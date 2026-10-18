@@ -111,6 +111,9 @@ git config core.hooksPath .githooks   # once per clone
 - Characters are **generated SVG, not image assets**: hair, skin and shirt come from a hash of the
   role name, so a role always looks the same across reloads and no binary art is committed.
   Working state is animation only (typing arms, lit screen) — nothing is downloaded.
+- The floor plan builds ~4,300 SVG nodes for 49 characters (chairs, arms, monitors, gradients,
+  filters). Measured first paint in headless Chromium: **~5.5 s** on a cold load; the panel view is
+  far lighter. It is a dashboard left open, not a page you reload often.
 
 ## Credits
 
