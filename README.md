@@ -16,6 +16,8 @@ a lobby where Orca-supervised workers wait as visitors:
 counts, active agents, rooms. This is the view to open from an iPhone; see
 [docs/REMOTE-CONTROL.md](docs/REMOTE-CONTROL.md).
 
+<img src="docs/mobile.png" alt="Mobile view" width="330">
+
 Built on top of [Claude Code Game Studios](https://github.com/donchitos/claude-code-game-studios)
 (CCGS) for its 49-role studio roster and its subagent audit hooks. No game development involved:
 the roster is used as the *organizational* model.
