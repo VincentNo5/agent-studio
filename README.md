@@ -20,12 +20,14 @@ the roster is used as the *organizational* model.
 
 | Panel | Source | Meaning |
 |---|---|---|
-| **Live floor** | `orca orchestration worker-list` + `terminal list` | Every supervised Orca worker: label (the worker terminal's own title), state, liveness, terminal state, next action |
-| **CCGS subagents** | `$CCGS_ROOT/production/session-logs/agent-audit.log` | Real per-role activity from CCGS's `SubagentStart`/`SubagentStop` hooks (`invoked` / `completed` / `active`) |
-| **Kanban** | `hermes kanban list` + `stats` | The persistent task board by status lane |
-| **Studio rooms / floor plan** | `roster.json` (generated from CCGS `.claude/agents`) | 49 roles in 10 rooms; a desk lights when that role is active |
+| **Live Floor** | `orca orchestration worker-list` + `terminal list` | Every supervised Orca worker: label (the worker terminal's own title), state, liveness, terminal state, next action |
+| **Subagent Activity** | `$CCGS_ROOT/production/session-logs/agent-audit.log` | Real per-role activity from CCGS's `SubagentStart`/`SubagentStop` hooks (`invoked` / `completed` / `active`) |
+| **Task Board** | `hermes kanban list` + `stats` | The persistent task board by status lane |
+| **Studio Roster** / floor plan | `roster.json` (generated from CCGS `.claude/agents`) | 49 roles in 10 rooms; a seat lights when that role is active |
 | **Corridor** (floor view) | same worker feed | Supervised workers as visitors, with their task label |
 | **Activity** | poll diff | Worker/task state transitions as they happen |
+
+All interface text is **English**; runtime data (task titles, role descriptions) is shown as-is.
 
 A role counts as active when either source says so:
 
