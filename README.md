@@ -57,7 +57,17 @@ Environment:
 | `CCGS_ROOT` | `/tmp/ccgs` when present | CCGS project root holding `production/session-logs/agent-audit.log` |
 | `AGENT_STUDIO_AUDIT` | unset | Point directly at an audit log file (overrides `CCGS_ROOT`) |
 | `AGENT_STUDIO_TTL_MS` | `1500` | Shared `/state` cache window. Every collect spawns CLI processes, so all clients share one collect per TTL; concurrent callers join the in-flight promise. Before this, several tabs polling every 2 s queued behind each other and `/state` took ~9 s. |
+| `AGENT_STUDIO_FLOOR_GRACE_MS` | `1800000` (30 min) | How long a finished run keeps its dispatches on the floor before they fade. A run that still owns a live or pending worker is never hidden, whatever this says. |
 | `PATH` | inherited | **Must include the directories holding `orca` and `hermes`** — see the launchd note below |
+
+**Floor scope.** `orca orchestration worker-list` has no run binding when a service calls it, so its
+receipt says `scope.source: "all"` and it returns every dispatch of every run, newest first, forever:
+a finished smoke test would keep its failures in the FAILED dial for good. `/state` therefore scopes
+the floor to the newest non-legacy run for `ORCA_COORDINATOR` (else the newest run overall), keeps
+that run while it owns a live or pending worker or is within `AGENT_STUDIO_FLOOR_GRACE_MS` of its
+creation, and never hides a worker that is still live or pending — a hidden live worker would be a
+lie. The `workerScope` field reports the run shown, whether it is live, and how many dispatches were
+left out; the panel prints that under the dial.
 
 Everything is read-only: the server only reads CLI output and log files.
 

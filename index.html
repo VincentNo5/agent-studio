@@ -598,14 +598,23 @@ function render(state) {
   }
   document.getElementById("w-total").textContent = total;
   const wNote = document.getElementById("w-note");
+  const scope = state.workerScope || {};
+  // The floor is scoped to the current run (a finished one fades after its grace window),
+  // so the note has to say what was left out — otherwise entries just look missing.
+  const runLabel = scope.objective ? `${scope.objective.slice(0, 60)}${scope.objective.length > 60 ? "…" : ""}` : null;
+  const hiddenNote = scope.hidden
+    ? `${scope.hidden} hidden (${scope.live ? "other runs" : `finished run${runLabel ? `: ${runLabel}` : ""}`})`
+    : "";
   wNote.textContent = "";
   if (!total) {
     wNote.appendChild(el("b", null, "No supervised workers"));
-    wNote.appendChild(document.createTextNode(" · dispatch with orca orchestration worker-start"));
+    const tail = [hiddenNote, "dispatch with orca orchestration worker-start"].filter(Boolean).join(" · ");
+    wNote.appendChild(document.createTextNode(` · ${tail}`));
   } else {
     const parts = [`${counts.live} working`, `${counts.present} present`, `${counts.archived} archived`];
     if (counts.failed) parts.push(`${counts.failed} failed`);
     if (counts.pending) parts.push(`${counts.pending} pending`);
+    if (hiddenNote) parts.push(hiddenNote);
     wNote.textContent = parts.join(" · ");
   }
 

@@ -10,7 +10,7 @@
 //
 // Run: bun run server.ts      (env: PORT, ORCA_COORDINATOR, CCGS_ROOT, AGENT_STUDIO_AUDIT)
 //
-// Every /state read spawns 6 CLI processes (~1 s each; hermes is a Python start-up) and performs
+// Every /state read spawns 7 CLI processes (~1 s each; hermes is a Python start-up) and performs
 // one local HTTP quota fetch. Several browser tabs polling every 2 s therefore previously queued
 // behind each other, leaving pages on "Connecting…". Collects are shared across clients: one per TTL;
 // concurrent callers join the in-flight promise.
@@ -54,6 +54,8 @@ interface QuotaView {
 const DIR = import.meta.dir;
 const PORT = Number(process.env.PORT ?? 8787);
 const TTL_MS = Number(process.env.AGENT_STUDIO_TTL_MS ?? 1500);
+/** A finished run keeps its dispatches on the floor for this long, then fades. */
+const FLOOR_GRACE_MS = Number(process.env.AGENT_STUDIO_FLOOR_GRACE_MS ?? 30 * 60_000);
 
 interface OrcaWorkerRow {
   dispatchId?: string;
@@ -75,6 +77,14 @@ interface OrcaWorkerRow {
 interface OrcaTerminalRow { handle?: string; title?: string; status?: string }
 interface OrcaWorktreeRow { displayName?: string; branch?: string; path?: string }
 interface OrcaTaskRow { id?: string; title?: string; spec?: string; status?: string; assignee?: string }
+interface OrcaRunRow {
+  id?: string;
+  objective?: string;
+  coordinator_handle?: string | null;
+  legacy?: number;
+  created_at?: string;
+  updated_at?: string;
+}
 
 interface WorkerView {
   dispatchId: string | null;
@@ -104,9 +114,21 @@ interface WorktreeView { name: string | null; branch: string | null; path: strin
 interface AuditEvent { ts: string; session: string; kind: "invoked" | "completed"; agent: string }
 interface AgentActivity { agent: string; invoked: number; completed: number; active: number; lastTs: string }
 
+/** What the floor is showing: the current run, not the whole archive. */
+interface WorkerScope {
+  runId: string | null;
+  objective: string | null;
+  startedAt: string | null;
+  /** True while the run still owns a worker that is live or pending. */
+  live: boolean;
+  /** Dispatches left off the floor: other runs, or a run that finished and faded. */
+  hidden: number;
+}
+
 interface StudioState {
   ts: number;
   workers: WorkerView[];
+  workerScope: WorkerScope;
   terminals: TerminalView[];
   worktrees: WorktreeView[];
   paseo: PaseoAgentView[];
@@ -186,12 +208,60 @@ function auditLogPath(): string | null {
   return root ? `${root}/production/session-logs/agent-audit.log` : null;
 }
 
+/**
+ * The floor shows the current run, not the archive. `orca orchestration worker-list` has no
+ * run binding for a caller without a terminal — its receipt says `scope.source: "all"` — so
+ * it returns every dispatch of every run, newest first, forever. Left unfiltered, a finished
+ * smoke test keeps its failures in the FAILED dial indefinitely.
+ *
+ * So: pick the newest non-legacy run for the configured coordinator (else the newest overall),
+ * keep its dispatches while it is still moving or within FLOOR_GRACE_MS of its creation, and
+ * never hide a worker that is still live or pending — a hidden live worker would be a lie.
+ */
+function selectFloor(
+  workers: WorkerView[],
+  runs: OrcaRunRow[],
+  coordinator: string | undefined,
+): { workers: WorkerView[]; scope: WorkerScope } {
+  const isMoving = (w: WorkerView) => w.liveness === "live" || w.dispatchStatus === "pending";
+  const candidates = runs.filter((r) => r.legacy !== 1 && r.id);
+  const owned = coordinator ? candidates.filter((r) => r.coordinator_handle === coordinator) : [];
+  const run = (owned.length ? owned : candidates)
+    .slice()
+    .sort((a, b) => (b.created_at ?? "").localeCompare(a.created_at ?? ""))[0];
+
+  if (!run?.id) {
+    const moving = workers.filter(isMoving);
+    return {
+      workers: moving,
+      scope: { runId: null, objective: null, startedAt: null, live: moving.length > 0, hidden: workers.length - moving.length },
+    };
+  }
+
+  const mine = workers.filter((w) => w.runId === run.id);
+  const live = mine.some(isMoving);
+  const startedAt = run.created_at ? Date.parse(run.created_at) : NaN;
+  const withinGrace = Number.isFinite(startedAt) && Date.now() - startedAt < FLOOR_GRACE_MS;
+  const onFloor = workers.filter((w) => isMoving(w) || (w.runId === run.id && (live || withinGrace)));
+  return {
+    workers: onFloor,
+    scope: {
+      runId: run.id,
+      objective: run.objective ?? null,
+      startedAt: run.created_at ?? null,
+      live,
+      hidden: workers.length - onFloor.length,
+    },
+  };
+}
+
 async function collect(): Promise<StudioState> {
   const coordinator = process.env.ORCA_COORDINATOR;
   // `hermes kanban stats` is deliberately not spawned: lane counts are derived from `list`.
   // Magpie quotas use local HTTP and do not add a CLI spawn.
-  const [workersRaw, terminalsRaw, worktreesRaw, kanbanRaw, tasksRaw, paseoRaw, quotasRaw] = await Promise.all([
+  const [workersRaw, runsRaw, terminalsRaw, worktreesRaw, kanbanRaw, tasksRaw, paseoRaw, quotasRaw] = await Promise.all([
     run(["orca", "orchestration", "worker-list", "--include-remote", "--json"]),
+    run(["orca", "orchestration", "run-list", "--json"]),
     run(["orca", "terminal", "list", "--json"]),
     run(["orca", "worktree", "list", "--json"]),
     run(["hermes", "kanban", "list", "--json"]),
@@ -204,6 +274,7 @@ async function collect(): Promise<StudioState> {
 
 
   const workerRows = (readJson(workersRaw) as { result?: { workers?: OrcaWorkerRow[] } } | null)?.result?.workers ?? [];
+  const runRows = (readJson(runsRaw) as { result?: { runs?: OrcaRunRow[] } } | null)?.result?.runs ?? [];
   const terminalRows = (readJson(terminalsRaw) as { result?: { terminals?: OrcaTerminalRow[] } } | null)?.result?.terminals ?? [];
   const worktreeRows = (readJson(worktreesRaw) as { result?: { worktrees?: OrcaWorktreeRow[] } } | null)?.result?.worktrees ?? [];
   const taskRows = (readJson(tasksRaw) as { result?: { tasks?: OrcaTaskRow[] } } | null)?.result?.tasks ?? [];
@@ -297,7 +368,10 @@ async function collect(): Promise<StudioState> {
     audit = { source: auditPath, events: events.slice(-40), agents: summarizeAudit(events) };
   }
 
-  return { ts: Date.now(), workers, terminals, worktrees, paseo, quotas, kanban, kanbanStats, audit };
+  // The floor is a live view, not an archive: scope it to the current run.
+  const { workers: onFloor, scope: workerScope } = selectFloor(workers, runRows, coordinator);
+
+  return { ts: Date.now(), workers: onFloor, workerScope, terminals, worktrees, paseo, quotas, kanban, kanbanStats, audit };
 }
 
 // One collect (six CLI spawns plus local HTTP) per TTL, shared by every client; concurrent callers join the in-flight promise.
