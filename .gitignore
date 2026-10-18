@@ -1,2 +1,25 @@
+# OS / editor
 .DS_Store
+Thumbs.db
+*.swp
+
+# deps / build
 node_modules/
+dist/
+bun.lockb
+
+# secrets — never commit credentials
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+id_rsa*
+credentials*.json
+secrets*.json
+*.local
+
+# logs / runtime
+*.log
+logs/

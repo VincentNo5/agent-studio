@@ -3,6 +3,8 @@
 A live **studio floor** for multi-agent work: one page that shows which agent is doing what,
 right now — roles arranged in rooms, real workers on the floor, tasks on the board.
 
+![Agent Studio](docs/studio.png)
+
 Built on top of [Claude Code Game Studios](https://github.com/donchitos/claude-code-game-studios)
 (CCGS) for its 49-role studio roster and its subagent audit hooks. No game development involved:
 the roster is used as the *organizational* model.
@@ -37,22 +39,42 @@ Environment:
 | `ORCA_COORDINATOR` | unset | Coordinator terminal handle; when set, task titles/specs are read via `orca orchestration task-list --from <handle>` and used for role matching |
 | `CCGS_ROOT` | `/tmp/ccgs` when present | CCGS project root holding `production/session-logs/agent-audit.log` |
 | `AGENT_STUDIO_AUDIT` | unset | Point directly at an audit log file (overrides `CCGS_ROOT`) |
+| `PATH` | inherited | **Must include the directories holding `orca` and `hermes`** — see the launchd note below |
 
 Everything is read-only: the server only reads CLI output and log files.
+
+## Run it as a service (macOS launchd)
+
+```bash
+# ~/Library/LaunchAgents/com.vincent.agent-studio.plist  →  then:
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.vincent.agent-studio.plist
+launchctl kickstart -k gui/$(id -u)/com.vincent.agent-studio   # restart after editing
+launchctl bootout gui/$(id -u)/com.vincent.agent-studio        # stop
+```
+
+**launchd starts with a minimal environment.** Without an explicit `PATH` in
+`EnvironmentVariables`, the server cannot find `orca` or `hermes` and every panel silently
+renders empty — the HTTP endpoint still answers `200`, so the failure looks like "no agents are
+running" rather than an error. Set `PATH` to include `~/.local/bin` and `/opt/homebrew/bin`.
+
+Logs: `~/Library/Logs/agent-studio.log` and `.err.log`.
+
+## Before committing
+
+This repo is public. A pre-commit hook blocks staged content that looks like a credential:
+
+```bash
+git config core.hooksPath .githooks   # once per clone
+```
+
+`.gitignore` also excludes `.env*`, keys, credential JSON, and logs.
 
 ## Files
 
 - `server.ts` — Bun HTTP server: collects the sources, serves `/state`, `/roster.json`, `/`
 - `index.html` — the whole UI (no framework, no build step)
 - `roster.json` — generated roster: `{ rooms: [...], agents: [{ name, model, desc, room, tier }] }`
-
-## Regenerating the roster
-
-```bash
-python3 - <<'PY'   # from a CCGS checkout's .claude/agents
-# see the mapping used: rooms → role names, then read each agent's frontmatter
-PY
-```
+- `docs/studio.png` — screenshot (redacted: repository names and local paths replaced)
 
 ## Limits
 
@@ -62,4 +84,12 @@ PY
 - The audit feed only exists while Claude Code runs inside a CCGS project (the hooks live there).
 - Short tasks finish faster than a poll: a worker can go from `pending` to `succeeded` between two
   polls (2 s apart). Long tasks show the pulsing "working" state.
-- `hermes kanban` and `orca` must be on `PATH` for the server process.
+- `hermes kanban` and `orca` must be on the server process's `PATH`.
+
+## Credits
+
+- Studio roster and audit-hook format: [Donchitos/Claude-Code-Game-Studios](https://github.com/donchitos/claude-code-game-studios) (MIT).
+
+## License
+
+MIT — see [LICENSE](LICENSE).
