@@ -10,10 +10,10 @@
 //
 // Run: bun run server.ts      (env: PORT, ORCA_COORDINATOR, CCGS_ROOT, AGENT_STUDIO_AUDIT)
 //
-// Every /state read spawns 6 CLI processes (~1 s each; hermes is a Python start-up). Several browser
-// tabs polling every 2 s therefore used to queue behind each other and the pages sat on
-// "Connecting…". Collects are now shared across clients: one collect per TTL, concurrent callers
-// join the in-flight promise.
+// Every /state read spawns 6 CLI processes (~1 s each; hermes is a Python start-up) and performs
+// one local HTTP quota fetch. Several browser tabs polling every 2 s therefore previously queued
+// behind each other, leaving pages on "Connecting…". Collects are shared across clients: one per TTL;
+// concurrent callers join the in-flight promise.
 //
 // Boundary contract: every CLI/JSON shape below mirrors what the producer emits today.
 // Fields are optional because a producer may add or omit keys between versions; mapping
@@ -40,6 +40,16 @@ interface PaseoAgentView {
   cwd: string | null;
   created: string | null;
 }
+interface MagpieQuotaWindowRow { name?: string; used?: number; remaining?: number; resetsAt?: string }
+interface MagpieQuotaRow { provider?: string; name?: string; kind?: string; user?: string; windows?: MagpieQuotaWindowRow[] }
+interface QuotaView {
+  provider: string | null;
+  name: string | null;
+  kind: string | null;
+  user: string | null;
+  windows: { name: string | null; used: number | null; remaining: number | null; resetsAt: string | null }[];
+}
+
 
 const DIR = import.meta.dir;
 const PORT = Number(process.env.PORT ?? 8787);
@@ -100,10 +110,12 @@ interface StudioState {
   terminals: TerminalView[];
   worktrees: WorktreeView[];
   paseo: PaseoAgentView[];
+  quotas: QuotaView[];
   kanban: Record<string, unknown>[];
   kanbanStats: Record<string, number>;
   audit: { source: string | null; events: AuditEvent[]; agents: AgentActivity[] };
 }
+
 
 /** JSON.parse that yields `unknown` instead of throwing (every CLI read shares it). */
 function readJson(raw: string): unknown {
@@ -177,14 +189,19 @@ function auditLogPath(): string | null {
 async function collect(): Promise<StudioState> {
   const coordinator = process.env.ORCA_COORDINATOR;
   // `hermes kanban stats` is deliberately not spawned: lane counts are derived from `list`.
-  const [workersRaw, terminalsRaw, worktreesRaw, kanbanRaw, tasksRaw, paseoRaw] = await Promise.all([
+  // Magpie quotas use local HTTP and do not add a CLI spawn.
+  const [workersRaw, terminalsRaw, worktreesRaw, kanbanRaw, tasksRaw, paseoRaw, quotasRaw] = await Promise.all([
     run(["orca", "orchestration", "worker-list", "--include-remote", "--json"]),
     run(["orca", "terminal", "list", "--json"]),
     run(["orca", "worktree", "list", "--json"]),
     run(["hermes", "kanban", "list", "--json"]),
     coordinator ? run(["orca", "orchestration", "task-list", "--from", coordinator, "--json"]) : Promise.resolve(""),
     run(["paseo", "ls", "--json"]),
+    fetch("http://127.0.0.1:3425/v1/magpie/quotas", { signal: AbortSignal.timeout(3000) })
+      .then((response) => response.ok ? response.text() : "")
+      .catch(() => ""),
   ]);
+
 
   const workerRows = (readJson(workersRaw) as { result?: { workers?: OrcaWorkerRow[] } } | null)?.result?.workers ?? [];
   const terminalRows = (readJson(terminalsRaw) as { result?: { terminals?: OrcaTerminalRow[] } } | null)?.result?.terminals ?? [];
@@ -192,6 +209,22 @@ async function collect(): Promise<StudioState> {
   const taskRows = (readJson(tasksRaw) as { result?: { tasks?: OrcaTaskRow[] } } | null)?.result?.tasks ?? [];
   const paseoParsed = readJson(paseoRaw);
   const paseoRows = Array.isArray(paseoParsed) ? paseoParsed as PaseoAgentRow[] : [];
+  const quotasParsed = readJson(quotasRaw) as { data?: MagpieQuotaRow[] } | null;
+  const quotas: QuotaView[] = Array.isArray(quotasParsed?.data) ? quotasParsed.data.map((quota) => ({
+    provider: quota.provider ?? null,
+    name: quota.name ?? null,
+    kind: quota.kind ?? null,
+    user: quota.user ?? null,
+    windows: (quota.windows ?? []).map((window) => ({
+      name: window.name ?? null,
+      // Some providers report fractional percentages (cursor: 95.24888888888889);
+      // round at the boundary so every consumer renders an integer.
+      used: window.used == null ? null : Math.round(window.used),
+      remaining: window.remaining == null ? null : Math.round(window.remaining),
+      resetsAt: window.resetsAt ?? null,
+    })),
+  })) : [];
+
   const kanbanParsed = readJson(kanbanRaw) as Record<string, unknown>[] | { tasks?: Record<string, unknown>[] } | null;
   const kanban = Array.isArray(kanbanParsed) ? kanbanParsed : (kanbanParsed?.tasks ?? []);
 
@@ -264,10 +297,10 @@ async function collect(): Promise<StudioState> {
     audit = { source: auditPath, events: events.slice(-40), agents: summarizeAudit(events) };
   }
 
-  return { ts: Date.now(), workers, terminals, worktrees, paseo, kanban, kanbanStats, audit };
+  return { ts: Date.now(), workers, terminals, worktrees, paseo, quotas, kanban, kanbanStats, audit };
 }
 
-// One collect (six CLI spawns) per TTL, shared by every client; concurrent callers join the in-flight promise.
+// One collect (six CLI spawns plus local HTTP) per TTL, shared by every client; concurrent callers join the in-flight promise.
 let cached: { at: number; data: StudioState } | null = null;
 let inflight: Promise<StudioState> | null = null;
 

@@ -143,6 +143,9 @@
   .paseoAgent[data-status="idle"] .paseoDot{fill:var(--cyan)}
   .paseoAgent[data-status="error"] .paseoDot,.paseoAgent[data-status="failed"] .paseoDot{fill:var(--alert)}
   .paseoEmpty{fill:var(--muted);font:5.5px var(--mono);letter-spacing:.04em}
+.paseoAgent.role-active .paseoDot{fill:var(--teal);filter:drop-shadow(0 0 2px var(--teal));animation:pulse 1.4s ease-in-out infinite}
+.paseoAgent.role-active .paseoName{fill:var(--teal)}
+
   .taskWallRow .taskWallLabel,.taskWallRow .taskWallCount{fill:var(--cyan)}
   .exit{fill:var(--teal);font:700 7.5px var(--mono);letter-spacing:.12em}
   .bubble{fill:rgba(7,13,23,.92);stroke:var(--hair)}
@@ -454,6 +457,10 @@ function activeRoles() {
     const blob = [w.taskTitle, w.taskSpec, w.label, w.worktreeName, w.agent].filter(Boolean).join(" ").toLowerCase();
     for (const a of roster.agents) if (blob.includes(a.name.toLowerCase())) hits.add(a.name);
   }
+  for (const agent of state.paseo || []) {
+    const blob = (agent.name || "").toLowerCase();
+    for (const role of roster.agents) if (blob.includes(role.name.toLowerCase())) hits.add(role.name);
+  }
   return hits;
 }
 
@@ -629,7 +636,7 @@ function updateTaskWall() {
     rows.appendChild(row);
   });
 }
-function updatePaseoBay() {
+function updatePaseoBay(hits) {
   const bay = document.getElementById("paseobay"), rows = bay.querySelector(".paseoRows"), agents = state.paseo || [];
   rows.textContent = "";
   bay.querySelector('[data-meta="paseo"]').textContent = String(agents.length);
@@ -639,7 +646,8 @@ function updatePaseoBay() {
   }
   agents.slice(0, 6).forEach((agent, i) => {
     const y = 768 + i * 4.8, status = (agent.status || "other").toLowerCase();
-    const row = mk("g", { class: "paseoAgent", "data-status": status });
+    const matched = roster.agents.some((role) => hits.has(role.name) && (agent.name || "").toLowerCase().includes(role.name.toLowerCase()));
+    const row = mk("g", { class: "paseoAgent" + (matched ? " role-active" : ""), "data-status": status });
     row.appendChild(mk("circle", { class: "paseoDot", cx: 799, cy: y - 1.7, r: 1.7 }));
     row.appendChild(mk("text", { class: "paseoName", x: 804, y }, clip(agent.name || "Unnamed agent", 20)));
     row.appendChild(mk("text", { class: "paseoProvider", x: 916, y, "text-anchor": "end" }, clip(agent.provider || "—", 12)));
@@ -651,7 +659,7 @@ function paint(st) {
   state = st;
   updateTaskWall();
   const hits = activeRoles();
-  updatePaseoBay();
+  updatePaseoBay(hits);
   const svg = document.getElementById("plan"), zl = document.getElementById("zoom"), vis = document.getElementById("vis");
 
   for (const w of svg.querySelectorAll(".worker[data-role]")) {
