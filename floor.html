@@ -6,9 +6,8 @@
 <title>Agent Studio — 办公室平面图</title>
 <style>
   :root{
-    --bg:#0b0d10; --floor:#12161b; --room:#181d24; --roomline:#2c333c; --wall:#3a434e;
-    --corridor:#1a2028; --fg:#e7ebf0; --muted:#8b939e; --ok:#3fb950; --warn:#d29922; --err:#f85149;
-    --desk:#2a323c; --deskHot:#2ea043; --accent:#5b9dff;
+    --bg:#0b0d10; --floor:#12161b; --room:#171c23; --roomline:#2c333c;
+    --corridor:#1a2028; --fg:#e7ebf0; --muted:#8b939e; --ok:#3fb950; --accent:#5b9dff;
   }
   *{box-sizing:border-box}
   body{margin:0;background:var(--bg);color:var(--fg);font:13px/1.5 ui-sans-serif,-apple-system,"SF Pro Text",Segoe UI,Roboto,sans-serif}
@@ -21,24 +20,32 @@
   @media (max-width:1000px){.wrap{grid-template-columns:1fr}}
   svg{width:100%;height:auto;background:var(--floor);border:1px solid var(--roomline);border-radius:10px}
   .roomBox{fill:var(--room);stroke:var(--roomline);stroke-width:1.5}
-  .roomBox.hot{stroke:var(--ok);stroke-opacity:.55}
+  .roomBox.hot{stroke:var(--ok);stroke-opacity:.5}
   .roomTitle{fill:var(--fg);font-size:12px;font-weight:600}
-  .roomMeta{fill:var(--muted);font-size:10.5px}
+  .roomMeta{fill:var(--muted);font-size:10px}
   .corridor{fill:var(--corridor);stroke:var(--roomline);stroke-width:1;stroke-dasharray:6 4}
   .corridorLabel{fill:var(--muted);font-size:10px;letter-spacing:.14em}
-  .desk{fill:var(--desk);stroke:#0d1117;stroke-width:1;rx:2}
-  .desk.busy{fill:var(--deskHot)}
-  .desk.hover{stroke:var(--accent);stroke-width:2}
-  .pulse{animation:pulse 1.7s ease-out infinite}
-  @keyframes pulse{0%{opacity:.35}50%{opacity:1}100%{opacity:.35}}
-  .visitor{fill:#101519;stroke:var(--roomline);rx:6}
+  .legend{fill:var(--muted);font-size:10.5px}
+  .name{fill:var(--muted);font-size:9.5px}
+  .bubble{fill:#0f141a;stroke:var(--roomline);stroke-width:1}
+  .bubbleText{fill:var(--fg);font-size:9px}
   .visitorText{fill:var(--fg);font-size:10.5px}
   .visitorState{fill:var(--muted);font-size:9.5px}
-  .legend{fill:var(--muted);font-size:10.5px}
+  /* 打字动画：只在 .working 的角色上跑 */
+  .worker .arm-l,.worker .arm-r{transition:transform .2s}
+  .worker.working .arm-l{animation:typeA .45s ease-in-out infinite alternate}
+  .worker.working .arm-r{animation:typeB .45s ease-in-out infinite alternate}
+  .worker.working .screen{fill:#7ee2a8}
+  .worker.working .glow{opacity:.5;animation:glow 1.8s ease-in-out infinite}
+  .worker .glow{opacity:0;transition:opacity .3s}
+  .worker.working .head{animation:bob 1.6s ease-in-out infinite}
+  @keyframes typeA{from{transform:translateY(0)}to{transform:translateY(-1.6px)}}
+  @keyframes typeB{from{transform:translateY(-1.6px)}to{transform:translateY(0)}}
+  @keyframes glow{0%,100%{opacity:.25}50%{opacity:.6}}
+  @keyframes bob{0%,100%{transform:translateY(0)}50%{transform:translateY(.6px)}}
   aside{border:1px solid var(--roomline);border-radius:10px;background:var(--floor);padding:12px 14px;align-self:start}
   aside h2{margin:0 0 8px;font-size:12px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted)}
   .row{display:flex;justify-content:space-between;gap:10px;padding:3px 0;border-bottom:1px dashed rgba(255,255,255,.06);font-size:12px}
-  .row b{font-weight:600}
   .role{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
   .hint{color:var(--muted);font-size:11.5px;margin-top:10px}
   .empty{color:var(--muted);font-size:12px}
@@ -47,7 +54,7 @@
 </head>
 <body>
 <header>
-  <h1>Agent Studio · 办公室平面图</h1>
+  <h1>Agent Studio · 办公室</h1>
   <span class="sub" id="sub">连接中…</span>
   <div class="kpis">
     <div class="kpi"><b id="k-work">0</b><span>working</span></div>
@@ -57,27 +64,33 @@
   </div>
 </header>
 <div class="wrap">
-  <div><svg id="plan" viewBox="0 0 1200 720" role="img" aria-label="office floor plan"></svg></div>
+  <div><svg id="plan" viewBox="0 0 1440 900" role="img" aria-label="office floor plan with cartoon characters"></svg></div>
   <aside>
     <h2 id="detail-title">选中一个工位</h2>
-    <div id="detail"><div class="empty">点房间里的方块看角色详情；绿色=正在工作。</div></div>
+    <div id="detail"><div class="empty">点办公室里的小人看角色详情；屏幕上发亮=正在工作。</div></div>
     <h2 style="margin-top:14px">活跃角色</h2>
     <div id="active"><div class="empty">无</div></div>
     <div class="hint">
-      绿色方块 = 该角色正在工作（来源：CCGS 审计流或工人任务文本）。<br>
-      中间走廊 = Orca 监督中的工人（外部来访者）。<br>
+      亮屏 + 打字 = 正在工作（来源：CCGS 审计流或工人任务文本）。<br>
+      走廊里站着的是 Orca 监督中的来访工人。<br>
       <a href="/">← 回面板视图</a>
     </div>
   </aside>
 </div>
 <script>
-// 平面图分区：两排房间夹一条走廊。房间宽度按人数分配。
+// 平面图：两排办公室夹一条走廊。房间宽度按人数分配，每个角色一个小人。
 const PLAN = [
-  { y: 40, h: 250, rooms: ["directors", "leads", "engineering", "design"] },
-  { y: 430, h: 250, rooms: ["art", "audio", "narrative", "qa", "engines", "community"] },
+  { y: 44, h: 300, rooms: ["directors", "leads", "engineering", "design"] },
+  { y: 520, h: 300, rooms: ["art", "audio", "narrative", "qa", "engines", "community"] },
 ];
-const CORRIDOR = { y: 310, h: 100 };
+const CORRIDOR = { y: 358, h: 148 };
+const CELL = { w: 46, h: 62 };
 const SETTLED = ["succeeded", "failed", "stopped", "cancelled"];
+const PALETTE = {
+  skin: ["#f2c9a0", "#e8b98c", "#d59b6a", "#b5764a", "#8d5524"],
+  hair: ["#2b2b2b", "#4a3527", "#7a5230", "#c9a227", "#8a8f98", "#3f4a5a"],
+  shirt: ["#5b9dff", "#3fb950", "#d29922", "#f85149", "#a371f7", "#39c5cf", "#e8845b"],
+};
 let roster = null, state = null, selected = null;
 
 const SVG = "http://www.w3.org/2000/svg";
@@ -90,6 +103,68 @@ const mk = (tag, attrs, text) => {
 const isPresent = (w) => w.liveness === "live" || w.dispatchStatus === "pending";
 const isWorking = (w) => isPresent(w) && !SETTLED.includes(w.workerState || "");
 
+/** 角色名 → 稳定的外观（同一角色每次刷新长相一致）。 */
+function look(name) {
+  let h = 0;
+  for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) >>> 0;
+  return {
+    skin: PALETTE.skin[h % PALETTE.skin.length],
+    hair: PALETTE.hair[(h >> 3) % PALETTE.hair.length],
+    shirt: PALETTE.shirt[(h >> 6) % PALETTE.shirt.length],
+    hairstyle: (h >> 9) % 3,
+  };
+}
+
+/** 一个坐在桌前的小人：椅子、身体、头（含发型/眼睛）、手臂、桌子、显示器、键盘、杯子。 */
+function worker(x, y, agentName, roomName) {
+  const v = look(agentName);
+  const g = mk("g", { class: "worker", "data-role": agentName, transform: `translate(${x},${y})` });
+  g.style.cursor = "pointer";
+
+  g.appendChild(mk("rect", { x: 6, y: 26, width: 26, height: 22, rx: 4, fill: "#222a33" }));           // 椅背
+  g.appendChild(mk("rect", { x: 12, y: 44, width: 14, height: 10, rx: 3, fill: "#2b3440" }));         // 椅座
+  g.appendChild(mk("rect", { x: 13, y: 10, width: 12, height: 18, rx: 4, fill: v.shirt }));           // 躯干
+  const arms = mk("g");
+  arms.appendChild(mk("rect", { class: "arm-l", x: 8, y: 22, width: 5, height: 10, rx: 2, fill: v.skin }));
+  arms.appendChild(mk("rect", { class: "arm-r", x: 25, y: 22, width: 5, height: 10, rx: 2, fill: v.skin }));
+  g.appendChild(arms);
+  g.appendChild(mk("circle", { class: "head", cx: 19, cy: 7, r: 6.2, fill: v.skin }));                 // 头
+  if (v.hairstyle === 0) g.appendChild(mk("path", { d: "M12.8 6.4 A6.2 6.2 0 0 1 25.2 6.4 L25.2 4.4 A6.2 5 0 0 0 12.8 4.4 Z", fill: v.hair }));
+  if (v.hairstyle === 1) g.appendChild(mk("path", { d: "M12.8 6.8 A6.4 6.4 0 0 1 25.2 6.8 Q19 1.6 12.8 6.8 Z", fill: v.hair }));
+  if (v.hairstyle === 2) {
+    g.appendChild(mk("path", { d: "M12.6 7 A6.4 6.4 0 0 1 25.4 7 L25.4 5.6 A6.4 5.4 0 0 0 12.6 5.6 Z", fill: v.hair }));
+    g.appendChild(mk("circle", { cx: 25.6, cy: 5.2, r: 2.2, fill: v.hair }));
+  }
+  g.appendChild(mk("circle", { cx: 17, cy: 7, r: .8, fill: "#1b2026" }));
+  g.appendChild(mk("circle", { cx: 21, cy: 7, r: .8, fill: "#1b2026" }));
+
+  g.appendChild(mk("rect", { x: 2, y: 34, width: 34, height: 4, rx: 1, fill: "#39424e" }));            // 桌面
+  g.appendChild(mk("rect", { class: "glow", x: 0, y: 20, width: 40, height: 16, rx: 8, fill: "#3fb950", opacity: 0 }));
+  g.appendChild(mk("rect", { x: 9, y: 22, width: 20, height: 13, rx: 2, fill: "#11161c", stroke: "#39424e", "stroke-width": 1 }));
+  g.appendChild(mk("rect", { class: "screen", x: 11, y: 24, width: 16, height: 9, rx: 1, fill: "#2b4a63" }));
+  g.appendChild(mk("rect", { x: 12, y: 30.5, width: 14, height: 2.5, rx: 1, fill: "#2b3440" }));       // 键盘
+  g.appendChild(mk("rect", { x: 31, y: 30, width: 4, height: 5, rx: 1, fill: "#c96f4a" }));           // 杯子
+  g.appendChild(mk("title", {}, `${agentName} · ${roomName}`));
+  g.addEventListener("click", () => { selected = agentName; paint(state); });
+  return g;
+}
+
+/** 站着的小人（走廊里的来访工人）。 */
+function stander(x, y, label, working) {
+  const v = look(label);
+  const g = mk("g", { class: "worker" + (working ? " working" : ""), transform: `translate(${x},${y})` });
+  g.appendChild(mk("rect", { x: 7, y: 14, width: 12, height: 20, rx: 4, fill: v.shirt }));
+  g.appendChild(mk("rect", { x: 8, y: 34, width: 4, height: 14, rx: 2, fill: "#2b3440" }));
+  g.appendChild(mk("rect", { x: 14, y: 34, width: 4, height: 14, rx: 2, fill: "#2b3440" }));
+  g.appendChild(mk("rect", { class: "arm-l", x: 3, y: 16, width: 4, height: 13, rx: 2, fill: v.skin }));
+  g.appendChild(mk("rect", { class: "arm-r", x: 19, y: 16, width: 4, height: 13, rx: 2, fill: v.skin }));
+  g.appendChild(mk("circle", { class: "head", cx: 13, cy: 9, r: 6, fill: v.skin }));
+  g.appendChild(mk("path", { d: "M7 8.6 A6 6 0 0 1 19 8.6 L19 6.4 A6 5 0 0 0 7 6.4 Z", fill: v.hair }));
+  g.appendChild(mk("circle", { cx: 11, cy: 9, r: .8, fill: "#1b2026" }));
+  g.appendChild(mk("circle", { cx: 15, cy: 9, r: .8, fill: "#1b2026" }));
+  return g;
+}
+
 function activeRoles() {
   const hits = new Set();
   for (const a of (state.audit?.agents || [])) if (a.active > 0) hits.add(a.agent);
@@ -101,30 +176,27 @@ function activeRoles() {
   return hits;
 }
 
-// 一个房间里的工位网格：列数按房间宽高比和人数算，行数向上取整。
-function deskGrid(room, agents) {
-  const innerW = room.w - 24, innerH = room.h - 46;
-  // 小房间（≤4 人）排成一列并显示名字，大房间用网格、靠 tooltip
-  const cols = agents.length <= 4 ? 1 : Math.max(2, Math.min(8, Math.round(Math.sqrt(agents.length * (innerW / innerH) * 0.9))));
+/** 房间里的小人网格：列数按房间宽高比算；小房间一列并显示名字。 */
+function seats(room, agents) {
+  const innerW = room.w - 24, innerH = room.h - 54;
+  const cols = agents.length <= 4 ? 1 : Math.max(2, Math.min(9, Math.round(Math.sqrt(agents.length * (innerW / innerH) * (CELL.h / CELL.w)))));
   const rows = Math.ceil(agents.length / cols);
   const cellW = innerW / cols, cellH = innerH / Math.max(rows, 1);
   return agents.map((a, i) => ({
     agent: a,
-    x: room.x + 12 + (i % cols) * cellW,
-    y: room.y + 38 + Math.floor(i / cols) * cellH,
-    w: Math.max(8, Math.min(cellW - 4, 34)),
-    h: Math.max(6, Math.min(cellH - 4, 18)),
+    x: room.x + 14 + (i % cols) * cellW,
+    y: room.y + 44 + Math.floor(i / cols) * cellH,
   }));
 }
 
-function roomGeometry(agentsPerRoom) {
+function roomGeometry(perRoom) {
   const out = [];
   for (const band of PLAN) {
-    const total = band.rooms.reduce((n, r) => n + agentsPerRoom[r], 0);
-    const usable = 1200 - 40 - (band.rooms.length - 1) * 12;
+    const total = band.rooms.reduce((n, r) => n + perRoom[r], 0);
+    const usable = 1440 - 40 - (band.rooms.length - 1) * 12;
     let x = 20;
     for (const name of band.rooms) {
-      const w = Math.max(120, Math.round((usable * agentsPerRoom[name]) / total));
+      const w = Math.max(140, Math.round((usable * perRoom[name]) / total));
       out.push({ name, x, y: band.y, w, h: band.h });
       x += w + 12;
     }
@@ -138,43 +210,36 @@ function drawPlan() {
   const svg = document.getElementById("plan");
   svg.textContent = "";
 
-  // 地面网格
   const defs = mk("defs");
-  const pat = mk("pattern", { id: "grid", width: 24, height: 24, patternUnits: "userSpaceOnUse" });
-  pat.appendChild(mk("path", { d: "M 24 0 L 0 0 0 24", fill: "none", stroke: "#1b2129", "stroke-width": 1 }));
+  const pat = mk("pattern", { id: "carpet", width: 20, height: 20, patternUnits: "userSpaceOnUse" });
+  pat.appendChild(mk("path", { d: "M 20 0 L 0 0 0 20", fill: "none", stroke: "#191f27", "stroke-width": 1 }));
   defs.appendChild(pat);
   svg.appendChild(defs);
-  svg.appendChild(mk("rect", { x: 0, y: 0, width: 1200, height: 720, fill: "url(#grid)" }));
+  svg.appendChild(mk("rect", { x: 0, y: 0, width: 1440, height: 900, fill: "url(#carpet)" }));
 
-  // 走廊
-  svg.appendChild(mk("rect", { class: "corridor", x: 20, y: CORRIDOR.y, width: 1160, height: CORRIDOR.h, rx: 8 }));
-  svg.appendChild(mk("text", { class: "corridorLabel", x: 32, y: CORRIDOR.y + 18 }, "CORRIDOR · ORCA WORKERS"));
+  svg.appendChild(mk("rect", { class: "corridor", x: 20, y: CORRIDOR.y, width: 1400, height: CORRIDOR.h, rx: 10 }));
+  svg.appendChild(mk("text", { class: "corridorLabel", x: 34, y: CORRIDOR.y + 20 }, "CORRIDOR · VISITING WORKERS (ORCA)"));
 
-  // 房间
   for (const room of roomGeometry(perRoom)) {
     const agents = roster.agents.filter((a) => a.room === room.name);
     const g = mk("g", { "data-room": room.name });
-    g.appendChild(mk("rect", { class: "roomBox", x: room.x, y: room.y, width: room.w, height: room.h, rx: 10 }));
-    g.appendChild(mk("text", { class: "roomTitle", x: room.x + 12, y: room.y + 20 }, room.name));
-    g.appendChild(mk("text", { class: "roomMeta", x: room.x + room.w - 12, y: room.y + 20, "text-anchor": "end", "data-meta": room.name }, `${agents.length}`));
-    for (const desk of deskGrid(room, agents)) {
-      const d = mk("rect", { class: "desk", x: desk.x, y: desk.y, width: desk.w, height: desk.h, rx: 2, "data-role": desk.agent.name });
-      d.appendChild(mk("title", {}, `${desk.agent.name} · ${desk.agent.model} · ${desk.agent.desc}`));
-      d.style.cursor = "pointer";
-      d.addEventListener("click", () => { selected = desk.agent.name; paint(state); });
-      g.appendChild(d);
-      if (agents.length <= 4) {
-        g.appendChild(mk("text", { class: "roomMeta", x: desk.x + 26, y: desk.y + 12 }, desk.agent.name));
-      }
+    g.appendChild(mk("rect", { class: "roomBox", x: room.x, y: room.y, width: room.w, height: room.h, rx: 12 }));
+    g.appendChild(mk("text", { class: "roomTitle", x: room.x + 14, y: room.y + 22 }, room.name));
+    g.appendChild(mk("text", { class: "roomMeta", x: room.x + room.w - 14, y: room.y + 22, "text-anchor": "end", "data-meta": room.name }, `${agents.length}`));
+    // 房间绿植（纯装饰，让场景像办公室）
+    g.appendChild(mk("rect", { x: room.x + room.w - 26, y: room.y + room.h - 30, width: 12, height: 12, rx: 2, fill: "#5a4634" }));
+    g.appendChild(mk("circle", { cx: room.x + room.w - 20, cy: room.y + room.h - 34, r: 8, fill: "#2f6b46" }));
+    for (const seat of seats(room, agents)) {
+      g.appendChild(worker(seat.x, seat.y, seat.agent.name, seat.agent.room));
+      if (agents.length <= 4) g.appendChild(mk("text", { class: "name", x: seat.x + 42, y: seat.y + 30 }, seat.agent.name));
     }
     svg.appendChild(g);
   }
 
-  // 图例
-  svg.appendChild(mk("rect", { class: "desk", x: 20, y: 700 - 18, width: 14, height: 10, rx: 2 }));
-  svg.appendChild(mk("text", { class: "legend", x: 40, y: 700 - 9 }, "idle"));
-  svg.appendChild(mk("rect", { class: "desk busy", x: 90, y: 700 - 18, width: 14, height: 10, rx: 2 }));
-  svg.appendChild(mk("text", { class: "legend", x: 110, y: 700 - 9 }, "working · 点击查看"));
+  svg.appendChild(mk("circle", { cx: 30, cy: 878, r: 6, fill: "#2b4a63" }));
+  svg.appendChild(mk("text", { class: "legend", x: 44, y: 882 }, "idle（屏幕暗）"));
+  svg.appendChild(mk("circle", { cx: 160, cy: 878, r: 6, fill: "#7ee2a8" }));
+  svg.appendChild(mk("text", { class: "legend", x: 174, y: 882 }, "working（屏幕亮 + 打字）· 点小人看详情"));
 }
 
 function paint(st) {
@@ -182,14 +247,11 @@ function paint(st) {
   const hits = activeRoles();
   const svg = document.getElementById("plan");
 
-  // 工位状态
-  for (const d of svg.querySelectorAll(".desk[data-role]")) {
-    const on = hits.has(d.dataset.role);
-    d.classList.toggle("busy", on);
-    d.classList.toggle("pulse", on);
-    d.classList.toggle("hover", d.dataset.role === selected);
+  for (const w of svg.querySelectorAll(".worker[data-role]")) {
+    const on = hits.has(w.dataset.role);
+    w.classList.toggle("working", on);
+    w.querySelector(".head")?.classList.toggle("bob", on);
   }
-  // 房间热度与计数
   for (const g of svg.querySelectorAll("g[data-room]")) {
     const room = g.dataset.room;
     const members = roster.agents.filter((a) => a.room === room);
@@ -199,35 +261,31 @@ function paint(st) {
     if (meta) meta.textContent = `${members.length}${busy ? " · " + busy + " 忙" : ""}`;
   }
 
-  // 走廊里的来访工人
   for (const old of svg.querySelectorAll("g[data-visitor]")) old.remove();
-  const visitors = state.workers.filter(isPresent).slice(0, 6);
+  const visitors = state.workers.filter(isPresent).slice(0, 7);
   visitors.forEach((w, i) => {
-    const x = 40 + i * 186, y = CORRIDOR.y + 34;
+    const x = 50 + i * 194, y = CORRIDOR.y + 42;
     const g = mk("g", { "data-visitor": w.dispatchId });
-    g.appendChild(mk("rect", { class: "visitor", x, y, width: 176, height: 46 }));
-    g.appendChild(mk("text", { class: "visitorText", x: x + 10, y: y + 18 }, (w.label || w.dispatchId).slice(0, 26)));
-    const st2 = `${w.workerState || w.dispatchStatus || "-"} · ${w.liveness || "-"}${w.taskTitle ? " · " + w.taskTitle.slice(0, 14) : ""}`;
-    g.appendChild(mk("text", { class: "visitorState", x: x + 10, y: y + 34 }, st2.slice(0, 30)));
-    if (isWorking(w)) g.querySelector(".visitor").setAttribute("stroke", "var(--ok)");
+    g.appendChild(mk("rect", { class: "bubble", x, y: y - 34, width: 182, height: 30, rx: 7 }));
+    g.appendChild(mk("text", { class: "visitorText", x: x + 10, y: y - 20 }, (w.label || w.dispatchId).slice(0, 27)));
+    g.appendChild(mk("text", { class: "visitorState", x: x + 10, y: y - 9 }, `${w.workerState || w.dispatchStatus || "-"} · ${w.liveness || "-"}`.slice(0, 30)));
+    g.appendChild(stander(x + 80, y, w.label || w.dispatchId, isWorking(w)));
+    if (isWorking(w)) g.querySelector(".worker")?.classList.add("working");
     svg.appendChild(g);
   });
-  if (!visitors.length) {
-    svg.appendChild(mk("text", { class: "corridorLabel", x: 40, y: CORRIDOR.y + 58 }, "（走廊空着：当前没有 Orca 监督的工人）"));
-  }
+  if (!visitors.length) svg.appendChild(mk("text", { class: "corridorLabel", x: 40, y: CORRIDOR.y + 80 }, "（走廊空着：当前没有 Orca 监督的工人）"));
 
-  // KPI
-  document.getElementById("k-work").textContent = state.workers.filter(isWorking).length;
+  // KPI 与地板一致：亮着的小人数 = 活跃角色数（审计流 ∪ 工人任务文本）
+  document.getElementById("k-work").textContent = hits.size;
   document.getElementById("k-sub").textContent = (state.audit?.agents || []).reduce((n, a) => n + a.active, 0);
   document.getElementById("k-visit").textContent = state.workers.filter(isPresent).length;
   document.getElementById("k-kb").textContent = state.kanban.length;
-  document.getElementById("sub").textContent = `状态 ${new Date(state.ts).toLocaleTimeString()} · ${state.worktrees.length} 仓库 · ${hits.size} 角色活跃`;
+  document.getElementById("sub").textContent = `状态 ${new Date(state.ts).toLocaleTimeString()} · ${state.worktrees.length} 仓库 · ${hits.size} 角色工作中`;
 
-  // 侧栏
   const detail = document.getElementById("detail");
   detail.textContent = "";
   if (!selected) {
-    detail.appendChild(Object.assign(document.createElement("div"), { className: "empty", textContent: "点房间里的方块看角色详情；绿色=正在工作。" }));
+    detail.appendChild(Object.assign(document.createElement("div"), { className: "empty", textContent: "点办公室里的小人看角色详情；屏幕发亮=正在工作。" }));
   } else {
     const a = roster.agents.find((x) => x.name === selected);
     const last = (state.audit?.events || []).filter((e) => e.agent === selected).slice(-1)[0];

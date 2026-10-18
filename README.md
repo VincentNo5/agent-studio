@@ -7,7 +7,8 @@ an office floor plan — showing which agent is doing what, right now.
 
 ![Panel view](docs/studio.png)
 
-**Floor plan** (`/floor`) — rooms, desks, a corridor of visiting workers:
+**Floor plan** (`/floor`) — cartoon office: one character per role, screens light up and hands type
+while that role works, and visiting Orca workers stand in the corridor:
 
 ![Floor plan](docs/floor.png)
 
@@ -107,6 +108,9 @@ git config core.hooksPath .githooks   # once per clone
 - `hermes kanban` and `orca` must be on the server process's `PATH`.
 - The floor plan is top-down 2D on purpose: labels stay readable at 49 desks, and it needs no 3D
   or canvas code. An isometric view is possible but costs legibility, not capability.
+- Characters are **generated SVG, not image assets**: hair, skin and shirt come from a hash of the
+  role name, so a role always looks the same across reloads and no binary art is committed.
+  Working state is animation only (typing arms, lit screen) — nothing is downloaded.
 
 ## Credits
 
