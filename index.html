@@ -1,0 +1,299 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Agent Studio — 多 agent 工作室</title>
+<style>
+  :root{
+    --bg:#0b0d10; --panel:#14171c; --panel2:#191d23; --border:#252a31;
+    --fg:#e7ebf0; --muted:#8b939e; --accent:#5b9dff; --ok:#3fb950; --warn:#d29922; --err:#f85149; --idle:#39414b;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);font:13px/1.5 ui-sans-serif,-apple-system,"SF Pro Text",Segoe UI,Roboto,sans-serif}
+  header{display:flex;align-items:baseline;gap:14px;padding:14px 18px;border-bottom:1px solid var(--border);position:sticky;top:0;background:rgba(11,13,16,.92);backdrop-filter:blur(6px);z-index:5}
+  h1{font-size:15px;margin:0;letter-spacing:.02em}
+  .sub{color:var(--muted);font-size:12px}
+  .kpis{margin-left:auto;display:flex;gap:16px;font-variant-numeric:tabular-nums}
+  .kpi b{display:block;font-size:16px}
+  .kpi span{color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.06em}
+  main{padding:16px 18px 40px;display:grid;gap:16px}
+  section{border:1px solid var(--border);background:var(--panel);border-radius:10px;overflow:hidden}
+  section>h2{margin:0;padding:10px 14px;font-size:12px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);border-bottom:1px solid var(--border);display:flex;gap:10px;align-items:center}
+  section>h2 em{font-style:normal;color:var(--fg);opacity:.75;text-transform:none;letter-spacing:0}
+  .body{padding:12px 14px}
+  .workers{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:10px}
+  .w{border:1px solid var(--border);background:var(--panel2);border-radius:8px;padding:10px 12px;opacity:.72}
+  .w.present{opacity:.9}
+  .w.live{border-color:rgba(63,185,80,.5);opacity:1}
+  .w .top{display:flex;align-items:center;gap:8px;margin-bottom:6px}
+  .w .label{font-weight:600;font-size:12.5px}
+  .w .state{margin-left:auto;font-size:11px;padding:1px 7px;border-radius:20px;border:1px solid var(--border);color:var(--muted)}
+  .w .id{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11px;color:var(--muted)}
+  .w .meta{color:var(--muted);font-size:11.5px;display:flex;flex-wrap:wrap;gap:8px;margin-top:4px}
+  .dot{width:8px;height:8px;border-radius:50%;background:var(--idle);flex:none}
+  .dot.live{background:var(--ok);box-shadow:0 0 0 0 rgba(63,185,80,.6);animation:pulse 1.6s infinite}
+  .dot.present{background:var(--accent)}
+  .dot.failed{background:var(--err)} .dot.pending{background:var(--warn)}
+  @keyframes pulse{70%{box-shadow:0 0 0 7px rgba(63,185,80,0)}100%{box-shadow:0 0 0 0 rgba(63,185,80,0)}}
+  table{width:100%;border-collapse:collapse;font-size:12px}
+  th{text-align:left;color:var(--muted);font-weight:500;font-size:11px;text-transform:uppercase;letter-spacing:.06em;padding:4px 8px;border-bottom:1px solid var(--border)}
+  td{padding:4px 8px;border-bottom:1px dashed rgba(255,255,255,.05);font-variant-numeric:tabular-nums}
+  td.role{font-weight:600}
+  .badge{display:inline-block;min-width:18px;text-align:center;padding:0 6px;border-radius:20px;border:1px solid var(--border)}
+  .badge.on{border-color:var(--ok);color:var(--fg);background:rgba(63,185,80,.18)}
+  .lanes{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
+  @media (min-width:1100px){.lanes{grid-template-columns:repeat(8,1fr)}}
+  .lane{border:1px solid var(--border);border-radius:8px;padding:8px;min-height:64px}
+  .lane.dim{opacity:.45}
+  .lane h3{margin:0 0 6px;font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;display:flex;justify-content:space-between}
+  .lane .card{background:var(--panel2);border:1px solid var(--border);border-radius:6px;padding:5px 7px;font-size:11.5px;margin-bottom:5px}
+  .rooms{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:10px}
+  .room{border:1px solid var(--border);border-radius:8px;padding:9px 10px;background:var(--panel2)}
+  .room.hot{border-color:rgba(63,185,80,.5)}
+  .room h3{margin:0 0 7px;font-size:11.5px;letter-spacing:.04em;color:var(--muted);display:flex;justify-content:space-between}
+  .room h3 b{color:var(--fg);font-weight:600}
+  .chips{display:flex;flex-wrap:wrap;gap:5px}
+  .chip{font-size:11px;padding:2px 7px;border-radius:20px;border:1px solid var(--border);color:var(--muted);white-space:nowrap}
+  .chip.t1{border-color:#4b5b74} .chip.t2{border-color:#3d5162}
+  .chip.opus{background:rgba(91,157,255,.12)}
+  .chip.sonnet{background:rgba(63,185,80,.10)}
+  .chip.busy{border-color:var(--ok);color:var(--fg);background:rgba(63,185,80,.20);animation:pulse 1.6s infinite}
+  .ticker{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11.5px;max-height:170px;overflow:auto}
+  .ticker div{padding:2px 0;border-bottom:1px dashed rgba(255,255,255,.05);color:var(--muted)}
+  .ticker b{color:var(--fg);font-weight:500}
+  .empty{color:var(--muted);font-size:12px}
+  .hint{color:var(--muted);font-size:11.5px;margin-top:6px}
+</style>
+</head>
+<body>
+<header>
+  <h1>Agent Studio</h1>
+  <span class="sub" id="sub">连接中…</span>
+  <div class="kpis">
+    <div class="kpi"><b id="k-work">0</b><span>working</span></div>
+    <div class="kpi"><b id="k-present">0</b><span>present</span></div>
+    <div class="kpi"><b id="k-sub">0</b><span>subagents</span></div>
+    <div class="kpi"><b id="k-term">0</b><span>terminals</span></div>
+    <div class="kpi"><b id="k-kb">0</b><span>kanban</span></div>
+  </div>
+</header>
+<main>
+  <section>
+    <h2>Live floor <em>Orca 监督中的工人 · 卡片标题 = 该工人自己的终端标题</em></h2>
+    <div class="body"><div class="workers" id="workers"></div></div>
+  </section>
+  <section>
+    <h2>CCGS subagents <em id="audit-note">审计流</em></h2>
+    <div class="body">
+      <div id="audit-table"></div>
+      <div class="ticker" id="audit-events" style="margin-top:10px"></div>
+    </div>
+  </section>
+  <section>
+    <h2>Kanban <em>hermes 持久任务板</em></h2>
+    <div class="body"><div class="lanes" id="lanes"></div></div>
+  </section>
+  <section>
+    <h2>Studio rooms <em id="rooms-note">49 个角色 · 来自 CCGS 花名册</em></h2>
+    <div class="body"><div class="rooms" id="rooms"></div></div>
+  </section>
+  <section>
+    <h2>Activity <em>状态差分</em></h2>
+    <div class="body"><div class="ticker" id="ticker"></div></div>
+  </section>
+</main>
+<script>
+const LANES = ["triage","todo","scheduled","ready","running","review","blocked","done"];
+const SETTLED = ["succeeded","failed","stopped","cancelled"];
+let roster = null, prev = null;
+const events = [];
+let seeded = false;
+
+const el = (t, c, x) => { const n = document.createElement(t); if (c) n.className = c; if (x != null) n.textContent = x; return n; };
+const short = (s, n = 18) => { const v = s || ""; return v.length > n ? v.slice(0, n) + "…" : v; };
+
+// 在场 = 终端还活着；工作中 = 尚未结算。
+const isPresent = (w) => w.liveness === "live" || w.dispatchStatus === "pending";
+const isWorking = (w) => isPresent(w) && !SETTLED.includes(w.workerState || "");
+const dotClass = (w) => {
+  if (w.liveness === "live") return isWorking(w) ? "live" : "present";
+  if (w.liveness === "exited" || w.workerState === "failed") return "failed";
+  if (w.liveness === "unverifiable" || w.dispatchStatus === "pending") return "pending";
+  return "";
+};
+
+// 活跃角色 = CCGS 审计流里 active>0 的真子 agent ∪ 正在工作的工人任务描述里点名的角色。
+function activeRoles(state) {
+  const hits = new Set();
+  for (const a of (state.audit?.agents || [])) if (a.active > 0) hits.add(a.agent);
+  for (const w of state.workers) {
+    if (!isWorking(w)) continue;
+    const blob = [w.taskTitle, w.taskSpec, w.label, w.worktreeName, w.agent].filter(Boolean).join(" ").toLowerCase();
+    for (const a of roster.agents) if (blob.includes(a.name.toLowerCase())) hits.add(a.name);
+  }
+  return hits;
+}
+
+function render(state) {
+  document.getElementById("sub").textContent =
+    `状态 ${new Date(state.ts).toLocaleTimeString()} · ${state.worktrees.length} 仓库 · ${state.terminals.length} 终端`;
+  const working = state.workers.filter(isWorking).length;
+  const present = state.workers.filter(isPresent).length;
+  const subActive = (state.audit?.agents || []).reduce((n, a) => n + a.active, 0);
+  document.getElementById("k-work").textContent = working;
+  document.getElementById("k-present").textContent = present;
+  document.getElementById("k-sub").textContent = subActive;
+  document.getElementById("k-term").textContent = state.terminals.length;
+  document.getElementById("k-kb").textContent = state.kanban.length;
+
+  if (!seeded) {
+    seeded = true;
+    events.unshift(`已连接 · 工作中 ${working} / 在场 ${present} / 子 agent ${subActive} / 终端 ${state.terminals.length} / kanban ${state.kanban.length}`);
+  }
+
+  // live floor
+  const wrap = document.getElementById("workers");
+  wrap.textContent = "";
+  const rank = (w) => (isWorking(w) ? 0 : isPresent(w) ? 1 : 2);
+  const ordered = [...state.workers].sort((a, b) => rank(a) - rank(b));
+  if (!ordered.length) {
+    wrap.appendChild(el("div", "empty", "当前没有 Orca 监督的工人（orca orchestration worker-start 派发后出现在这里）"));
+  }
+  for (const w of ordered.slice(0, 24)) {
+    const cls = "w" + (isWorking(w) ? " live" : isPresent(w) ? " present" : "");
+    const card = el("div", cls);
+    const top = el("div", "top");
+    top.appendChild(el("span", "dot " + dotClass(w)));
+    top.appendChild(el("span", "label", short(w.label || w.dispatchId, 34)));
+    top.appendChild(el("span", "state", w.workerState || w.dispatchStatus || "-"));
+    card.appendChild(top);
+    card.appendChild(el("div", "id", short(w.dispatchId, 20) + (w.worktreeName ? " · " + w.worktreeName : "")));
+    const meta = el("div", "meta");
+    meta.appendChild(el("span", null, "liveness: " + (w.liveness || "-") + (w.livenessReason ? ` (${w.livenessReason})` : "")));
+    meta.appendChild(el("span", null, "term: " + (w.terminalState || "-")));
+    if (w.taskTitle) meta.appendChild(el("span", null, "task: " + short(w.taskTitle, 26)));
+    if (w.nextAction) meta.appendChild(el("span", null, "next: " + w.nextAction));
+    card.appendChild(meta);
+    wrap.appendChild(card);
+  }
+
+  // CCGS subagents（审计流）
+  const note = document.getElementById("audit-note");
+  const table = document.getElementById("audit-table");
+  const auditEvents = document.getElementById("audit-events");
+  table.textContent = "";
+  auditEvents.textContent = "";
+  const agents = state.audit?.agents || [];
+  if (!state.audit?.source || !agents.length) {
+    note.textContent = state.audit?.source ? `无记录：${state.audit.source}` : "未配置审计源（CCGS_ROOT / AGENT_STUDIO_AUDIT）";
+    table.appendChild(el("div", "empty", "在 CCGS 项目里由 claude 启动子 agent 后，这里会显示每个角色的 invoked/completed。"));
+    table.appendChild(el("div", "hint", "hook：.claude/hooks/log-agent.sh · log-agent-stop.sh → production/session-logs/agent-audit.log"));
+  } else {
+    note.textContent = `${agents.length} 个角色有记录 · ${short(state.audit.source, 46)}`;
+    const t = el("table");
+    const head = el("tr");
+    for (const label of ["角色", "invoked", "completed", "active", "最后活动"]) head.appendChild(el("th", null, label));
+    t.appendChild(head);
+    for (const a of [...agents].sort((x, y) => (y.active - x.active) || (y.invoked - x.invoked)).slice(0, 12)) {
+      const tr = el("tr");
+      tr.appendChild(el("td", "role", a.agent));
+      tr.appendChild(el("td", null, String(a.invoked)));
+      tr.appendChild(el("td", null, String(a.completed)));
+      const td = el("td");
+      td.appendChild(el("span", "badge" + (a.active > 0 ? " on" : ""), String(a.active)));
+      tr.appendChild(td);
+      tr.appendChild(el("td", null, a.lastTs.slice(-6)));
+      t.appendChild(tr);
+    }
+    table.appendChild(t);
+    for (const e of [...(state.audit.events || [])].reverse().slice(0, 8)) {
+      const d = el("div");
+      d.appendChild(el("b", null, `${e.ts.slice(-6)}  ${e.kind === "invoked" ? "▶" : "■"} `));
+      d.appendChild(document.createTextNode(`${e.agent} · session ${short(e.session, 10)}`));
+      auditEvents.appendChild(d);
+    }
+  }
+
+  // kanban
+  const lanes = document.getElementById("lanes");
+  lanes.textContent = "";
+  const byStatus = {};
+  for (const t of state.kanban) (byStatus[t.status || "todo"] ||= []).push(t);
+  for (const name of LANES) {
+    const count = (byStatus[name] || []).length || (state.kanbanStats?.[name] ?? 0);
+    const lane = el("div", "lane" + (count ? "" : " dim"));
+    const h = el("h3");
+    h.appendChild(el("span", null, name));
+    h.appendChild(el("b", null, String(count)));
+    lane.appendChild(h);
+    for (const t of (byStatus[name] || []).slice(0, 6)) {
+      const card = el("div", "card");
+      card.appendChild(el("div", null, short(t.title || t.id, 24)));
+      card.appendChild(el("div", "empty", t.assignee || "unassigned"));
+      lane.appendChild(card);
+    }
+    lanes.appendChild(lane);
+  }
+
+  // rooms
+  const hits = activeRoles(state);
+  const rooms = document.getElementById("rooms");
+  rooms.textContent = "";
+  for (const room of roster.rooms) {
+    const members = roster.agents.filter(a => a.room === room);
+    const busy = members.filter(a => hits.has(a.name)).length;
+    const box = el("div", "room" + (busy ? " hot" : ""));
+    const h = el("h3");
+    h.appendChild(el("b", null, room));
+    h.appendChild(el("span", null, `${members.length}${busy ? " · " + busy + " 忙" : ""}`));
+    box.appendChild(h);
+    const chips = el("div", "chips");
+    for (const a of members) {
+      const chip = el("span", "chip t" + a.tier + (a.model !== "inherit" ? " " + a.model : "") + (hits.has(a.name) ? " busy" : ""), a.name);
+      chip.title = `${a.model} · ${a.desc}`;
+      chips.appendChild(chip);
+    }
+    box.appendChild(chips);
+    rooms.appendChild(box);
+  }
+  document.getElementById("rooms-note").textContent = `49 个角色 · 来自 CCGS 花名册 · ${hits.size} 个角色活跃`;
+
+  // diff → activity
+  if (prev) {
+    const pW = {};
+    for (const w of prev.workers) pW[w.dispatchId] = w;
+    for (const w of state.workers) {
+      const p = pW[w.dispatchId];
+      if (!p) events.unshift(`worker 出现 · ${short(w.label || w.dispatchId, 26)} · ${w.workerState || w.dispatchStatus}`);
+      else if (p.workerState !== w.workerState || p.liveness !== w.liveness)
+        events.unshift(`worker ${short(w.dispatchId, 14)} ${p.workerState}/${p.liveness} → ${w.workerState}/${w.liveness}`);
+    }
+    const pK = {};
+    for (const t of (prev.kanban || [])) pK[t.id] = t.status;
+    for (const t of state.kanban) if (pK[t.id] !== undefined && pK[t.id] !== t.status) events.unshift(`task ${short(t.title || t.id, 20)} ${pK[t.id]} → ${t.status}`);
+  }
+  prev = state;
+
+  const tick = document.getElementById("ticker");
+  tick.textContent = "";
+  if (!events.length) tick.appendChild(el("div", "empty", "等待状态变化…"));
+  for (const line of events.slice(0, 12)) {
+    const d = el("div");
+    d.appendChild(el("b", null, new Date().toLocaleTimeString() + "  "));
+    d.appendChild(document.createTextNode(line));
+    tick.appendChild(d);
+  }
+}
+
+async function tick() {
+  try {
+    render(await (await fetch("/state", { cache: "no-store" })).json());
+  } catch (e) {
+    document.getElementById("sub").textContent = "服务未响应：" + e.message;
+  }
+}
+(async () => { roster = await (await fetch("/roster.json")).json(); await tick(); setInterval(tick, 2000); })();
+</script>
+</body>
+</html>

@@ -1,0 +1,14 @@
+{
+  "name": "agent-studio",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Live studio-floor visualization of multi-agent work: CCGS studio roster + Orca supervised workers + hermes kanban + CCGS subagent audit trail.",
+  "type": "module",
+  "scripts": {
+    "start": "bun run server.ts",
+    "dev": "bun run --hot server.ts"
+  },
+  "engines": {
+    "bun": ">=1.0.0"
+  }
+}
