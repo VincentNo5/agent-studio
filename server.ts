@@ -327,6 +327,9 @@ Bun.serve({
     if (path === "/floor") {
       return new Response(Bun.file(`${DIR}/floor.html`), { headers: { "content-type": "text/html; charset=utf-8" } });
     }
+    if (path === "/mobile") {
+      return new Response(Bun.file(`${DIR}/mobile.html`), { headers: { "content-type": "text/html; charset=utf-8" } });
+    }
     return new Response(Bun.file(`${DIR}/index.html`), { headers: { "content-type": "text/html; charset=utf-8" } });
   },
 });

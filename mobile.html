@@ -1,0 +1,225 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#05070d">
+<title>Agent Studio — Mobile</title>
+<style>
+  :root {
+    color-scheme: dark;
+    --bg: #05070d;
+    --panel: rgba(11, 18, 29, .88);
+    --hair: rgba(77, 214, 255, .24);
+    --cyan: #4dd6ff;
+    --teal: #2ee6c8;
+    --amber: #ffb648;
+    --alert: #ff526e;
+    --fg: #e6f1ff;
+    --muted: #91a1b7;
+    --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    --gutter: clamp(10px, 3.2vw, 16px);
+    --gap: clamp(6px, .9vh, 9px);
+  }
+  * { box-sizing: border-box; }
+  html, body { width: 100%; height: 100%; min-height: 0; margin: 0; overflow: hidden; }
+  body {
+    color: var(--fg);
+    background: radial-gradient(100% 35% at 12% 0%, rgba(77,214,255,.12), transparent 75%),
+      radial-gradient(100% 40% at 100% 100%, rgba(46,230,200,.06), transparent 72%),
+      linear-gradient(160deg, #0a101a, var(--bg) 60%);
+    font: 12px/1.3 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    -webkit-font-smoothing: antialiased;
+    font-variant-numeric: tabular-nums;
+  }
+  .screen {
+    width: 100%; height: 100%; height: 100dvh;
+    max-width: 900px; margin: 0 auto;
+    display: flex; flex-direction: column; gap: var(--gap);
+    padding: max(8px, env(safe-area-inset-top)) var(--gutter) max(8px, env(safe-area-inset-bottom));
+    overflow: hidden;
+  }
+  header { min-height: 42px; display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  h1 { margin: 0; color: var(--fg); font: 700 clamp(12px, 3.4vw, 14px)/1 var(--mono); letter-spacing: .16em; white-space: nowrap; }
+  .brand { display: flex; align-items: center; gap: 9px; min-width: 0; }
+  .sigil { width: 25px; height: 25px; flex: none; border: 1px solid var(--hair); border-radius: 50%; background: radial-gradient(circle, #effcff 0 12%, var(--cyan) 19%, rgba(77,214,255,.18) 38%, transparent 43% 51%, rgba(77,214,255,.7) 55%, transparent 61%); box-shadow: 0 0 16px rgba(77,214,255,.32), inset 0 0 8px rgba(77,214,255,.22); }
+  .sync { min-width: 0; padding: 6px 8px; border: 1px solid var(--hair); background: rgba(77,214,255,.045); color: var(--teal); font: 600 11px/1.1 var(--mono); letter-spacing: .025em; white-space: nowrap; }
+  .sync::before { content: ""; display: inline-block; width: 6px; height: 6px; margin: 0 6px 1px 0; border-radius: 50%; background: currentColor; box-shadow: 0 0 8px currentColor; }
+  .sync.stale { color: var(--amber); border-color: rgba(255,182,72,.35); }
+  .sync.down { color: var(--alert); border-color: rgba(255,82,110,.4); }
+  .panel { min-width: 0; overflow: hidden; border: 1px solid var(--hair); background: linear-gradient(145deg, rgba(15,25,39,.94), var(--panel)); box-shadow: inset 0 0 24px rgba(77,214,255,.035), 0 10px 24px -20px #000; position: relative; }
+  .panel::before, .panel::after { content: ""; position: absolute; top: -1px; width: 11px; height: 1px; background: var(--cyan); opacity: .8; }
+  .panel::before { left: -1px; box-shadow: 0 0 0 1px rgba(77,214,255,.08); }
+  .panel::after { right: -1px; }
+  .section-title { margin: 0; color: var(--cyan); font: 700 11px/1.1 var(--mono); letter-spacing: .16em; }
+  .quota { flex: 0 0 auto; padding: 10px; display: flex; flex-direction: column; }
+  .quota-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; margin-bottom: 6px; }
+  .caption { color: var(--muted); font: 600 11px/1 var(--mono); letter-spacing: .08em; }
+  #quotas { min-height: 0; overflow: hidden; }
+  .account { padding: 5px 0 4px; border-top: 1px solid rgba(77,214,255,.11); }
+  .account:first-child { border-top: 0; padding-top: 1px; }
+  .account-name { margin-bottom: 3px; overflow: hidden; color: var(--fg); font: 600 11px/1.15 var(--mono); text-overflow: ellipsis; white-space: nowrap; }
+  .q-window { display: grid; grid-template-columns: minmax(56px, .82fr) minmax(75px, 1.15fr) 34px; align-items: center; gap: 7px; min-height: 19px; color: var(--muted); font: 11px/1.1 var(--mono); }
+  .q-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .track { height: 4px; overflow: hidden; border-radius: 4px; background: rgba(145,161,183,.18); }
+  .fill { display: block; width: var(--amount); height: 100%; background: var(--tone); box-shadow: 0 0 7px var(--tone); }
+  .percent { color: var(--tone); text-align: right; }
+  .q-window[data-level="high"] { --tone: var(--teal); }
+  .q-window[data-level="mid"] { --tone: var(--amber); }
+  .q-window[data-level="low"] { --tone: var(--alert); }
+  .reset { grid-column: 2 / 4; margin: -2px 0 1px; color: var(--amber); font: 600 11px/1 var(--mono); text-align: right; }
+  .unavailable { padding: 9px 0; color: var(--amber); font: 700 11px/1.2 var(--mono); letter-spacing: .08em; }
+  .work { flex: 1 1 auto; padding: 10px; }
+  .metrics { display: grid; grid-template-columns: repeat(3, 1fr); margin: 8px 0 7px; padding: 6px 0; border-top: 1px solid rgba(77,214,255,.12); border-bottom: 1px solid rgba(77,214,255,.12); }
+  .metric { display: flex; align-items: baseline; justify-content: center; gap: 6px; border-right: 1px solid rgba(77,214,255,.12); }
+  .metric:last-child { border: 0; }
+  .metric b { color: var(--teal); font: 700 18px/1 var(--mono); }
+  .metric span { color: var(--muted); font: 600 11px/1 var(--mono); letter-spacing: .05em; }
+  #agents { display: grid; grid-template-columns: 1fr 1fr; column-gap: 10px; row-gap: 3px; }
+  .agent { display: flex; min-width: 0; align-items: center; gap: 6px; min-height: 18px; }
+  .dot { width: 6px; height: 6px; flex: none; border-radius: 50%; background: var(--muted); }
+  .dot.working, .dot.running { background: var(--teal); box-shadow: 0 0 7px var(--teal); }
+  .dot.pending, .dot.idle { background: var(--amber); box-shadow: 0 0 6px rgba(255,182,72,.5); }
+  .dot.error, .dot.failed { background: var(--alert); box-shadow: 0 0 6px var(--alert); }
+  .origin { flex: none; color: var(--cyan); font: 700 11px/1 var(--mono); letter-spacing: .025em; }
+  .agent-name { min-width: 0; overflow: hidden; color: var(--fg); font: 11px/1.15 var(--mono); text-overflow: ellipsis; white-space: nowrap; }
+  .empty { color: var(--muted); font: 11px/1.3 var(--mono); }
+  .roles { flex: 0 0 auto; padding: 9px 10px; }
+  .roles-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+  #role-list { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 7px; }
+  .role { max-width: 48%; overflow: hidden; padding: 3px 6px; border: 1px solid rgba(46,230,200,.23); color: var(--teal); font: 11px/1.15 var(--mono); text-overflow: ellipsis; white-space: nowrap; }
+  footer { flex: 0 0 34px; display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 0 2px; color: var(--muted); font: 600 11px/1 var(--mono); letter-spacing: .035em; white-space: nowrap; }
+  footer strong { color: var(--cyan); font-weight: 700; }
+  @media (min-width: 700px) {
+    .screen { display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: 48px minmax(0, 1fr) minmax(0, 1fr) 38px; }
+    header, footer { grid-column: 1 / -1; }
+    .quota { grid-column: 1; grid-row: 2; }
+    .work { grid-column: 2; grid-row: 2; }
+    .roles { grid-column: 1; grid-row: 3; }
+  }
+  @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; } }
+</style>
+</head>
+<body>
+<main class="screen" aria-label="Agent Studio mobile overview">
+  <header>
+    <div class="brand"><span class="sigil" aria-hidden="true"></span><h1>AGENT STUDIO</h1></div>
+    <div class="sync" id="sync" aria-live="polite">CONNECTING</div>
+  </header>
+  <section class="panel quota" aria-labelledby="quota-title">
+    <div class="quota-head"><h2 class="section-title" id="quota-title">QUOTAS</h2><span class="caption" id="quota-count">—</span></div>
+    <div id="quotas"><div class="empty">WAITING FOR GATEWAY</div></div>
+  </section>
+  <section class="panel work" aria-labelledby="work-title">
+    <h2 class="section-title" id="work-title">WORKING</h2>
+    <div class="metrics" aria-label="Worker counts">
+      <div class="metric"><b id="working-count">0</b><span>WORKING</span></div>
+      <div class="metric"><b id="present-count">0</b><span>PRESENT</span></div>
+      <div class="metric"><b id="pending-count">0</b><span>PENDING</span></div>
+    </div>
+    <div id="agents"><div class="empty">NO ACTIVE AGENTS</div></div>
+  </section>
+  <section class="panel roles" aria-labelledby="roles-title">
+    <div class="roles-head"><h2 class="section-title" id="roles-title">ROOMS</h2><span class="caption" id="role-count">0 ROLES ACTIVE</span></div>
+    <div id="role-list"><span class="empty">NO ACTIVE ROLES</span></div>
+  </section>
+  <footer><span><strong>KANBAN</strong> <span id="kanban-count">0</span></span><span><span id="worktree-count">0</span> worktrees · <span id="terminal-count">0</span> terminals</span></footer>
+</main>
+<script>
+  const $ = (id) => document.getElementById(id);
+  let lastTs = 0;
+  const settled = new Set(["succeeded", "failed", "stopped", "cancelled"]);
+  const present = (worker) => worker.liveness === "live" || worker.dispatchStatus === "pending";
+  const working = (worker) => present(worker) && !settled.has(worker.workerState || "");
+  const escapeText = (value) => String(value ?? "");
+  const safe = (value) => escapeText(value).replace(/[&<>"']/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[ch]);
+  const time = (value) => {
+    const date = new Date(value);
+    return Number.isNaN(date.getTime()) ? "—" : date.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", hour12: false });
+  };
+  function renderQuotas(rows) {
+    const root = $("quotas");
+    if (!Array.isArray(rows) || rows.length === 0) {
+      $("quota-count").textContent = "OFFLINE";
+      root.innerHTML = '<div class="unavailable">GATEWAY UNREACHABLE</div>';
+      return;
+    }
+    $("quota-count").textContent = `${rows.length} ${rows.length === 1 ? "ACCOUNT" : "ACCOUNTS"}`;
+    root.innerHTML = rows.map((quota) => {
+      const title = quota.provider || quota.name || "UNKNOWN PROVIDER";
+      const detail = quota.name && quota.provider && quota.name !== quota.provider ? ` · ${quota.name}` : "";
+      const windows = Array.isArray(quota.windows) ? quota.windows : [];
+      return `<article class="account"><div class="account-name" title="${safe(title + detail)}">${safe(title + detail)}</div>${windows.length ? windows.map((window) => {
+        const remaining = Number.isFinite(window.remaining) ? Math.max(0, Math.min(100, Math.round(window.remaining))) : null;
+        const level = remaining === null || remaining >= 50 ? "high" : remaining >= 20 ? "mid" : "low";
+        const pct = remaining === null ? "—" : `${remaining}%`;
+        return `<div class="q-window" data-level="${level}" style="--amount:${remaining ?? 0}%"><span class="q-label" title="${safe(window.name || "WINDOW")}">${safe(window.name || "WINDOW")}</span><span class="track" aria-hidden="true"><i class="fill"></i></span><span class="percent">${pct}</span>${remaining === 0 ? `<span class="reset">RESETS ${safe(time(window.resetsAt))}</span>` : ""}</div>`;
+      }).join("") : '<div class="empty">NO WINDOWS REPORTED</div>'}</article>`;
+    }).join("");
+  }
+  function renderAgents(state) {
+    const workers = Array.isArray(state.workers) ? state.workers : [];
+    const workerPresent = workers.filter(present);
+    const workerWorking = workerPresent.filter(working);
+    const pending = workers.filter((worker) => worker.dispatchStatus === "pending");
+    $("working-count").textContent = workerWorking.length;
+    $("present-count").textContent = workerPresent.length;
+    $("pending-count").textContent = pending.length;
+    const list = workerPresent.map((worker) => ({
+      source: "ORCA", name: worker.label || worker.agent || worker.dispatchId || "Unnamed worker",
+      state: working(worker) ? "working" : worker.dispatchStatus === "pending" ? "pending" : "present"
+    }));
+    const paseo = Array.isArray(state.paseo) ? state.paseo : [];
+    for (const agent of paseo) {
+      const status = String(agent.status || "active").toLowerCase();
+      if (["completed", "stopped", "cancelled", "terminated"].includes(status)) continue;
+      list.push({ source: "PASEO", name: agent.name || "Unnamed agent", state: status });
+    }
+    $("agents").innerHTML = list.length ? list.slice(0, 5).map((agent) => {
+      const tone = ["working", "running", "pending", "idle", "error", "failed"].includes(agent.state) ? agent.state : "";
+      return `<div class="agent"><i class="dot ${tone}" aria-hidden="true"></i><span class="origin">${agent.source}</span><span class="agent-name" title="${safe(agent.name)}">${safe(agent.name)}</span></div>`;
+    }).join("") : '<div class="empty">NO ACTIVE AGENTS</div>';
+  }
+  function render(state) {
+    lastTs = Number(state.ts) || Date.now();
+    renderQuotas(state.quotas);
+    renderAgents(state);
+    const roles = Array.isArray(state.audit?.agents) ? state.audit.agents.filter((role) => Number(role.active) > 0) : [];
+    $("role-count").textContent = `${roles.length} ${roles.length === 1 ? "ROLE" : "ROLES"} ACTIVE`;
+    $("role-list").innerHTML = roles.length ? roles.slice(0, 4).map((role) => `<span class="role" title="${safe(role.agent)}">${safe(role.agent)}</span>`).join("") : '<span class="empty">NO ACTIVE ROLES</span>';
+    const stats = state.kanbanStats || {};
+    const kanbanCount = Array.isArray(state.kanban) ? state.kanban.length : Object.values(stats).reduce((sum, count) => sum + (Number(count) || 0), 0);
+    $("kanban-count").textContent = kanbanCount;
+    $("worktree-count").textContent = Array.isArray(state.worktrees) ? state.worktrees.length : 0;
+    $("terminal-count").textContent = Array.isArray(state.terminals) ? state.terminals.length : 0;
+    updateSync();
+  }
+  function updateSync() {
+    const age = lastTs ? Math.max(0, (Date.now() - lastTs) / 1000) : null;
+    const badge = $("sync");
+    if (age === null) return;
+    const stale = age > 10;
+    badge.classList.toggle("stale", stale);
+    badge.classList.remove("down");
+    badge.textContent = stale ? `STALE ${age.toFixed(1)}s` : `SYNC ${new Date(lastTs).toLocaleTimeString("en-GB")} · AGE ${age.toFixed(1)}s`;
+  }
+  async function poll() {
+    try {
+      const response = await fetch("/state", { cache: "no-store" });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      render(await response.json());
+    } catch {
+      if (!lastTs) {
+        $("sync").textContent = "GATEWAY OFFLINE";
+        $("sync").classList.add("down");
+        $("quotas").innerHTML = '<div class="unavailable">GATEWAY UNREACHABLE</div>';
+        $("quota-count").textContent = "OFFLINE";
+      }
+    }
+  }
+  poll();
+  setInterval(poll, 2000);
+  setInterval(updateSync, 1000);
+</script>
+</body>
+</html>

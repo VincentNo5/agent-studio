@@ -37,27 +37,64 @@ Rules that matter in practice:
 Paseo drives *agent CLIs*; to drive **omp** (TUI, sessions, its own subagents) from the
 phone, use SSH into this Mac with tmux so a dropped connection does not kill the session.
 
+### What the phone needs
+
+| App | Why | Required |
+|---|---|---|
+| **Blink Shell** (paid) or **Termius** (free tier) | an SSH client; Blink has native tmux control mode and Mosh, which is the best mobile experience | yes |
+| **Tailscale** (iOS) | reach the Mac when you are not on the home Wi-Fi (no port forwarding, no public port) | only for remote access |
+| Paseo Pocket Engineer | drives agent CLIs, **not** a shell — already paired | optional |
+| Feishu / WeChat | the hermes gateway is connected to both | optional |
+
+### What the Mac needs
+
 ```bash
-# On the Mac: turn on Remote Login (needs admin; not enabled as of 2026-10-18)
+# 1. Turn on Remote Login — needs admin, still OFF as of 2026-10-18
 sudo systemsetup -setremotelogin on
-# then verify
-lsof -nP -iTCP:22 -sTCP:LISTEN
+lsof -nP -iTCP:22 -sTCP:LISTEN          # verify
+
+# 2. tmux + mosh — installed 2026-10-18 (tmux 3.8, mosh 1.4.0)
+brew install tmux mosh
+
+# 3. Authorize the phone's key (no authorized_keys existed before 2026-10-18)
+#    Generate a key in Blink/Termius, then paste the public key here:
+mkdir -p ~/.ssh && chmod 700 ~/.ssh
+echo '<phone-public-key>' >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys
 ```
 
-On the phone, install an SSH client (Blink, Termius, …) and:
+### Daily loop
 
 ```bash
-ssh vincent@<mac-address>
-tmux new -As omp        # first time
-tmux attach -t omp      # after a disconnect
-# inside tmux:
-omp
+ssh vincent@MacBook-Pro-2.local     # same Wi-Fi (Bonjour); Tailscale 100.x address off-LAN
+mosh vincent@MacBook-Pro-2.local    # preferred on cellular: survives network switches and lock
+tmux new -As omp                    # first time
+tmux attach -t omp                  # after any disconnect
+omp                                 # inside tmux
 ```
 
-Outside the home network this needs a way to reach the Mac. **Tailscale is not installed**
-here; `brew install --cask tailscale` plus signing in on both devices gives a stable
-`100.x.y.z` address with no port forwarding. (Paseo's relay is an alternative for agents,
-but it does not give you a shell.)
+### Trap: non-interactive SSH shells do not read .zshrc
+
+`ssh host <command>` and mosh's remote `mosh-server` startup run **non-interactive** zsh, which
+never sources `.zshrc`/`.zprofile`. sshd hands them a minimal `PATH` without `/opt/homebrew/bin`,
+so `tmux` and `mosh-server` come back `command not found` and **mosh fails outright** with
+`Did not find mosh server startup message`. Measured here on 2026-10-18 before the fix:
+
+```
+$ ssh vincent@127.0.0.1 'tmux -V'
+zsh:1: command not found: tmux
+$ mosh vincent@127.0.0.1
+/opt/homebrew/bin/mosh: Did not find mosh server startup message.
+```
+
+Fixed by adding a plain PATH export to `~/.zshenv`, which every zsh reads:
+
+```sh
+export PATH="/opt/homebrew/bin:/opt/homebrew/sbin:$PATH"
+```
+
+**Why mosh + tmux and not plain SSH:** a phone switches between Wi-Fi and cellular, locks the
+screen, and gets backgrounded. Plain SSH drops the connection; mosh keeps the session alive
+across those changes, and tmux keeps the process alive even if the client dies.
 
 ## 3. Studio pages — watch, from any browser
 
