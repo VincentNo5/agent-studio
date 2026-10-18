@@ -236,6 +236,9 @@ Bun.serve({
     if (path === "/roster.json") {
       return new Response(Bun.file(`${DIR}/roster.json`), { headers: { "content-type": "application/json" } });
     }
+    if (path === "/floor") {
+      return new Response(Bun.file(`${DIR}/floor.html`), { headers: { "content-type": "text/html; charset=utf-8" } });
+    }
     return new Response(Bun.file(`${DIR}/index.html`), { headers: { "content-type": "text/html; charset=utf-8" } });
   },
 });

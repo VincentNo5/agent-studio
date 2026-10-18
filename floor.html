@@ -1,0 +1,278 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Agent Studio — 办公室平面图</title>
+<style>
+  :root{
+    --bg:#0b0d10; --floor:#12161b; --room:#181d24; --roomline:#2c333c; --wall:#3a434e;
+    --corridor:#1a2028; --fg:#e7ebf0; --muted:#8b939e; --ok:#3fb950; --warn:#d29922; --err:#f85149;
+    --desk:#2a323c; --deskHot:#2ea043; --accent:#5b9dff;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);font:13px/1.5 ui-sans-serif,-apple-system,"SF Pro Text",Segoe UI,Roboto,sans-serif}
+  header{display:flex;align-items:baseline;gap:14px;padding:12px 18px;border-bottom:1px solid var(--roomline)}
+  h1{font-size:15px;margin:0}
+  .sub{color:var(--muted);font-size:12px}
+  .kpis{margin-left:auto;display:flex;gap:16px;font-variant-numeric:tabular-nums}
+  .kpi b{display:block;font-size:16px}.kpi span{color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.06em}
+  .wrap{display:grid;grid-template-columns:1fr 300px;gap:16px;padding:16px 18px 40px}
+  @media (max-width:1000px){.wrap{grid-template-columns:1fr}}
+  svg{width:100%;height:auto;background:var(--floor);border:1px solid var(--roomline);border-radius:10px}
+  .roomBox{fill:var(--room);stroke:var(--roomline);stroke-width:1.5}
+  .roomBox.hot{stroke:var(--ok);stroke-opacity:.55}
+  .roomTitle{fill:var(--fg);font-size:12px;font-weight:600}
+  .roomMeta{fill:var(--muted);font-size:10.5px}
+  .corridor{fill:var(--corridor);stroke:var(--roomline);stroke-width:1;stroke-dasharray:6 4}
+  .corridorLabel{fill:var(--muted);font-size:10px;letter-spacing:.14em}
+  .desk{fill:var(--desk);stroke:#0d1117;stroke-width:1;rx:2}
+  .desk.busy{fill:var(--deskHot)}
+  .desk.hover{stroke:var(--accent);stroke-width:2}
+  .pulse{animation:pulse 1.7s ease-out infinite}
+  @keyframes pulse{0%{opacity:.35}50%{opacity:1}100%{opacity:.35}}
+  .visitor{fill:#101519;stroke:var(--roomline);rx:6}
+  .visitorText{fill:var(--fg);font-size:10.5px}
+  .visitorState{fill:var(--muted);font-size:9.5px}
+  .legend{fill:var(--muted);font-size:10.5px}
+  aside{border:1px solid var(--roomline);border-radius:10px;background:var(--floor);padding:12px 14px;align-self:start}
+  aside h2{margin:0 0 8px;font-size:12px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted)}
+  .row{display:flex;justify-content:space-between;gap:10px;padding:3px 0;border-bottom:1px dashed rgba(255,255,255,.06);font-size:12px}
+  .row b{font-weight:600}
+  .role{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+  .hint{color:var(--muted);font-size:11.5px;margin-top:10px}
+  .empty{color:var(--muted);font-size:12px}
+  a{color:var(--accent);text-decoration:none}
+</style>
+</head>
+<body>
+<header>
+  <h1>Agent Studio · 办公室平面图</h1>
+  <span class="sub" id="sub">连接中…</span>
+  <div class="kpis">
+    <div class="kpi"><b id="k-work">0</b><span>working</span></div>
+    <div class="kpi"><b id="k-sub">0</b><span>subagents</span></div>
+    <div class="kpi"><b id="k-visit">0</b><span>visitors</span></div>
+    <div class="kpi"><b id="k-kb">0</b><span>kanban</span></div>
+  </div>
+</header>
+<div class="wrap">
+  <div><svg id="plan" viewBox="0 0 1200 720" role="img" aria-label="office floor plan"></svg></div>
+  <aside>
+    <h2 id="detail-title">选中一个工位</h2>
+    <div id="detail"><div class="empty">点房间里的方块看角色详情；绿色=正在工作。</div></div>
+    <h2 style="margin-top:14px">活跃角色</h2>
+    <div id="active"><div class="empty">无</div></div>
+    <div class="hint">
+      绿色方块 = 该角色正在工作（来源：CCGS 审计流或工人任务文本）。<br>
+      中间走廊 = Orca 监督中的工人（外部来访者）。<br>
+      <a href="/">← 回面板视图</a>
+    </div>
+  </aside>
+</div>
+<script>
+// 平面图分区：两排房间夹一条走廊。房间宽度按人数分配。
+const PLAN = [
+  { y: 40, h: 250, rooms: ["directors", "leads", "engineering", "design"] },
+  { y: 430, h: 250, rooms: ["art", "audio", "narrative", "qa", "engines", "community"] },
+];
+const CORRIDOR = { y: 310, h: 100 };
+const SETTLED = ["succeeded", "failed", "stopped", "cancelled"];
+let roster = null, state = null, selected = null;
+
+const SVG = "http://www.w3.org/2000/svg";
+const mk = (tag, attrs, text) => {
+  const n = document.createElementNS(SVG, tag);
+  for (const k in attrs) n.setAttribute(k, attrs[k]);
+  if (text != null) n.textContent = text;
+  return n;
+};
+const isPresent = (w) => w.liveness === "live" || w.dispatchStatus === "pending";
+const isWorking = (w) => isPresent(w) && !SETTLED.includes(w.workerState || "");
+
+function activeRoles() {
+  const hits = new Set();
+  for (const a of (state.audit?.agents || [])) if (a.active > 0) hits.add(a.agent);
+  for (const w of state.workers) {
+    if (!isWorking(w)) continue;
+    const blob = [w.taskTitle, w.taskSpec, w.label, w.worktreeName, w.agent].filter(Boolean).join(" ").toLowerCase();
+    for (const a of roster.agents) if (blob.includes(a.name.toLowerCase())) hits.add(a.name);
+  }
+  return hits;
+}
+
+// 一个房间里的工位网格：列数按房间宽高比和人数算，行数向上取整。
+function deskGrid(room, agents) {
+  const innerW = room.w - 24, innerH = room.h - 46;
+  // 小房间（≤4 人）排成一列并显示名字，大房间用网格、靠 tooltip
+  const cols = agents.length <= 4 ? 1 : Math.max(2, Math.min(8, Math.round(Math.sqrt(agents.length * (innerW / innerH) * 0.9))));
+  const rows = Math.ceil(agents.length / cols);
+  const cellW = innerW / cols, cellH = innerH / Math.max(rows, 1);
+  return agents.map((a, i) => ({
+    agent: a,
+    x: room.x + 12 + (i % cols) * cellW,
+    y: room.y + 38 + Math.floor(i / cols) * cellH,
+    w: Math.max(8, Math.min(cellW - 4, 34)),
+    h: Math.max(6, Math.min(cellH - 4, 18)),
+  }));
+}
+
+function roomGeometry(agentsPerRoom) {
+  const out = [];
+  for (const band of PLAN) {
+    const total = band.rooms.reduce((n, r) => n + agentsPerRoom[r], 0);
+    const usable = 1200 - 40 - (band.rooms.length - 1) * 12;
+    let x = 20;
+    for (const name of band.rooms) {
+      const w = Math.max(120, Math.round((usable * agentsPerRoom[name]) / total));
+      out.push({ name, x, y: band.y, w, h: band.h });
+      x += w + 12;
+    }
+  }
+  return out;
+}
+
+function drawPlan() {
+  const perRoom = {};
+  for (const r of roster.rooms) perRoom[r] = roster.agents.filter((a) => a.room === r).length;
+  const svg = document.getElementById("plan");
+  svg.textContent = "";
+
+  // 地面网格
+  const defs = mk("defs");
+  const pat = mk("pattern", { id: "grid", width: 24, height: 24, patternUnits: "userSpaceOnUse" });
+  pat.appendChild(mk("path", { d: "M 24 0 L 0 0 0 24", fill: "none", stroke: "#1b2129", "stroke-width": 1 }));
+  defs.appendChild(pat);
+  svg.appendChild(defs);
+  svg.appendChild(mk("rect", { x: 0, y: 0, width: 1200, height: 720, fill: "url(#grid)" }));
+
+  // 走廊
+  svg.appendChild(mk("rect", { class: "corridor", x: 20, y: CORRIDOR.y, width: 1160, height: CORRIDOR.h, rx: 8 }));
+  svg.appendChild(mk("text", { class: "corridorLabel", x: 32, y: CORRIDOR.y + 18 }, "CORRIDOR · ORCA WORKERS"));
+
+  // 房间
+  for (const room of roomGeometry(perRoom)) {
+    const agents = roster.agents.filter((a) => a.room === room.name);
+    const g = mk("g", { "data-room": room.name });
+    g.appendChild(mk("rect", { class: "roomBox", x: room.x, y: room.y, width: room.w, height: room.h, rx: 10 }));
+    g.appendChild(mk("text", { class: "roomTitle", x: room.x + 12, y: room.y + 20 }, room.name));
+    g.appendChild(mk("text", { class: "roomMeta", x: room.x + room.w - 12, y: room.y + 20, "text-anchor": "end", "data-meta": room.name }, `${agents.length}`));
+    for (const desk of deskGrid(room, agents)) {
+      const d = mk("rect", { class: "desk", x: desk.x, y: desk.y, width: desk.w, height: desk.h, rx: 2, "data-role": desk.agent.name });
+      d.appendChild(mk("title", {}, `${desk.agent.name} · ${desk.agent.model} · ${desk.agent.desc}`));
+      d.style.cursor = "pointer";
+      d.addEventListener("click", () => { selected = desk.agent.name; paint(state); });
+      g.appendChild(d);
+      if (agents.length <= 4) {
+        g.appendChild(mk("text", { class: "roomMeta", x: desk.x + 26, y: desk.y + 12 }, desk.agent.name));
+      }
+    }
+    svg.appendChild(g);
+  }
+
+  // 图例
+  svg.appendChild(mk("rect", { class: "desk", x: 20, y: 700 - 18, width: 14, height: 10, rx: 2 }));
+  svg.appendChild(mk("text", { class: "legend", x: 40, y: 700 - 9 }, "idle"));
+  svg.appendChild(mk("rect", { class: "desk busy", x: 90, y: 700 - 18, width: 14, height: 10, rx: 2 }));
+  svg.appendChild(mk("text", { class: "legend", x: 110, y: 700 - 9 }, "working · 点击查看"));
+}
+
+function paint(st) {
+  state = st;
+  const hits = activeRoles();
+  const svg = document.getElementById("plan");
+
+  // 工位状态
+  for (const d of svg.querySelectorAll(".desk[data-role]")) {
+    const on = hits.has(d.dataset.role);
+    d.classList.toggle("busy", on);
+    d.classList.toggle("pulse", on);
+    d.classList.toggle("hover", d.dataset.role === selected);
+  }
+  // 房间热度与计数
+  for (const g of svg.querySelectorAll("g[data-room]")) {
+    const room = g.dataset.room;
+    const members = roster.agents.filter((a) => a.room === room);
+    const busy = members.filter((a) => hits.has(a.name)).length;
+    g.querySelector(".roomBox").classList.toggle("hot", busy > 0);
+    const meta = g.querySelector(`[data-meta="${room}"]`);
+    if (meta) meta.textContent = `${members.length}${busy ? " · " + busy + " 忙" : ""}`;
+  }
+
+  // 走廊里的来访工人
+  for (const old of svg.querySelectorAll("g[data-visitor]")) old.remove();
+  const visitors = state.workers.filter(isPresent).slice(0, 6);
+  visitors.forEach((w, i) => {
+    const x = 40 + i * 186, y = CORRIDOR.y + 34;
+    const g = mk("g", { "data-visitor": w.dispatchId });
+    g.appendChild(mk("rect", { class: "visitor", x, y, width: 176, height: 46 }));
+    g.appendChild(mk("text", { class: "visitorText", x: x + 10, y: y + 18 }, (w.label || w.dispatchId).slice(0, 26)));
+    const st2 = `${w.workerState || w.dispatchStatus || "-"} · ${w.liveness || "-"}${w.taskTitle ? " · " + w.taskTitle.slice(0, 14) : ""}`;
+    g.appendChild(mk("text", { class: "visitorState", x: x + 10, y: y + 34 }, st2.slice(0, 30)));
+    if (isWorking(w)) g.querySelector(".visitor").setAttribute("stroke", "var(--ok)");
+    svg.appendChild(g);
+  });
+  if (!visitors.length) {
+    svg.appendChild(mk("text", { class: "corridorLabel", x: 40, y: CORRIDOR.y + 58 }, "（走廊空着：当前没有 Orca 监督的工人）"));
+  }
+
+  // KPI
+  document.getElementById("k-work").textContent = state.workers.filter(isWorking).length;
+  document.getElementById("k-sub").textContent = (state.audit?.agents || []).reduce((n, a) => n + a.active, 0);
+  document.getElementById("k-visit").textContent = state.workers.filter(isPresent).length;
+  document.getElementById("k-kb").textContent = state.kanban.length;
+  document.getElementById("sub").textContent = `状态 ${new Date(state.ts).toLocaleTimeString()} · ${state.worktrees.length} 仓库 · ${hits.size} 角色活跃`;
+
+  // 侧栏
+  const detail = document.getElementById("detail");
+  detail.textContent = "";
+  if (!selected) {
+    detail.appendChild(Object.assign(document.createElement("div"), { className: "empty", textContent: "点房间里的方块看角色详情；绿色=正在工作。" }));
+  } else {
+    const a = roster.agents.find((x) => x.name === selected);
+    const last = (state.audit?.events || []).filter((e) => e.agent === selected).slice(-1)[0];
+    const rows = [
+      ["房间", a.room],
+      ["档位", a.model],
+      ["状态", hits.has(a.name) ? "工作中" : "空闲"],
+      ["最近审计", last ? `${last.kind === "invoked" ? "▶ invoked" : "■ completed"} ${last.ts.slice(-6)}` : "无记录"],
+    ];
+    for (const [k, v] of rows) {
+      const row = document.createElement("div");
+      row.className = "row";
+      row.appendChild(Object.assign(document.createElement("span"), { textContent: k }));
+      row.appendChild(Object.assign(document.createElement("b"), { className: "role", textContent: String(v) }));
+      detail.appendChild(row);
+    }
+    const desc = document.createElement("div");
+    desc.className = "hint";
+    desc.textContent = a.desc;
+    detail.appendChild(desc);
+    document.getElementById("detail-title").textContent = a.name;
+  }
+
+  const act = document.getElementById("active");
+  act.textContent = "";
+  if (!hits.size) act.appendChild(Object.assign(document.createElement("div"), { className: "empty", textContent: "无" }));
+  for (const role of [...hits].sort()) {
+    const row = document.createElement("div");
+    row.className = "row";
+    row.appendChild(Object.assign(document.createElement("span"), { className: "role", textContent: role }));
+    row.appendChild(Object.assign(document.createElement("b"), { textContent: roster.agents.find((a) => a.name === role)?.room ?? "—" }));
+    act.appendChild(row);
+  }
+}
+
+async function tick() {
+  try { paint(await (await fetch("/state", { cache: "no-store" })).json()); }
+  catch (e) { document.getElementById("sub").textContent = "服务未响应：" + e.message; }
+}
+(async () => {
+  roster = await (await fetch("/roster.json")).json();
+  drawPlan();
+  await tick();
+  setInterval(tick, 2000);
+})();
+</script>
+</body>
+</html>
