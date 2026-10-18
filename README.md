@@ -1,16 +1,16 @@
 # Agent Studio
 
-A live **studio floor** for multi-agent work: two views of the same state — a panel dashboard and
-an office floor plan — showing which agent is doing what, right now.
+A live **studio floor** for multi-agent work: two views of the same state — a one-screen command
+overview and an isometric studio tower. Both fit a single screen with no page scrolling.
 
-**Panel view** (`/`) — workers, subagents, board, rooms, activity feed:
+**Command Overview** (`/`) — summary only: KPIs, worker-state ring, room heat, subagent totals, activity:
 
-![Panel view](docs/studio.png)
+![Command Overview](docs/studio.png)
 
-**Floor plan** (`/floor`) — cartoon office: one character per role, screens light up and hands type
-while that role works, and visiting Orca workers stand in the corridor:
+**Studio Tower** (`/floor`) — isometric 3D: three stacked floors, one anime-style character per role,
+a lobby where Orca-supervised workers wait as visitors:
 
-![Floor plan](docs/floor.png)
+![Studio Tower](docs/floor.png)
 
 Built on top of [Claude Code Game Studios](https://github.com/donchitos/claude-code-game-studios)
 (CCGS) for its 49-role studio roster and its subagent audit hooks. No game development involved:
@@ -50,9 +50,27 @@ Environment:
 | `ORCA_COORDINATOR` | unset | Coordinator terminal handle; when set, task titles/specs are read via `orca orchestration task-list --from <handle>` and used for role matching |
 | `CCGS_ROOT` | `/tmp/ccgs` when present | CCGS project root holding `production/session-logs/agent-audit.log` |
 | `AGENT_STUDIO_AUDIT` | unset | Point directly at an audit log file (overrides `CCGS_ROOT`) |
+| `AGENT_STUDIO_TTL_MS` | `1500` | Shared `/state` cache window. Every collect spawns CLI processes, so all clients share one collect per TTL; concurrent callers join the in-flight promise. Before this, several tabs polling every 2 s queued behind each other and `/state` took ~9 s. |
 | `PATH` | inherited | **Must include the directories holding `orca` and `hermes`** — see the launchd note below |
 
 Everything is read-only: the server only reads CLI output and log files.
+
+## Layout: one screen, no scrolling
+
+Both pages render a fixed **1600×900 stage** inside `html,body{height:100%;overflow:hidden}` and scale
+it to the viewport with a few lines of JS:
+
+```js
+const s = Math.min(innerWidth / 1600, innerHeight / 900);
+stage.style.transform = `translate(${(innerWidth - 1600 * s) / 2}px, ${(innerHeight - 900 * s) / 2}px) scale(${s})`;
+```
+
+Measured: no page scroll, no clipping and no internal scrollbars at 1600×900 (`s=1`), 1440×900
+(`s=0.9`) and 1280×800 (`s=0.8`). Fixed-size design is why the layout has no breakpoints — the stage
+is the breakpoint.
+
+`/` is deliberately **summary only** (aggregate ring, room heat, totals, one-line activity); the
+per-worker detail lives on `/floor`, where clicking a character fills the side panel.
 
 ## Adding a view (the cheap way)
 

@@ -4,16 +4,22 @@
 //   • CCGS roster            → studio rooms + roles          (roster.json, generated from .claude/agents)
 //   • Orca                   → supervised workers            (`orca orchestration worker-list|terminal list|worktree list`)
 //   • Orca task specs        → role matching per worker      (`orca orchestration task-list --from $ORCA_COORDINATOR`)
-//   • hermes kanban          → persistent task board         (`hermes kanban list|stats`)
+//   • hermes kanban          → persistent task board         (`hermes kanban list`)
 //   • CCGS subagent audit    → real role activity            (`$CCGS_ROOT/production/session-logs/agent-audit.log`)
 //
 // Run: bun run server.ts      (env: PORT, ORCA_COORDINATOR, CCGS_ROOT, AGENT_STUDIO_AUDIT)
+//
+// Every /state read spawns CLI processes (~1 s each, hermes is a Python start-up). Several browser
+// tabs polling every 2 s therefore used to queue behind each other and the pages sat on
+// "Connecting…". Collects are now shared across clients: one collect per TTL, concurrent callers
+// join the in-flight promise.
 //
 // Boundary contract: every CLI/JSON shape below mirrors what the producer emits today.
 // Fields are optional because a producer may add or omit keys between versions; mapping
 // coerces each one to `| null`.
 const DIR = import.meta.dir;
 const PORT = Number(process.env.PORT ?? 8787);
+const TTL_MS = Number(process.env.AGENT_STUDIO_TTL_MS ?? 1500);
 
 interface OrcaWorkerRow {
   dispatchId?: string;
@@ -70,7 +76,7 @@ interface StudioState {
   terminals: TerminalView[];
   worktrees: WorktreeView[];
   kanban: Record<string, unknown>[];
-  kanbanStats: Record<string, unknown>;
+  kanbanStats: Record<string, number>;
   audit: { source: string | null; events: AuditEvent[]; agents: AgentActivity[] };
 }
 
@@ -145,12 +151,12 @@ function auditLogPath(): string | null {
 
 async function collect(): Promise<StudioState> {
   const coordinator = process.env.ORCA_COORDINATOR;
-  const [workersRaw, terminalsRaw, worktreesRaw, kanbanRaw, kanbanStatsRaw, tasksRaw] = await Promise.all([
+  // `hermes kanban stats` is deliberately not spawned: lane counts are derived from `list`.
+  const [workersRaw, terminalsRaw, worktreesRaw, kanbanRaw, tasksRaw] = await Promise.all([
     run(["orca", "orchestration", "worker-list", "--include-remote", "--json"]),
     run(["orca", "terminal", "list", "--json"]),
     run(["orca", "worktree", "list", "--json"]),
     run(["hermes", "kanban", "list", "--json"]),
-    run(["hermes", "kanban", "stats", "--json"]),
     coordinator ? run(["orca", "orchestration", "task-list", "--from", coordinator, "--json"]) : Promise.resolve(""),
   ]);
 
@@ -159,7 +165,7 @@ async function collect(): Promise<StudioState> {
   const worktreeRows = (readJson(worktreesRaw) as { result?: { worktrees?: OrcaWorktreeRow[] } } | null)?.result?.worktrees ?? [];
   const taskRows = (readJson(tasksRaw) as { result?: { tasks?: OrcaTaskRow[] } } | null)?.result?.tasks ?? [];
   const kanbanParsed = readJson(kanbanRaw) as Record<string, unknown>[] | { tasks?: Record<string, unknown>[] } | null;
-  const stats = (readJson(kanbanStatsRaw) as { by_status?: Record<string, unknown> } | null)?.by_status ?? {};
+  const kanban = Array.isArray(kanbanParsed) ? kanbanParsed : (kanbanParsed?.tasks ?? []);
 
   const terminals: TerminalView[] = terminalRows.map((t) => ({
     handle: t.handle ?? null,
@@ -206,6 +212,12 @@ async function collect(): Promise<StudioState> {
     };
   });
 
+  const kanbanStats: Record<string, number> = {};
+  for (const t of kanban) {
+    const status = typeof t.status === "string" ? t.status : "todo";
+    kanbanStats[status] = (kanbanStats[status] ?? 0) + 1;
+  }
+
   const auditPath = auditLogPath();
   let audit: StudioState["audit"] = { source: auditPath, events: [], agents: [] };
   if (auditPath && (await Bun.file(auditPath).exists())) {
@@ -214,15 +226,20 @@ async function collect(): Promise<StudioState> {
     audit = { source: auditPath, events: events.slice(-40), agents: summarizeAudit(events) };
   }
 
-  return {
-    ts: Date.now(),
-    workers,
-    terminals,
-    worktrees,
-    kanban: Array.isArray(kanbanParsed) ? kanbanParsed : (kanbanParsed?.tasks ?? []),
-    kanbanStats: stats,
-    audit,
-  };
+  return { ts: Date.now(), workers, terminals, worktrees, kanban, kanbanStats, audit };
+}
+
+// One collect per TTL, shared by every client; concurrent callers join the in-flight promise.
+let cached: { at: number; data: StudioState } | null = null;
+let inflight: Promise<StudioState> | null = null;
+
+function stateForClients(): Promise<StudioState> {
+  if (cached && Date.now() - cached.at < TTL_MS) return Promise.resolve(cached.data);
+  if (inflight) return inflight;
+  inflight = collect()
+    .then((data) => { cached = { at: Date.now(), data }; return data; })
+    .finally(() => { inflight = null; });
+  return inflight;
 }
 
 Bun.serve({
@@ -231,7 +248,7 @@ Bun.serve({
   async fetch(req) {
     const path = new URL(req.url).pathname;
     if (path === "/state") {
-      return Response.json(await collect(), { headers: { "cache-control": "no-store" } });
+      return Response.json(await stateForClients(), { headers: { "cache-control": "no-store" } });
     }
     if (path === "/roster.json") {
       return new Response(Bun.file(`${DIR}/roster.json`), { headers: { "content-type": "application/json" } });
@@ -243,4 +260,4 @@ Bun.serve({
   },
 });
 
-console.log(`Agent Studio on http://127.0.0.1:${PORT}`);
+console.log(`Agent Studio on http://127.0.0.1:${PORT} (state TTL ${TTL_MS}ms)`);
