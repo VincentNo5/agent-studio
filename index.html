@@ -164,6 +164,10 @@
   .lrow .bar i{position:absolute;left:0;top:0;bottom:0;width:0;background:linear-gradient(90deg,color-mix(in srgb,var(--s) 30%,transparent),var(--s));
     box-shadow:0 0 9px -1px var(--s);transition:width .6s cubic-bezier(.2,.7,.2,1)}
   .lrow b{font:600 15px/1 var(--mono);font-variant-numeric:tabular-nums;color:var(--s);text-align:right}
+  .paseo-summary{margin-top:8px;padding:6px 9px;border:1px solid rgba(46,230,200,.22);background:linear-gradient(90deg,rgba(46,230,200,.06),transparent 72%);font:10px/1.35 var(--mono);color:var(--muted);overflow:hidden}
+  .paseo-summary strong{color:var(--teal);font-weight:600;letter-spacing:.12em}
+  .paseo-summary .paseo-counts{margin-left:8px;color:#b3c3d8}
+  .paseo-summary .paseo-names{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--fg)}
 
   /* ---------- 03 studio roster ---------- */
   .hero{flex:none;display:flex;align-items:center;gap:24px}
@@ -327,7 +331,7 @@
 
     <section class="panel p-board" style="--d:-4s" aria-labelledby="h-board">
       <div class="ph"><b>02</b><h2 id="h-board">Task Board</h2><em id="kb-note">Hermes persistent kanban</em></div>
-      <div class="pb"><div id="lanes"></div></div>
+      <div class="pb"><div id="lanes"></div><div class="paseo-summary" id="paseo-summary"><strong>PASEO AGENTS</strong><span class="paseo-counts"></span><span class="paseo-names">No Paseo agents</span></div></div>
     </section>
 
     <section class="panel p-roster" style="--d:-8s" aria-labelledby="h-roster">
@@ -472,6 +476,20 @@ function render(state) {
   setKpi("k-sub", subActive);
   setKpi("k-term", state.terminals.length);
   setKpi("k-kb", state.kanban.length);
+  // Paseo agent summary
+  const paseo = state.paseo || [];
+  const paseoSummary = document.getElementById("paseo-summary");
+  const paseoCounts = { running: 0, idle: 0, other: 0 };
+  for (const agent of paseo) {
+    const status = (agent.status || "").toLowerCase();
+    if (status === "running") paseoCounts.running++;
+    else if (status === "idle") paseoCounts.idle++;
+    else paseoCounts.other++;
+  }
+  paseoSummary.querySelector(".paseo-counts").textContent = `${paseo.length} total · ${paseoCounts.running} running · ${paseoCounts.idle} idle · ${paseoCounts.other} other`;
+  paseoSummary.querySelector(".paseo-names").textContent = paseo.length
+    ? paseo.slice(0, 3).map(agent => short(agent.name || "Unnamed agent", 24)).join(" · ")
+    : "No Paseo agents";
 
   if (!seeded) {
     seeded = true;

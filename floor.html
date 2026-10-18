@@ -133,6 +133,16 @@
   .taskWallRow[data-lane="blocked"] .taskWallLabel,.taskWallRow[data-lane="blocked"] .taskWallCount{fill:var(--alert)}
   .taskWallRow[data-lane="review"] .taskWallLabel,.taskWallRow[data-lane="review"] .taskWallCount,.taskWallRow[data-lane="scheduled"] .taskWallLabel,.taskWallRow[data-lane="scheduled"] .taskWallCount{fill:var(--amber)}
   .taskWallRow[data-lane="done"] .taskWallLabel,.taskWallRow[data-lane="done"] .taskWallCount{fill:#8da2be}
+  .paseoFrame{fill:rgba(6,11,20,.94);stroke:var(--teal);stroke-opacity:.7;stroke-width:.8}
+  .paseoHeading{fill:var(--teal);font:600 7px var(--mono);letter-spacing:.16em}
+  .paseoMeta{fill:var(--fg);font:600 6.5px var(--mono);font-variant-numeric:tabular-nums}
+  .paseoName,.paseoProvider{font:5.5px var(--mono);fill:var(--fg)}
+  .paseoProvider{fill:var(--muted)}
+  .paseoDot{fill:#718096}
+  .paseoAgent[data-status="running"] .paseoDot{fill:var(--teal);animation:pulse 1.4s ease-in-out infinite}
+  .paseoAgent[data-status="idle"] .paseoDot{fill:var(--cyan)}
+  .paseoAgent[data-status="error"] .paseoDot,.paseoAgent[data-status="failed"] .paseoDot{fill:var(--alert)}
+  .paseoEmpty{fill:var(--muted);font:5.5px var(--mono);letter-spacing:.04em}
   .taskWallRow .taskWallLabel,.taskWallRow .taskWallCount{fill:var(--cyan)}
   .exit{fill:var(--teal);font:700 7.5px var(--mono);letter-spacing:.12em}
   .bubble{fill:rgba(7,13,23,.92);stroke:var(--hair)}
@@ -589,6 +599,7 @@ function drawPlan() {
   });
   put(svg, `<rect class="vig" width="1240" height="824" fill="url(#vign)"/><g id="zoom" pointer-events="none" aria-hidden="true"></g>`);
   put(svg, `<g id="taskwall" aria-label="Task wall"><rect class="taskWallFrame" x="1070" y="648" width="150" height="130" rx="3"/><rect class="taskWallGlass" x="1075" y="653" width="140" height="120" rx="2"/><path class="taskWallRule" d="M1080 669h130"/><text class="taskWallHeading" x="1081" y="665">TASK WALL</text><text class="taskWallMeta" data-meta="kanban" x="1209" y="665" text-anchor="end">0</text><g class="taskWallRows"></g></g>`);
+  put(svg, `<g id="paseobay" aria-label="Paseo Bay"><path class="paseoFrame" d="M790 742h140l-7 6v48H790Z"/><path class="taskWallRule" d="M796 760h127"/><text class="paseoHeading" x="797" y="755">PASEO BAY</text><text class="paseoMeta" data-meta="paseo" x="915" y="755" text-anchor="end">0</text><g class="paseoRows"></g></g>`);
 }
 
 function updateTaskWall() {
@@ -618,11 +629,29 @@ function updateTaskWall() {
     rows.appendChild(row);
   });
 }
+function updatePaseoBay() {
+  const bay = document.getElementById("paseobay"), rows = bay.querySelector(".paseoRows"), agents = state.paseo || [];
+  rows.textContent = "";
+  bay.querySelector('[data-meta="paseo"]').textContent = String(agents.length);
+  if (!agents.length) {
+    rows.appendChild(mk("text", { class: "paseoEmpty", x: 797, y: 777 }, "PASEO BAY CLEAR — NO AGENTS"));
+    return;
+  }
+  agents.slice(0, 6).forEach((agent, i) => {
+    const y = 768 + i * 4.8, status = (agent.status || "other").toLowerCase();
+    const row = mk("g", { class: "paseoAgent", "data-status": status });
+    row.appendChild(mk("circle", { class: "paseoDot", cx: 799, cy: y - 1.7, r: 1.7 }));
+    row.appendChild(mk("text", { class: "paseoName", x: 804, y }, clip(agent.name || "Unnamed agent", 20)));
+    row.appendChild(mk("text", { class: "paseoProvider", x: 916, y, "text-anchor": "end" }, clip(agent.provider || "—", 12)));
+    rows.appendChild(row);
+  });
+}
 
 function paint(st) {
   state = st;
   updateTaskWall();
   const hits = activeRoles();
+  updatePaseoBay();
   const svg = document.getElementById("plan"), zl = document.getElementById("zoom"), vis = document.getElementById("vis");
 
   for (const w of svg.querySelectorAll(".worker[data-role]")) {
