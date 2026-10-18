@@ -313,10 +313,77 @@ function stateForClients(): Promise<StudioState> {
   return inflight;
 }
 
+// Access control: the studio has no login, so it is restricted by source address instead.
+// Default is loopback plus the Tailscale ranges (100.64.0.0/10 IPv4, fd7a:115c:a1e0::/48 IPv6),
+// which keeps it readable from this machine and from the tailnet while hiding it from whatever
+// LAN the machine is plugged into — the point being that this laptop moves between home and an
+// office network. Override with AGENT_STUDIO_ALLOW="cidr,cidr,...".
+const ALLOW = (process.env.AGENT_STUDIO_ALLOW ?? "127.0.0.0/8,::1/128,100.64.0.0/10,fd7a:115c:a1e0::/48")
+  .split(",")
+  .map((entry) => entry.trim())
+  .filter(Boolean);
+
+interface Cidr { bytes: number[]; bits: number }
+
+/** 4 bytes for IPv4 (including IPv4-mapped IPv6), 16 for IPv6; null when unparseable. */
+function ipToBytes(address: string): number[] | null {
+  const bare = address.startsWith("::ffff:") ? address.slice("::ffff:".length) : address;
+  if (bare.includes(".")) {
+    const parts = bare.split(".");
+    if (parts.length !== 4) return null;
+    const bytes = parts.map(Number);
+    return bytes.every((b) => Number.isInteger(b) && b >= 0 && b <= 255) ? bytes : null;
+  }
+  const [head, tail] = address.includes("::") ? address.split("::") : [address, undefined];
+  const headGroups = head ? head.split(":") : [];
+  const tailGroups = tail === undefined ? [] : tail ? tail.split(":") : [];
+  if (tail !== undefined && headGroups.length + tailGroups.length > 8) return null;
+  const groups = [...headGroups, ...Array(8 - headGroups.length - tailGroups.length).fill("0"), ...tailGroups];
+  if (groups.length !== 8) return null;
+  const bytes: number[] = [];
+  for (const group of groups) {
+    const value = parseInt(group || "0", 16);
+    if (!Number.isInteger(value) || value < 0 || value > 0xffff) return null;
+    bytes.push(value >> 8, value & 0xff);
+  }
+  return bytes;
+}
+
+function parseCidr(spec: string): Cidr | null {
+  const [address, lengthText] = spec.split("/");
+  const bytes = ipToBytes(address);
+  if (!bytes) return null;
+  const bits = lengthText === undefined ? bytes.length * 8 : Number(lengthText);
+  if (!Number.isInteger(bits) || bits < 0 || bits > bytes.length * 8) return null;
+  return { bytes, bits };
+}
+
+const ALLOWED = ALLOW.map(parseCidr).filter((entry): entry is Cidr => entry !== null);
+
+function isAllowed(address: string | null | undefined): boolean {
+  if (!address) return false;
+  const client = ipToBytes(address);
+  if (!client) return false;
+  return ALLOWED.some((net) => {
+    if (net.bytes.length !== client.length) return false;
+    for (let bit = 0; bit < net.bits; bit++) {
+      const mask = 1 << (7 - (bit % 8));
+      if ((client[bit >> 3] & mask) !== (net.bytes[bit >> 3] & mask)) return false;
+    }
+    return true;
+  });
+}
+
 Bun.serve({
   port: PORT,
   idleTimeout: 60,
-  async fetch(req) {
+  async fetch(req, server) {
+    if (!isAllowed(server.requestIP(req)?.address)) {
+      return new Response("Forbidden: source address is not on the allowlist.\n", {
+        status: 403,
+        headers: { "content-type": "text/plain; charset=utf-8" },
+      });
+    }
     const path = new URL(req.url).pathname;
     if (path === "/state") {
       return Response.json(await stateForClients(), { headers: { "cache-control": "no-store" } });
@@ -334,4 +401,4 @@ Bun.serve({
   },
 });
 
-console.log(`Agent Studio on http://127.0.0.1:${PORT} (state TTL ${TTL_MS}ms)`);
+console.log(`Agent Studio on http://127.0.0.1:${PORT} (state TTL ${TTL_MS}ms) — allow ${ALLOW.join(" ")}`);

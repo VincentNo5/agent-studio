@@ -168,6 +168,39 @@ hermes gateway restart     # after config changes
 This controls *hermes*, not omp; use it for "tell the machine to do X" rather than for
 interactive coding.
 
+## 5. Hardening (this machine is sometimes on an office LAN)
+
+Audited with `lsof -nP -iTCP -sTCP:LISTEN` on 2026-10-18; every listener that was reachable from
+the LAN, and what to do about it:
+
+| Listener | Exposure | Action |
+|---|---|---|
+| studio `*:8787` | no login at all | **fixed** — source allowlist (loopback + Tailscale ranges) |
+| `daily-reporting` server `*:3011` | a *company* project served to whoever is on the LAN | stop it, or bind it to loopback |
+| `daily-reporting` Vite `*:5174` (launched with `--host`) | same | drop `--host`, or stop it |
+| Orca runtime `ws://0.0.0.0:6768` | token-protected | acceptable; treat `~/.orca/.../orca-runtime.json`'s token as a secret |
+| Syncthing `*:22000` | TLS + device auth by design | acceptable |
+| macOS AirPlay `*:5000` / `*:7000`, `rapportd` | OS features | disable AirPlay Receiver in System Settings if you do not use it |
+| Paseo `127.0.0.1:6767`, magpie `127.0.0.1:3425` | loopback only | nothing to do |
+
+**Studio allowlist.** The studio has no login, so it now refuses any request whose source address
+is not in `AGENT_STUDIO_ALLOW` (default `127.0.0.0/8,::1/128,100.64.0.0/10,fd7a:115c:a1e0::/48` —
+loopback plus the Tailscale ranges). It stays readable from this machine and from the tailnet, and
+disappears from whatever LAN the laptop joins. Verified: `127.0.0.1` → 200, the tailnet IP → 200,
+and an instance configured without loopback → **403 Forbidden**.
+
+**Two commands need admin and are yours to run:**
+
+```bash
+sudo pmset -a sleep 0 womp 1        # stay reachable — only while on power
+# keys-only SSH; confirm key login works first (it does, verified 2026-10-18):
+printf '\nPasswordAuthentication no\n' | sudo tee -a /etc/ssh/sshd_config
+sudo launchctl kickstart -k system/com.openssh.sshd
+```
+
+Keep a local console available before disabling password auth: if the key is ever lost, remote
+access is gone with it.
+
 ## Quota routing (learned the hard way)
 
 | Account | Where it is spent | Guidance |
