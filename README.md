@@ -12,6 +12,10 @@ a lobby where Orca-supervised workers wait as visitors:
 
 ![Studio Tower](docs/floor.png)
 
+**Mobile** (`/mobile`) — phone-first single screen (390×844, no scrolling): quota bars, worker
+counts, active agents, rooms. This is the view to open from an iPhone; see
+[docs/REMOTE-CONTROL.md](docs/REMOTE-CONTROL.md).
+
 Built on top of [Claude Code Game Studios](https://github.com/donchitos/claude-code-game-studios)
 (CCGS) for its 49-role studio roster and its subagent audit hooks. No game development involved:
 the roster is used as the *organizational* model.
