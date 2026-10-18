@@ -72,6 +72,26 @@ tmux attach -t omp                  # after any disconnect
 omp                                 # inside tmux
 ```
 
+### Trap: non-interactive SSH shells do not read .zshrc
+
+`ssh host <command>` and mosh's remote `mosh-server` startup run **non-interactive** zsh, which
+never sources `.zshrc`/`.zprofile`. sshd hands them a minimal `PATH` without `/opt/homebrew/bin`,
+so `tmux` and `mosh-server` come back `command not found` and **mosh fails outright** with
+`Did not find mosh server startup message`. Measured here on 2026-10-18 before the fix:
+
+```
+$ ssh vincent@127.0.0.1 'tmux -V'
+zsh:1: command not found: tmux
+$ mosh vincent@127.0.0.1
+/opt/homebrew/bin/mosh: Did not find mosh server startup message.
+```
+
+Fixed by adding a plain PATH export to `~/.zshenv`, which every zsh reads:
+
+```sh
+export PATH="/opt/homebrew/bin:/opt/homebrew/sbin:$PATH"
+```
+
 **Why mosh + tmux and not plain SSH:** a phone switches between Wi-Fi and cellular, locks the
 screen, and gets backgrounded. Plain SSH drops the connection; mosh keeps the session alive
 across those changes, and tmux keeps the process alive even if the client dies.
