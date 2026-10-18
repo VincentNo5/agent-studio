@@ -2,6 +2,7 @@
 //
 // Sources (all read-only):
 //   • CCGS roster            → studio rooms + roles          (roster.json, generated from .claude/agents)
+//   • Paseo                  → live agents                   (`paseo ls --json`)
 //   • Orca                   → supervised workers            (`orca orchestration worker-list|terminal list|worktree list`)
 //   • Orca task specs        → role matching per worker      (`orca orchestration task-list --from $ORCA_COORDINATOR`)
 //   • hermes kanban          → persistent task board         (`hermes kanban list`)
@@ -9,7 +10,7 @@
 //
 // Run: bun run server.ts      (env: PORT, ORCA_COORDINATOR, CCGS_ROOT, AGENT_STUDIO_AUDIT)
 //
-// Every /state read spawns CLI processes (~1 s each, hermes is a Python start-up). Several browser
+// Every /state read spawns 6 CLI processes (~1 s each; hermes is a Python start-up). Several browser
 // tabs polling every 2 s therefore used to queue behind each other and the pages sat on
 // "Connecting…". Collects are now shared across clients: one collect per TTL, concurrent callers
 // join the in-flight promise.
@@ -17,6 +18,29 @@
 // Boundary contract: every CLI/JSON shape below mirrors what the producer emits today.
 // Fields are optional because a producer may add or omit keys between versions; mapping
 // coerces each one to `| null`.
+//
+interface PaseoAgentRow {
+  id?: string;
+  shortId?: string;
+  name?: string;
+  provider?: string;
+  thinking?: string;
+  status?: string;
+  cwd?: string;
+  created?: string;
+}
+
+interface PaseoAgentView {
+  id: string | null;
+  shortId: string | null;
+  name: string | null;
+  provider: string | null;
+  thinking: string | null;
+  status: string | null;
+  cwd: string | null;
+  created: string | null;
+}
+
 const DIR = import.meta.dir;
 const PORT = Number(process.env.PORT ?? 8787);
 const TTL_MS = Number(process.env.AGENT_STUDIO_TTL_MS ?? 1500);
@@ -75,6 +99,7 @@ interface StudioState {
   workers: WorkerView[];
   terminals: TerminalView[];
   worktrees: WorktreeView[];
+  paseo: PaseoAgentView[];
   kanban: Record<string, unknown>[];
   kanbanStats: Record<string, number>;
   audit: { source: string | null; events: AuditEvent[]; agents: AgentActivity[] };
@@ -152,18 +177,21 @@ function auditLogPath(): string | null {
 async function collect(): Promise<StudioState> {
   const coordinator = process.env.ORCA_COORDINATOR;
   // `hermes kanban stats` is deliberately not spawned: lane counts are derived from `list`.
-  const [workersRaw, terminalsRaw, worktreesRaw, kanbanRaw, tasksRaw] = await Promise.all([
+  const [workersRaw, terminalsRaw, worktreesRaw, kanbanRaw, tasksRaw, paseoRaw] = await Promise.all([
     run(["orca", "orchestration", "worker-list", "--include-remote", "--json"]),
     run(["orca", "terminal", "list", "--json"]),
     run(["orca", "worktree", "list", "--json"]),
     run(["hermes", "kanban", "list", "--json"]),
     coordinator ? run(["orca", "orchestration", "task-list", "--from", coordinator, "--json"]) : Promise.resolve(""),
+    run(["paseo", "ls", "--json"]),
   ]);
 
   const workerRows = (readJson(workersRaw) as { result?: { workers?: OrcaWorkerRow[] } } | null)?.result?.workers ?? [];
   const terminalRows = (readJson(terminalsRaw) as { result?: { terminals?: OrcaTerminalRow[] } } | null)?.result?.terminals ?? [];
   const worktreeRows = (readJson(worktreesRaw) as { result?: { worktrees?: OrcaWorktreeRow[] } } | null)?.result?.worktrees ?? [];
   const taskRows = (readJson(tasksRaw) as { result?: { tasks?: OrcaTaskRow[] } } | null)?.result?.tasks ?? [];
+  const paseoParsed = readJson(paseoRaw);
+  const paseoRows = Array.isArray(paseoParsed) ? paseoParsed as PaseoAgentRow[] : [];
   const kanbanParsed = readJson(kanbanRaw) as Record<string, unknown>[] | { tasks?: Record<string, unknown>[] } | null;
   const kanban = Array.isArray(kanbanParsed) ? kanbanParsed : (kanbanParsed?.tasks ?? []);
 
@@ -176,6 +204,16 @@ async function collect(): Promise<StudioState> {
     name: w.displayName ?? null,
     branch: w.branch ?? null,
     path: w.path ?? null,
+  }));
+  const paseo: PaseoAgentView[] = paseoRows.map((agent) => ({
+    id: agent.id ?? null,
+    shortId: agent.shortId ?? null,
+    name: agent.name ?? null,
+    provider: agent.provider ?? null,
+    thinking: agent.thinking ?? null,
+    status: agent.status ?? null,
+    cwd: agent.cwd ?? null,
+    created: agent.created ?? null,
   }));
 
   // Runtime-built, string-keyed joins. Plain records: keys are strings, only get/set is used.
@@ -226,10 +264,10 @@ async function collect(): Promise<StudioState> {
     audit = { source: auditPath, events: events.slice(-40), agents: summarizeAudit(events) };
   }
 
-  return { ts: Date.now(), workers, terminals, worktrees, kanban, kanbanStats, audit };
+  return { ts: Date.now(), workers, terminals, worktrees, paseo, kanban, kanbanStats, audit };
 }
 
-// One collect per TTL, shared by every client; concurrent callers join the in-flight promise.
+// One collect (six CLI spawns) per TTL, shared by every client; concurrent callers join the in-flight promise.
 let cached: { at: number; data: StudioState } | null = null;
 let inflight: Promise<StudioState> | null = null;
 
