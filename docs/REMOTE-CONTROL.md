@@ -3,6 +3,48 @@
 Four ways to drive the agents on this machine from an iPhone, in the order most people want them.
 Facts below were measured on this Mac (2026-10-18); commands are copy-pasteable.
 
+## 0. The Mac moves between networks — design for that first
+
+This machine is sometimes at home and sometimes at the office, so **any address that belongs to
+one network is a trap**: the LAN IP (`192.168.1.63`) is home-specific, and `MacBook-Pro-2.local`
+only resolves on the same link and only where mDNS is not filtered — office Wi-Fi commonly blocks
+Bonjour *and* isolates clients from each other, so "same Wi-Fi" is not a reliable path there.
+
+| Where the phone is | How to reach the Mac | Works when |
+|---|---|---|
+| same home LAN | `MacBook-Pro-2.local` | home only |
+| same office LAN | usually **not** — mDNS filtered, client isolation | unreliable |
+| anywhere else (cellular, hotel, other office) | **Tailscale MagicDNS name** | everywhere |
+
+**Recommendation: make Tailscale the primary path.** Install it on the Mac
+(`brew install --cask tailscale`, sign in) and on the iPhone (App Store), then use the MagicDNS
+name (`<host>.<tailnet>.ts.net`) as the single host address in Termius/Blink. It resolves at home,
+at the office, and on cellular, and nothing needs port forwarding.
+
+### Three real obstacles on this machine
+
+1. **Sleep kills remote access.** Measured: `pmset -g` reports `sleep 1` — the Mac sleeps after one
+   minute of idle, and `womp` (wake for network access) is not enabled. Today only omp's power
+   assertion keeps it awake. For 24/7 reachability:
+   ```bash
+   sudo pmset -a sleep 0 womp 1      # never system-sleep; wake for network access
+   ```
+   Run this **only while plugged in** — a laptop on battery that never sleeps will die, and a
+   sleeping laptop is unreachable either way. The honest alternative is to accept that remote
+   access works only while the machine is awake (a `caffeinate -s` window, or keeping it on power).
+2. **GlobalProtect (the office VPN) is running on this machine.** Two VPN clients competing for
+   routes is the classic failure: Tailscale usually coexists, but a corporate policy can block its
+   UDP transport, in which case Tailscale falls back to DERP relays (works, slower). If the office
+   network misbehaves, test with GlobalProtect disconnected before blaming Tailscale.
+3. **The studio has no authentication.** The server binds `*:8787`, so on an office LAN anyone on
+   the subnet can read the fleet view (repository names, task titles, account names). Two fixes:
+   bind it to the Tailscale interface only (change the launchd plist's hostname to the Tailscale
+   IP) or put a token in front of it. On an untrusted network, do not leave it on `*`.
+
+Also worth doing once a key works: keys-only SSH —
+`PasswordAuthentication no` in `/etc/ssh/sshd_config` (needs sudo, then
+`sudo launchctl kickstart -k system/com.openssh.sshd`).
+
 ## 1. Paseo mobile app — drive agents (recommended)
 
 The Paseo daemon runs on this machine and relays to the phone; the phone app is
