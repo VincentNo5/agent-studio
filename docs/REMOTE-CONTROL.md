@@ -216,6 +216,31 @@ Check the live numbers any time:
 curl -s http://127.0.0.1:3425/v1/magpie/quotas | python3 -m json.tool
 ```
 
+### Seeing the numbers in the console
+
+`omp usage` prints every subscription window omp knows about, with reset countdowns and banked
+resets (`--json`, `--history`, `--redact`, `--provider <id>` also work).
+
+The status line shows it live once `statusLine.preset: custom` includes the built-in **`usage`**
+segment. That covers the accounts omp is authenticated with — Claude via Anthropic OAuth and
+opencode-go. **Codex and Cursor are served through magpie and are not omp accounts**, so they
+come from `~/.omp/agent/extensions/magpie-quota.ts`: it polls `/v1/magpie/quotas` every 60s and
+publishes one line through `ctx.ui.setStatus("magpie", …)`, which the built-in **`status`**
+segment renders. Segments are configured in `~/.omp/agent/config.yml`:
+
+```yaml
+statusLine:
+  preset: custom
+  leftSegments: [vim, model, mode, path, git, pr]
+  rightSegments: [usage, status, token_total, cost, context_pct]
+```
+
+Verified 2026-10-18 against a live TUI:
+
+```
+⏱ OpenCode Go · 5h 0% (4h 19m) · 7d 27% (3h) · mo 62% (15d 2h) < cursor cur5% · codex 5h2%
+```
+
 omp already falls back automatically (`plan`/`review` → codex → opencode-go); **Orca and
 Paseo do not** — pick the provider deliberately when you launch.
 
