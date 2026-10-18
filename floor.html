@@ -1,0 +1,699 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Agent Studio — Studio Tower</title>
+<style>
+  :root{
+    --bg:#05070d; --bg2:#0a0f18; --panel:rgba(13,20,32,.72); --hair:rgba(77,214,255,.22);
+    --cyan:#4dd6ff; --teal:#2ee6c8; --amber:#ffb648; --alert:#ff4d6d; --fg:#e6f1ff; --muted:#7d8fa8;
+    --mono:ui-monospace,SFMono-Regular,Menlo,monospace;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%;margin:0;overflow:hidden}
+  body{color:var(--fg);background:radial-gradient(1200px 620px at 18% -12%,rgba(77,214,255,.09),transparent 70%),radial-gradient(900px 520px at 100% 110%,rgba(46,230,200,.05),transparent 70%),linear-gradient(var(--bg2),var(--bg) 60%);font:13px/1.5 ui-sans-serif,-apple-system,"SF Pro Text","PingFang SC",Segoe UI,Roboto,sans-serif;-webkit-font-smoothing:antialiased}
+  /* 固定 1600×900 舞台，JS 按视口等比缩放并居中，页面永不滚动 */
+  #stage{position:absolute;left:0;top:0;width:1600px;height:900px;transform-origin:0 0;display:flex;flex-direction:column}
+  /* 面板：玻璃底 + 发丝描边 + 四角括号（8 条 1px 渐变线叠在边框角上） */
+  .hud{--bc:rgba(77,214,255,.8);background:linear-gradient(var(--bc) 0 0) 0 0/12px 1px no-repeat,linear-gradient(var(--bc) 0 0) 0 0/1px 12px no-repeat,linear-gradient(var(--bc) 0 0) 100% 0/12px 1px no-repeat,linear-gradient(var(--bc) 0 0) 100% 0/1px 12px no-repeat,linear-gradient(var(--bc) 0 0) 0 100%/12px 1px no-repeat,linear-gradient(var(--bc) 0 0) 0 100%/1px 12px no-repeat,linear-gradient(var(--bc) 0 0) 100% 100%/12px 1px no-repeat,linear-gradient(var(--bc) 0 0) 100% 100%/1px 12px no-repeat,var(--hb,linear-gradient(180deg,rgba(16,26,40,.8),rgba(9,14,23,.72)));background-origin:border-box;border:1px solid var(--hair);box-shadow:inset 0 0 28px rgba(77,214,255,.05),0 18px 44px -24px #000}
+  header{flex:none;height:56px;display:flex;align-items:center;gap:20px;padding:0 18px;border-bottom:1px solid var(--hair);background:linear-gradient(180deg,rgba(13,20,32,.92),rgba(5,7,13,.5))}
+  .brand{display:flex;align-items:center;gap:12px}
+  .logo{position:relative;width:32px;height:32px;border-radius:50%;border:1px solid var(--hair);background:radial-gradient(circle,#effcff 0 13%,var(--cyan) 19%,rgba(77,214,255,.14) 33%,transparent 40% 51%,rgba(77,214,255,.6) 54%,transparent 59%);box-shadow:0 0 18px rgba(77,214,255,.35),inset 0 0 10px rgba(77,214,255,.3)}
+  .logo::after{content:"";position:absolute;inset:3px;border-radius:50%;border:1px dashed rgba(77,214,255,.55);animation:spin 18s linear infinite}
+  h1{margin:0;font:700 13px/1.2 var(--mono);letter-spacing:.24em}
+  .crumb{color:var(--muted);font:600 9.5px var(--mono);letter-spacing:.18em}
+  .live{display:inline-flex;align-items:center;gap:8px;padding:4px 12px 4px 10px;border:1px solid var(--hair);border-radius:2px;background:rgba(77,214,255,.04)}
+  .live i{width:7px;height:7px;border-radius:50%;background:var(--teal);box-shadow:0 0 0 3px rgba(46,230,200,.15),0 0 10px var(--teal);animation:pulse 2s ease-in-out infinite}
+  body.down .live i{background:var(--alert);box-shadow:0 0 0 3px rgba(255,77,109,.18);animation:none}
+  .sub{color:var(--muted);font:11px var(--mono);letter-spacing:.08em;font-variant-numeric:tabular-nums}
+  .kpis{margin-left:auto;display:flex;gap:8px}
+  .kpi{min-width:104px;padding:5px 12px 6px}
+  .kpi span{display:flex;align-items:center;gap:8px;color:var(--muted);font:600 9.5px var(--mono);letter-spacing:.18em}
+  .kpi span::before{content:"";width:5px;height:5px;transform:rotate(45deg);background:var(--c);box-shadow:0 0 8px var(--c)}
+  .kpi b{display:block;font:600 18px/1.2 var(--mono);color:var(--c);text-shadow:0 0 14px rgba(77,214,255,.35);font-variant-numeric:tabular-nums}
+  .wrap{flex:1;min-height:0;display:flex;gap:12px;padding:10px 12px}
+  .view{--hb:radial-gradient(120% 80% at 50% 0%,#0b1422,#05080e);position:relative;flex:none;width:1240px;height:824px;overflow:hidden}
+  .view::before{content:"";position:absolute;inset:0;z-index:1;pointer-events:none;background:repeating-linear-gradient(0deg,rgba(77,214,255,.028) 0 1px,transparent 1px 3px)}
+  .view::after{content:"";position:absolute;top:0;bottom:0;left:0;width:26%;z-index:1;pointer-events:none;background:linear-gradient(90deg,transparent,rgba(77,214,255,.055),transparent);transform:translateX(-100%);animation:sweep 12s linear infinite}
+  #plan{display:block;width:1240px;height:824px;user-select:none}
+  aside{flex:1;min-width:0;display:flex;flex-direction:column;gap:10px;overflow:hidden}
+  .card{flex:none;padding:12px 14px;overflow:hidden;backdrop-filter:blur(6px)}
+  .card.grow{flex:1;min-height:0;display:flex;flex-direction:column}
+  .card h2,.eyebrow{margin:0 0 8px;font:600 9.5px var(--mono);letter-spacing:.18em;color:var(--cyan)}
+  .eyebrow{margin-bottom:4px;opacity:.8}
+  #detail-title{margin-bottom:6px;font:600 15px/1.35 var(--mono);letter-spacing:0;color:var(--fg);word-break:break-all}
+  .row{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:5px 0;border-bottom:1px solid rgba(77,214,255,.08);font-size:12px}
+  .row:last-child{border-bottom:0}
+  .row>span{color:var(--muted);font:600 9.5px var(--mono);letter-spacing:.16em}
+  .row b{font-weight:500;text-align:right}
+  .role{font-family:var(--mono);font-size:11.5px}
+  .row>span.role{font:11.5px var(--mono);letter-spacing:0;color:var(--fg)}
+  .role.on{color:var(--teal)}
+  .role.on::before,#active .row span.role::before{content:"";display:inline-block;width:6px;height:6px;margin-right:8px;transform:rotate(45deg);background:var(--teal);box-shadow:0 0 8px var(--teal);vertical-align:1px}
+  #active{flex:1;min-height:0;overflow:hidden}
+  #active .row{height:26px;padding:0}
+  #active .row b{color:var(--muted);font:400 10px var(--mono);letter-spacing:.14em;text-transform:uppercase}
+  #active .more{color:var(--cyan);font:600 9.5px var(--mono);letter-spacing:.16em}
+  .hint{color:var(--muted);font-size:11.5px;line-height:1.55;margin:8px 0 10px}
+  #detail .hint{margin:8px 0 0;padding-top:8px;border-top:1px solid var(--hair);font-size:12px;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+  .lg{display:grid;grid-template-columns:1fr 1fr;gap:8px 12px;margin:0;padding:0;list-style:none;font:600 9.5px var(--mono);letter-spacing:.16em;color:var(--muted)}
+  .lg li{display:flex;align-items:center;gap:9px}
+  .lg i{flex:none;width:18px;height:11px;border-radius:2px}
+  .lg-idle{background:linear-gradient(135deg,#11203a,#060a12);border:1px solid rgba(77,214,255,.4)}
+  .lg-work{background:linear-gradient(135deg,#eafcff,#4dd6ff 45%,#147a9c);box-shadow:0 0 10px rgba(77,214,255,.7)}
+  .lg-busy{border:1px solid var(--teal);box-shadow:0 0 8px rgba(46,230,200,.6),inset 0 0 6px rgba(46,230,200,.35)}
+  .lg-vis{border:1px solid var(--amber);border-radius:5px!important;background:rgba(255,182,72,.12)}
+  .empty{color:var(--muted);font-size:12px}
+  a{color:var(--cyan);font:600 10.5px var(--mono);letter-spacing:.18em;text-decoration:none}
+  a:hover{text-shadow:0 0 10px var(--cyan)}
+  a:focus-visible{outline:1px solid var(--cyan);outline-offset:3px}
+
+  /* —— 楼层：2:1 等角斜投影的楼板、墙、玻璃、柱 —— */
+  #plan text{font-family:inherit}
+  .planTitle{fill:var(--muted);font:600 10px var(--mono);letter-spacing:.24em}
+  .floorNo{fill:rgba(77,214,255,.08);stroke:var(--cyan);stroke-width:.8;font:700 30px var(--mono);letter-spacing:.04em}
+  .floorSub{fill:var(--muted);font:600 8.5px var(--mono);letter-spacing:.18em}
+  .slabF{fill:url(#slabG);stroke:var(--hair)}
+  .slabR{fill:#060b14;stroke:var(--hair)}
+  .edge{fill:none;stroke:var(--cyan);stroke-width:1.2;stroke-opacity:.85}
+  .col{fill:url(#colG);stroke:var(--cyan);stroke-opacity:.35;stroke-width:.6}
+  .cap{fill:var(--cyan);opacity:.6}
+  .glassF{fill:rgba(77,214,255,.07);stroke:var(--cyan);stroke-opacity:.45;stroke-width:.6}
+  .doorF{fill:none;stroke:#bdefff;stroke-opacity:.6;stroke-width:1.1}
+  .roomBox,.lobbyFloor{fill:url(#isoGrid);stroke:var(--hair);transition:stroke .4s}
+  .roomBox.hot{stroke:var(--teal)}
+  .hotEdge{fill:none;stroke:var(--teal);stroke-width:6;stroke-linejoin:round;opacity:0;transition:opacity .5s}
+  .roomBox.hot~.hotEdge{opacity:.16}
+  .pool{opacity:.55;transition:opacity .6s}
+  .roomBox.hot~.pool{opacity:1}
+  .wall{fill:url(#wallG);stroke:var(--hair)}
+  .mull{stroke:var(--cyan);stroke-opacity:.1}
+  .wallTop{fill:none;stroke:var(--cyan);stroke-opacity:.6;stroke-width:1.2;transition:stroke .4s}
+  .roomBox.hot~.wallTop{stroke:var(--teal);stroke-opacity:1}
+  .endWall{fill:url(#endG);stroke:var(--hair)}
+  .glassSide{fill:rgba(77,214,255,.06);stroke:var(--cyan);stroke-opacity:.4;stroke-width:.6}
+  .brk{fill:none;stroke:var(--cyan);stroke-width:1.2;opacity:.75}
+  .roomBox.hot~.brk{stroke:var(--teal);opacity:1}
+  .roomTitle{fill:var(--fg);font-size:10.5px;font-weight:700;letter-spacing:.16em}
+  .roomMeta{fill:var(--muted);font:9px var(--mono);letter-spacing:.04em;font-variant-numeric:tabular-nums}
+  .roomBox.hot~.roomMeta{fill:var(--teal)}
+  .rcode{fill:var(--muted);font:8px var(--mono);letter-spacing:.14em;opacity:.75}
+  .rdot{fill:#23364b}
+  .roomBox.hot~.rdot{fill:var(--teal);animation:pulse 1.6s ease-in-out infinite}
+  .sign text{fill:var(--muted);font:600 7.5px var(--mono);letter-spacing:.16em}
+  .roomBox.hot~.sign text{fill:var(--teal)}
+  .wp{fill:rgba(77,214,255,.05);stroke:var(--hair)}
+  .bar{fill:var(--cyan);opacity:.35;transform-box:fill-box;transform-origin:50% 100%}
+  .roomBox.hot~.wscr .bar,.wscr.on .bar{fill:var(--teal);opacity:.75;animation:eq 1.8s ease-in-out infinite alternate}
+  .roomBox.hot~.wscr .bar:nth-of-type(odd),.wscr.on .bar:nth-of-type(odd){animation-delay:-.7s}
+  .wave{fill:none;stroke:var(--cyan);stroke-opacity:.55;stroke-width:.8}
+  .wscan{stroke:var(--teal);opacity:0}
+  .roomBox.hot~.wscr .wscan,.wscr.on .wscan{opacity:.85;animation:wscan 3.6s linear infinite}
+  .bt{fill:#132238;stroke:var(--cyan);stroke-opacity:.45;stroke-width:.5}
+  .br{fill:#070e19;stroke:var(--cyan);stroke-opacity:.2;stroke-width:.5}
+  .bf{fill:#0c1626;stroke:var(--cyan);stroke-opacity:.3;stroke-width:.5}
+  .neon{fill:rgba(46,230,200,.1);stroke:var(--teal);stroke-width:.9;stroke-linejoin:round}
+  .led{fill:var(--teal);animation:pulse 2.4s steps(2) infinite}
+  .led.l2{animation-delay:-.8s}
+  .led.l3{fill:var(--amber);animation-delay:-1.6s}
+  .hubRing{fill:none;stroke:var(--cyan);stroke-opacity:.35;stroke-dasharray:6 8;animation:march 6s linear infinite}
+  .hubRing.in{stroke-opacity:.22;stroke-dasharray:2 6;animation-direction:reverse}
+  .chev{fill:none;stroke:var(--cyan);stroke-opacity:.25;stroke-width:1.2}
+  .corridorLabel{fill:var(--muted);font:600 8.5px var(--mono);letter-spacing:.24em}
+  .exit{fill:var(--teal);font:700 7.5px var(--mono);letter-spacing:.12em}
+  .bubble{fill:rgba(7,13,23,.92);stroke:var(--hair)}
+  .v.on .bubble{stroke:var(--teal);animation:bub 2.2s ease-in-out infinite}
+  .visitorText{fill:var(--fg);font-size:10px;font-weight:600}
+  .visitorState{fill:var(--muted);font:8px var(--mono);letter-spacing:.1em}
+  .v.on .visitorState{fill:var(--teal)}
+  .vdot{fill:#33465c}
+  .vdot.wait{fill:var(--amber)}
+  .vdot.on{fill:var(--teal);animation:pulse 1.4s ease-in-out infinite}
+  .vpulse{fill:none;stroke:var(--teal);stroke-width:1.2;opacity:0;transform-box:fill-box;transform-origin:center}
+  .v.on .vpulse{animation:vp 1.8s ease-out infinite}
+  .vig{pointer-events:none}
+  .zPanel{fill:rgba(6,11,20,.94);stroke:var(--cyan);stroke-opacity:.45}
+  .zoomBox{animation:zin .2s cubic-bezier(.2,.8,.2,1) both}
+  .zoomFig{transform:scale(3)}
+  .zName{fill:var(--fg);font:600 8.5px var(--mono)}
+  .zRoom{fill:var(--cyan);font:600 7.5px var(--mono);letter-spacing:.22em}
+
+  /* —— 角色：空闲安静（暗屏、只眨眼）；.working 时全息屏亮、屏光、光环、逐行代码、打字、点头、眼睛转向屏幕 —— */
+  .worker[data-role]{cursor:pointer;outline:none}
+  .hit{fill:transparent}
+  .sel{fill:none;stroke:var(--cyan);stroke-width:1;opacity:0;transition:opacity .2s}
+  .worker[data-role]:hover .sel{opacity:.6}
+  .worker.picked .sel{opacity:1;fill:rgba(77,214,255,.1);stroke-dasharray:4 2}
+  .worker:focus-visible .sel{opacity:1;stroke:#fff}
+  .ring{opacity:0;transition:opacity .5s}
+  .worker.working .ring{opacity:1;animation:dash 2.4s linear infinite}
+  .screen{fill:url(#scrOff)}
+  .worker.working .screen{fill:url(#scrOn)}
+  .code{fill:none;stroke:#04384f;stroke-width:1;stroke-linecap:round;stroke-dasharray:12;stroke-dashoffset:12;opacity:0}
+  .worker.working .code{animation:code 3s infinite}
+  .worker.working .c2{animation-delay:.5s}
+  .worker.working .c3{animation-delay:1s}
+  .glow{opacity:0;pointer-events:none;transition:opacity .5s}
+  .worker.working .glow{opacity:1;animation:glow 3s ease-in-out infinite}
+  .eyes{transform-box:fill-box;transform-origin:center;animation:blink 6s infinite}
+  .look{transition:transform .4s}
+  .worker.working .look{transform:translate(.6px,.1px)}
+  .visitor.working .look{transform:translateY(.5px)}
+  .head{transform-box:fill-box;transform-origin:50% 100%}
+  .worker.working .head{animation:nod 2.6s ease-in-out infinite}
+  .worker.working .arm-l{animation:type .28s ease-in-out infinite alternate}
+  .worker.working .arm-r{animation:type .28s ease-in-out -.14s infinite alternate}
+  @keyframes type{from{transform:translateY(.3px)}to{transform:translateY(-1.3px)}}
+  @keyframes nod{0%,100%{transform:translate(0,0) rotate(0)}30%{transform:translate(.3px,.5px) rotate(2deg)}65%{transform:translate(.1px,.2px) rotate(-1deg)}}
+  @keyframes glow{0%,100%{opacity:.8}45%{opacity:1}52%{opacity:.86}}
+  @keyframes code{0%{opacity:1;stroke-dashoffset:12;animation-timing-function:steps(6)}25%,80%{opacity:.9;stroke-dashoffset:0}100%{opacity:0;stroke-dashoffset:0}}
+  @keyframes blink{0%,95%,100%{transform:scaleY(1)}97.5%{transform:scaleY(.1)}}
+  @keyframes dash{to{stroke-dashoffset:-16}}
+  @keyframes march{to{stroke-dashoffset:-140}}
+  @keyframes eq{from{transform:scaleY(.45)}to{transform:scaleY(1)}}
+  @keyframes wscan{to{transform:translateX(var(--bw))}}
+  @keyframes bub{50%{stroke-opacity:.35}}
+  @keyframes vp{from{opacity:.8;transform:scale(.4)}to{opacity:0;transform:scale(1.5)}}
+  @keyframes zin{from{opacity:0;transform:scale(.6)}}
+  @keyframes pulse{50%{opacity:.35}}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  @keyframes sweep{to{transform:translateX(430%)}}
+  @media (prefers-reduced-motion:reduce){
+    *,*::before,*::after{animation:none!important;transition:none!important}
+    .view::after{display:none}
+    .worker.working .code{opacity:.9;stroke-dashoffset:0}
+  }
+</style>
+</head>
+<body>
+<div id="stage">
+<header>
+  <div class="brand"><i class="logo"></i><div><h1>AGENT STUDIO</h1><div class="crumb">STUDIO TOWER · 3 FLOORS · ISO VIEW</div></div></div>
+  <span class="live"><i></i><span class="sub" id="sub">CONNECTING…</span></span>
+  <div class="kpis">
+    <div class="kpi hud" style="--c:var(--teal)"><span>WORKING</span><b id="k-work">0</b></div>
+    <div class="kpi hud" style="--c:var(--cyan)"><span>SUBAGENTS</span><b id="k-sub">0</b></div>
+    <div class="kpi hud" style="--c:var(--amber)"><span>VISITORS</span><b id="k-visit">0</b></div>
+    <div class="kpi hud" style="--c:var(--fg)"><span>KANBAN</span><b id="k-kb">0</b></div>
+  </div>
+</header>
+<div class="wrap">
+  <div class="view hud"><svg id="plan" viewBox="0 0 1240 824" role="img" aria-label="Isometric studio tower with three floors of anime-style agent characters"></svg></div>
+  <aside>
+    <section class="card hud">
+      <div class="eyebrow">ROLE DETAIL</div>
+      <h2 id="detail-title">Select a character</h2>
+      <div id="detail"><div class="empty">Click any figure on the floors. A lit screen means the role is working.</div></div>
+    </section>
+    <section class="card hud grow">
+      <h2>ACTIVE ROLES</h2>
+      <div id="active"><div class="empty">None</div></div>
+    </section>
+    <section class="card hud">
+      <h2>LEGEND</h2>
+      <ul class="lg"><li><i class="lg-idle"></i>IDLE</li><li><i class="lg-work"></i>WORKING</li><li><i class="lg-busy"></i>ROOM BUSY</li><li><i class="lg-vis"></i>VISITOR</li></ul>
+      <p class="hint">Lit screen + typing + hologram ring = working (source: CCGS audit stream or worker task text). Figures in the 1F lobby are Orca-supervised visiting workers. Hover to magnify, click or Tab to inspect.</p>
+      <a href="/">← OVERVIEW</a>
+    </section>
+  </aside>
+</div>
+</div>
+<script>
+// 塔楼：三块叠放的楼板（3F / 2F 放房间，1F 是来访大厅）。投影：宽度轴水平，进深轴按 2:1 斜率向右上退（X += d, Y -= d/2），高度轴竖直。
+const ISO = { X0: 64, L: 868, D: 300, HW: 56, T: 14, ROWS: [45, 135, 225], SU: 54, PAD: 18, MIN: 108 };
+const FLOORS = [
+  { name: "3F", y: 246, rooms: ["directors", "leads", "engineering", "design"] },
+  { name: "2F", y: 522, rooms: ["art", "audio", "narrative", "qa", "engines", "community"] },
+  { name: "1F", y: 798, rooms: [] },
+];
+const SETTLED = ["succeeded", "failed", "stopped", "cancelled"];
+const PAL = {
+  skin: ["#ffe6d5", "#fbd9c2", "#f3c9a8", "#e2ae88", "#c48d66", "#8f5f41"],
+  hair: ["#1b1d2b", "#2c2233", "#4a2c22", "#7b4a2e", "#c8964f", "#e9d08a", "#cfd6e2", "#e79ab9", "#2e4a8c", "#2a9d96", "#6d4fb3", "#a3313f"],
+  iris: ["#3b7dd8", "#7a4fc9", "#2f9e6e", "#a0572c", "#c8333f", "#d39a1c", "#2aa3b8", "#5a5f73"],
+  shirt: ["#f2f5fa", "#cfe3f7", "#3a5f9e", "#2e7d74", "#6b5bc4", "#b9485b", "#d9a441", "#47566e", "#87a9d6"],
+  jacket: ["#1c2433", "#262b38", "#2b2236", "#1d2e33", "#333845"],
+  tie: ["#4dd6ff", "#2ee6c8", "#ffb648", "#ff4d6d", "#9b7bff"],
+  pants: ["#1a2130", "#272a33", "#1e2a3b", "#2f2a3a"],
+};
+// 发型 [脑后层, 额前层]：0 长直发 1 双马尾 2 波波头 3 刺猬头 4 马尾 5 短发侧分 6 狼尾 7 丸子头
+const HAIRS = [["hb0", "hf0"], ["hb1", "hf1"], ["hb2", "hf2"], ["", "hf3"], ["hb4", "hf4"], ["", "hf5"], ["hb6", "hf6"], ["hb7", "hf0"]];
+// 服装按房间：directors 西装+领带、leads 西装外套、工程类衬衫、创作类开衫+蝴蝶结
+const OUTFIT = { directors: "suit", leads: "blazer", engineering: "shirt", engines: "shirt", qa: "shirt" };
+
+// 人物部件坐标系：精灵 56×62，落地点 (24,56)，头心 (18,12)。颜色走 CSS 变量（--k 肤 --h 发 --i 瞳 --s 衣 --j 外套 --t 点缀 --p 裤 --a 袖），<use> 影子树继承。
+const BANG = "M10.4 12C10 5 13.6 2 18 2s8 3 7.6 10l-1-2.6-1.2 1.2-1-2.6-1.8 1.8-1-2.4L18 9.6l-1.4-2.2-1.4 2.4-1.6-1.8-1 2.6-1.2-1.2Z";
+const LOCKS = "M10.4 10.4 11 19.6l1.4-6.4ZM25.6 10.4 25 19.6l-1.4-6.4Z";
+const FACE = "M11.2 10.2C11.2 5.6 14 3.6 18 3.6s6.8 2 6.8 6.6c0 4.4-3.2 8.4-6.8 9.2-3.6-.8-6.8-4.8-6.8-9.2Z";
+const BODY = "M9 38V27.6c0-4 2.6-6.2 6.4-6.6h5.2c3.8.4 6.4 2.6 6.4 6.6V38Z";
+const NECK = `<rect x="16.3" y="16.6" width="3.4" height="5.4" rx="1" style="fill:var(--k)"/><path d="M16.3 17.6h3.4v2q-1.7 1.2-3.4 0Z" fill="#3a1d1d" opacity=".28"/>`;
+const SHINE = `<path d="M12.8 5.4Q18 2.8 23.2 5.4" fill="none" stroke="#fff" stroke-opacity=".45" stroke-width=".6"/>`;
+const TIE = (cx, cy) => `<circle cx="${cx}" cy="${cy}" r="1.1" style="fill:var(--t)" stroke="none"/>`;
+/** 发片：底色 + 渐变阴影（顶部高光、发梢压暗）+ 细描边。 */
+const hairG = (id, d, extra = "") => `<g id="${id}" style="fill:var(--h)" stroke="#070910" stroke-opacity=".5" stroke-width=".35"><path d="${d}"/><path d="${d}" fill="url(#hairSh)" stroke="none"/>${extra}</g>`;
+/** 上身：脖子 + 圆肩躯干 + 侧光阴影 + 服装细节。 */
+const upper = (id, base, extra) => `<g id="${id}">${NECK}<path d="${BODY}" style="fill:var(${base})" stroke="#000" stroke-opacity=".35" stroke-width=".35"/><path d="${BODY}" fill="url(#clothSh)"/>${extra}</g>`;
+const arm = (id, d, hx, hy) => `<g id="${id}"><path d="${d}" style="stroke:var(--a)" stroke-width="3.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/><circle cx="${hx}" cy="${hy}" r="1.5" style="fill:var(--k)"/></g>`;
+
+const DEFS = `<defs>
+<pattern id="isoGrid" width="36" height="36" patternUnits="userSpaceOnUse" patternTransform="matrix(1 0 1 -.5 0 0)"><rect width="36" height="36" fill="#08111d"/><path d="M36 .5H0M.5 0v36" fill="none" stroke="#4dd6ff" stroke-opacity=".1"/></pattern>
+<linearGradient id="wallG" x2="0" y2="1"><stop offset="0" stop-color="#11203a" stop-opacity=".95"/><stop offset="1" stop-color="#091322" stop-opacity=".95"/></linearGradient>
+<linearGradient id="endG" x2="1"><stop offset="0" stop-color="#0a1424"/><stop offset="1" stop-color="#101d33"/></linearGradient>
+<linearGradient id="slabG" x2="0" y2="1"><stop offset="0" stop-color="#16263d"/><stop offset="1" stop-color="#070d17"/></linearGradient>
+<linearGradient id="colG"><stop offset="0" stop-color="#0c1828"/><stop offset=".5" stop-color="#1a3048"/><stop offset="1" stop-color="#0a1422"/></linearGradient>
+<linearGradient id="under" x2="0" y2="1"><stop offset="0" stop-color="#4dd6ff" stop-opacity=".14"/><stop offset="1" stop-color="#4dd6ff" stop-opacity="0"/></linearGradient>
+<radialGradient id="pool"><stop offset="0" stop-color="#4dd6ff" stop-opacity=".1"/><stop offset="1" stop-color="#4dd6ff" stop-opacity="0"/></radialGradient>
+<radialGradient id="vign" r=".75"><stop offset=".55" stop-opacity="0"/><stop offset="1" stop-opacity=".5"/></radialGradient>
+<linearGradient id="hairSh" x2="0" y2="1"><stop offset="0" stop-color="#fff" stop-opacity=".28"/><stop offset=".3" stop-color="#fff" stop-opacity="0"/><stop offset="1" stop-color="#000" stop-opacity=".42"/></linearGradient>
+<linearGradient id="faceSh" x2="0" y2="1"><stop offset="0" stop-color="#7a3a3a" stop-opacity=".35"/><stop offset=".38" stop-color="#7a3a3a" stop-opacity="0"/><stop offset=".85" stop-opacity="0"/><stop offset="1" stop-opacity=".14"/></linearGradient>
+<radialGradient id="blush"><stop offset="0" stop-color="#ff6f8a" stop-opacity=".55"/><stop offset="1" stop-color="#ff6f8a" stop-opacity="0"/></radialGradient>
+<linearGradient id="irisSh" x2="0" y2="1"><stop offset="0" stop-opacity=".55"/><stop offset=".5" stop-opacity="0"/><stop offset="1" stop-color="#fff" stop-opacity=".35"/></linearGradient>
+<linearGradient id="clothSh"><stop offset="0" stop-color="#fff" stop-opacity=".14"/><stop offset=".45" stop-color="#fff" stop-opacity="0"/><stop offset="1" stop-opacity=".38"/></linearGradient>
+<linearGradient id="chairG" x2="0" y2="1"><stop offset="0" stop-color="#1d2a3c"/><stop offset="1" stop-color="#0c121c"/></linearGradient>
+<linearGradient id="scrOff" x2="1" y2="1"><stop offset="0" stop-color="#11203a" stop-opacity=".85"/><stop offset="1" stop-color="#060a12" stop-opacity=".85"/></linearGradient>
+<linearGradient id="scrOn" x2="1" y2="1"><stop offset="0" stop-color="#eafcff"/><stop offset=".4" stop-color="#4dd6ff"/><stop offset="1" stop-color="#147a9c"/></linearGradient>
+<radialGradient id="halo"><stop offset="0" stop-color="#4dd6ff" stop-opacity=".55"/><stop offset=".5" stop-color="#2ee6c8" stop-opacity=".16"/><stop offset="1" stop-color="#2ee6c8" stop-opacity="0"/></radialGradient>
+<radialGradient id="ringF"><stop offset=".55" stop-color="#2ee6c8" stop-opacity="0"/><stop offset="1" stop-color="#2ee6c8" stop-opacity=".35"/></radialGradient>
+<linearGradient id="beam" x2="0" y2="1"><stop offset="0" stop-color="#2ee6c8" stop-opacity="0"/><stop offset="1" stop-color="#2ee6c8" stop-opacity=".16"/></linearGradient>
+<g id="face"><g style="fill:var(--k)"><ellipse cx="11.3" cy="12" rx="1.1" ry="1.7"/><ellipse cx="24.7" cy="12" rx="1.1" ry="1.7"/><path d="${FACE}" stroke="#4a2020" stroke-opacity=".4" stroke-width=".35"/></g><path d="${FACE}" fill="url(#faceSh)"/><ellipse cx="14.1" cy="15" rx="1.9" ry="1.1" fill="url(#blush)"/><ellipse cx="21.9" cy="15" rx="1.9" ry="1.1" fill="url(#blush)"/><path d="M18.4 13.7l-.5 1.2h.7" fill="none" stroke="#a0564a" stroke-opacity=".6" stroke-width=".4" stroke-linecap="round"/><path d="M16.9 16.8q1.1.6 2.2 0" fill="none" stroke="#7a2c38" stroke-width=".5" stroke-linecap="round"/></g>
+<g id="sclera" fill="#f8fbff"><ellipse cx="15" cy="12.2" rx="1.8" ry="1.75"/><ellipse cx="21" cy="12.2" rx="1.8" ry="1.75"/></g>
+<g id="irisE"><ellipse cx="15.1" cy="12.4" rx="1.3" ry="1.65"/><ellipse cx="21.1" cy="12.4" rx="1.3" ry="1.65"/></g>
+<g id="iris"><use href="#irisE" style="fill:var(--i)"/><use href="#irisE" fill="url(#irisSh)"/><g fill="#0a0912"><ellipse cx="15.15" cy="12.55" rx=".55" ry=".85"/><ellipse cx="21.15" cy="12.55" rx=".55" ry=".85"/></g><g fill="#fff"><circle cx="14.55" cy="11.55" r=".5"/><circle cx="20.55" cy="11.55" r=".5"/><circle cx="15.6" cy="13.35" r=".22"/><circle cx="21.6" cy="13.35" r=".22"/></g></g>
+<g id="lash0" fill="none" stroke="#1a1320" stroke-linecap="round"><path d="M13.1 11.3q1.9-1.7 3.9-.4M19 10.9q2-1.3 3.9.4" stroke-width=".75"/><path d="M14 14.1h1.6M20.4 14.1h1.6" stroke-opacity=".45" stroke-width=".35"/></g>
+<g id="lash1" fill="none" stroke="#1a1320" stroke-linecap="round"><path d="M12.7 11.8q1.8-2 4.4-.9M18.9 10.9q2.6-1.1 4.4.9M12.7 11.8l-.6-.7M23.3 11.8l.6-.7" stroke-width=".85"/><path d="M14 14.1h1.6M20.4 14.1h1.6" stroke-opacity=".45" stroke-width=".35"/></g>
+<path id="brows" d="M13.4 9.4q1.6-.9 3.1-.3M19.5 9.1q1.5-.6 3.1.3" fill="none" style="stroke:var(--h)" stroke-width=".65" stroke-linecap="round"/>
+<g id="specs" fill="#a0e6ff" fill-opacity=".12" stroke="#202838" stroke-width=".45"><rect x="12.9" y="10.4" width="4.4" height="3.4" rx="1"/><rect x="18.7" y="10.4" width="4.4" height="3.4" rx="1"/><path d="M17.3 11.6h1.4" fill="none"/></g>
+${hairG("hb0", "M10.6 8C10.4 3.4 14 1.8 18 1.8s7.6 1.6 7.4 6.2l1.2 22c-2.6 1-5.1 1-6.6 0l-.4-11h-3.2l-.4 11c-1.5 1-4 1-6.6 0Z")}
+${hairG("hf0", BANG + LOCKS, SHINE)}
+${hairG("hb1", "M10.8 6.6C6 7 4.8 14.6 6.2 22.4c.6 3 2 4.6 2.8 5.2-.6-5 .2-11 2.6-16.4ZM25.2 6.6c4.8.4 6 8 4.6 15.8-.6 3-2 4.6-2.8 5.2.6-5-.2-11-2.6-16.4ZM10.8 11C10.6 4 14 2 18 2s7.4 2 7.2 9Z", TIE(10.6, 6.8) + TIE(25.4, 6.8))}
+${hairG("hf1", BANG, SHINE)}
+${hairG("hb2", "M9.8 10C9.6 3.6 13.6 1.6 18 1.6s8.4 2 8.2 8.4c.2 4 .2 7-.4 9.6-1.4.8-3 .6-3.8-.2H14c-.8.8-2.4 1-3.8.2-.6-2.6-.6-5.6-.4-9.6Z")}
+${hairG("hf2", "M10.2 12C9.8 4.6 13.6 2 18 2s8.2 2.6 7.8 10l-1-3c-3.8.6-9.8.6-13.6 0ZM10.2 9c-.2 5 .2 8.4 1.4 10.4l1-.2c-.8-3.2-1-7.2-.6-9.8ZM25.8 9c.2 5-.2 8.4-1.4 10.4l-1-.2c.8-3.2 1-7.2.6-9.8Z", SHINE)}
+${hairG("hf3", "M10.6 12 8.6 9l1.8-.6-1.6-3.6 3.2.4-.4-3.6 3.2 1.6 1.4-3.4 2.2 2.8 2.2-3 1.2 3.4 3.2-1.6-.4 3.6 3 .2-1.8 3.2 1.8.8-2.2 2.8-.8-2.4-1.4.8-.6-2.2-1.6 1.4-1-2-1.6 2.2-1.4-2.2-1.6 2-1.2-1.6-1.4 2.4-1.2-1Z", SHINE)}
+${hairG("hb4", "M22 4c6-1 8.6 4 7.6 12-.6 5-2 8-3.6 9.6.6-4.6.2-10.6-1.8-15.6Z", TIE(24.4, 5))}
+${hairG("hf4", "M10.4 12C10 4.8 13.6 2 18 2s8 2.8 7.6 10l-.8-2.8c-2.4.2-5.8-.8-8.4-2.8-.8 2.2-3 3.6-5.2 4.2ZM10.4 10.4 11 17.6l1.2-5Z", SHINE)}
+${hairG("hf5", "M10.6 11.6C10 4.6 13.6 2.2 18 2.2s8 2.4 7.4 9.4l-.8-3.2c-.6-1-1.4-1.6-2.4-1.8-2.6 1.6-6.6 2.2-9.8 2-.8.8-1.4 1.8-1.8 3Z", SHINE)}
+${hairG("hb6", "M10 9C9.6 3.4 13.8 1.6 18 1.6s8.4 1.8 8 7.4l.8 8-2-1 .2 3.6-2.4-2-4.6.4-4.6-.4-2.4 2 .2-3.6-2 1Z")}
+${hairG("hf6", "M10.4 12C10 4.8 13.6 2 18 2s8 2.8 7.6 10l-1.2-3.4-.8 2.6-1.6-3.6-1.6 2.8-1-3.2-2.2 4.2-1.4-4-1.2 2.2-1.4-2-1.8 3Z", SHINE)}
+${hairG("hb7", "M14.6 1.4a3.4 3.4 0 1 0 6.8 0 3.4 3.4 0 1 0-6.8 0Z")}
+${upper("shirt", "--s", `<path d="M15.2 21 18 24.6l-1.6 1.6-2.6-3.6ZM20.8 21 18 24.6l1.6 1.6 2.6-3.6Z" fill="#fff" fill-opacity=".85" stroke="#000" stroke-opacity=".2" stroke-width=".3"/><path d="M18 24.6V38M21.2 28.4h3.2" stroke="#000" stroke-opacity=".25" stroke-width=".45"/>`)}
+${upper("suit", "--j", `<path d="M15 21l3 7.4 3-7.4Z" fill="#f2f6fb"/><path d="M18 22.2l-.9 1.1.9 5.2.9-5.2Z" style="fill:var(--t)"/><path d="M14.6 21.2 18 28.8l-4.6-3.4 1.2-1.6ZM21.4 21.2 18 28.8l4.6-3.4-1.2-1.6Z" fill="#000" opacity=".35"/><path d="M21.8 29.8h2.6" style="stroke:var(--t)" stroke-width=".9"/>`)}
+${upper("blazer", "--j", `<path d="M14.8 21l3.2 9 3.2-9Z" style="fill:var(--s)"/><path d="M15.4 21 18 23.8l-1.4 1.2-1.8-3.2ZM20.6 21 18 23.8l1.4 1.2 1.8-3.2Z" fill="#f2f6fb"/><path d="M14.4 21.2 18 30.6l-4.8-4 1-1.8ZM21.6 21.2 18 30.6l4.8-4-1-1.8Z" fill="#000" opacity=".3"/>`)}
+${upper("cardigan", "--s", `<path d="M15.2 21l2.8 6.4 2.8-6.4Z" fill="#f2f6fb"/><path d="M18 22.6l-2.4-1.2v2.4Zm0 0 2.4-1.2v2.4Z" style="fill:var(--t)"/><path d="M18 29.6v.1M18 32.6v.1M18 35.6v.1" stroke="#000" stroke-opacity=".35" stroke-linecap="round" stroke-width=".9"/>`)}
+${arm("armL", "M10.8 24 9.6 31.2l3.6 4.4", 13.8, 36)}${arm("armR", "M25.2 24 26.4 31.2l-3.6 4.4", 22.2, 36)}
+${arm("armLs", "M10.8 24 9.6 30.4l2.6 2", 12.6, 32.6)}${arm("armRs", "M25.2 24 26.4 30.4l-2.6 2", 23.4, 32.6)}
+<g id="chair"><ellipse cx="24" cy="56" rx="20" ry="7" fill="#000" opacity=".45"/><ellipse cx="18" cy="55.4" rx="8" ry="3" fill="none" stroke="#1d2c3e" stroke-width="1.4"/><path d="M18 45v10" stroke="#24364a" stroke-width="2"/><rect x="8.2" y="14.6" width="19.6" height="27" rx="6" fill="url(#chairG)" stroke="#4dd6ff" stroke-opacity=".28" stroke-width=".5"/><rect x="8" y="41.4" width="20" height="4.2" rx="2.1" fill="#142030"/></g>
+<g id="legs"><g style="fill:var(--p)"><rect x="12.4" y="41" width="4.8" height="13.6" rx="2"/><rect x="18.8" y="41" width="4.8" height="13.6" rx="2"/></g><g fill="#0b0e15"><ellipse cx="14.8" cy="55" rx="3.1" ry="1.5"/><ellipse cx="21.2" cy="55" rx="3.1" ry="1.5"/></g></g>
+<g id="legsS"><g style="fill:var(--p)"><rect x="12.6" y="36.6" width="4.8" height="17.4" rx="2"/><rect x="18.6" y="36.6" width="4.8" height="17.4" rx="2"/></g><g fill="#0b0e15"><ellipse cx="15" cy="54.4" rx="3.2" ry="1.5"/><ellipse cx="21" cy="54.4" rx="3.2" ry="1.5"/></g></g>
+<g id="desk"><path d="M1 42v15M43 42v15M53 37v14" stroke="#1a2a3c" stroke-width="1.4"/><path d="M0 38h44l10-5H10Z" fill="#132033" stroke="#4dd6ff" stroke-opacity=".5" stroke-width=".45" stroke-linejoin="round"/><path d="M0 38h44v4H0Z" fill="#0b1422"/><path d="M44 38l10-5v4l-10 5Z" fill="#08101b"/><path d="M.4 38.2h43.4" stroke="#4dd6ff" stroke-opacity=".7" stroke-width=".5"/><path d="M11 37.4h14l2.4-1.2h-14Z" fill="#0b121c" stroke="#4dd6ff" stroke-opacity=".4" stroke-width=".3"/><ellipse cx="30" cy="36.4" rx="1.3" ry=".7" fill="#18263a"/><ellipse cx="40.5" cy="33.6" rx="4" ry="1.5" fill="#0b1a2a" stroke="#4dd6ff" stroke-opacity=".5" stroke-width=".4"/><path d="M33.4 36.4 46.6 29.8V14.6L33.4 21.2Z" fill="#4dd6ff" fill-opacity=".05" stroke="#4dd6ff" stroke-opacity=".45" stroke-width=".45" stroke-linejoin="round"/></g>
+<g id="glowS"><ellipse cx="37" cy="25" rx="18" ry="14" fill="url(#halo)"/><ellipse cx="34" cy="36" rx="16" ry="3.4" fill="url(#halo)"/></g>
+<ellipse id="glowT" cx="18" cy="29" rx="13" ry="11" fill="url(#halo)"/>
+<g id="ring"><path d="M-2 56 5 6h38l7 50Z" fill="url(#beam)"/><ellipse cx="24" cy="56" rx="26" ry="10" fill="url(#ringF)" stroke="#2ee6c8" stroke-width=".9" stroke-dasharray="5 3"/><ellipse cx="24" cy="56" rx="17" ry="6.5" fill="none" stroke="#4dd6ff" stroke-opacity=".6" stroke-width=".5" stroke-dasharray="2 2"/></g>
+<rect id="tablet" x="12.2" y="28.6" width="11.6" height="7.6" rx="1.2" fill="#0b121c" stroke="#4dd6ff" stroke-opacity=".5" stroke-width=".45"/>
+<g id="badge"><path d="M16 21.4l4.8 2.4" stroke="#ffb648" stroke-width=".45"/><rect x="20" y="23.4" width="3.4" height="4.4" rx=".6" fill="#e6f1ff"/><rect x="20" y="23.4" width="3.4" height="1.4" rx=".5" fill="#ffb648"/></g>
+<g id="prop0"><rect x="3" y="33" width="3.6" height="4" rx=".8" style="fill:var(--t)"/><path d="M6.6 34h.6a1 1 0 0 1 0 2h-.6" style="stroke:var(--t)" stroke-width=".6" fill="none"/></g>
+<g id="prop1" stroke="#4dd6ff"><path d="M5 30.6l2.4 1.3v2.8L5 36l-2.4-1.3v-2.8Z" fill="#4dd6ff" fill-opacity=".14" stroke-width=".4"/><path d="M2.6 31.9 5 33.2l2.4-1.3M5 33.2V36" fill="none" stroke-width=".3" stroke-opacity=".7"/></g>
+<g id="prop2" stroke="#2ee6c8" stroke-width=".45"><path d="M3 33h4l-.5 3.6h-3Z" fill="none"/><path d="M5 33c-1.4-.6-2-2-1.6-3.2 1 .3 1.6 1 1.6 1.8.2-1.4.8-2.4 1.8-2.8.2 1.6-.4 3.2-1.8 4.2Z" fill="#2ee6c8" fill-opacity=".25"/></g>
+</defs>`;
+let roster = null, state = null, selected = null, zoomSrc = null;
+
+const SVG = "http://www.w3.org/2000/svg";
+const mk = (tag, attrs, text) => {
+  const n = document.createElementNS(SVG, tag);
+  for (const k in attrs) n.setAttribute(k, attrs[k]);
+  if (text != null) n.textContent = text;
+  return n;
+};
+/** 追加一段静态 SVG 标记（只拼接调色板/几何数字，名字等数据一律走 mk 的 textContent）。 */
+const put = (el, markup) => (el.insertAdjacentHTML("beforeend", markup), el);
+const isPresent = (w) => w.liveness === "live" || w.dispatchStatus === "pending";
+const isWorking = (w) => isPresent(w) && !SETTLED.includes(w.workerState || "");
+const units = (ch) => (ch.charCodeAt(0) > 0x2e80 ? 2 : 1);
+/** 按显示宽度截断：CJK 记 2 个单位，超出加省略号。 */
+const clip = (s, max) => {
+  let n = 0, out = "";
+  for (const ch of String(s)) { n += units(ch); if (n > max) return out + "…"; out += ch; }
+  return out;
+};
+/** 按显示宽度折成两行，第二行溢出加省略号。 */
+const wrap = (s, max) => {
+  const first = clip(s, max);
+  if (!first.endsWith("…")) return [first, ""];
+  const head = first.slice(0, -1);
+  return [head, clip(String(s).slice(head.length), max)];
+};
+
+// —— 投影 ——：u 沿楼板宽度（水平），d 为进深（0 = 前沿玻璃，D = 后墙），z 为高度。
+const XY = (f, u, d, z = 0) => [ISO.X0 + u + d, f.y - d / 2 - z];
+const P = (f, u, d, z = 0) => XY(f, u, d, z).map((n) => +n.toFixed(1)).join(" ");
+const flat = (f, u0, u1, d0, d1) => `M${P(f, u0, d0)}L${P(f, u1, d0)}L${P(f, u1, d1)}L${P(f, u0, d1)}Z`;
+const side = (f, u, d0, d1, z) => `M${P(f, u, d0)}L${P(f, u, d1)}L${P(f, u, d1, z)}L${P(f, u, d0, z)}Z`;
+/** 等角小盒子：x,y = 前面左下角，w 宽 h 高，dd 进深（屏幕上向右上退 dd、dd/2）。画右侧面、顶面、正面三片。 */
+const isoBox = (x, y, w, h, dd, inner = "") => `<g><path class="br" d="M${x + w} ${y}l${dd} ${-dd / 2}v${-h}l${-dd} ${dd / 2}Z"/><path class="bt" d="M${x} ${y - h}l${dd} ${-dd / 2}h${w}l${-dd} ${dd / 2}Z"/><path class="bf" d="M${x} ${y}h${w}v${-h}h${-w}Z"/>${inner}</g>`;
+
+/** 角色名 → 稳定的外观（同一角色每次刷新长相一致）。 */
+function look(name) {
+  let h = 2166136261;
+  for (let i = 0; i < name.length; i++) h = Math.imul(h ^ name.charCodeAt(i), 16777619);
+  h ^= h >>> 15; h = Math.imul(h, 0x2c1b3c6d); h ^= h >>> 12; h >>>= 0;
+  const pick = (arr, s) => arr[(h >>> s) % arr.length];
+  return {
+    h, hair: HAIRS[(h >>> 9) % HAIRS.length], lash: (h >>> 20) & 1, specs: (h >>> 18) % 4 === 0, prop: (h >>> 22) % 3,
+    vars: `--k:${pick(PAL.skin, 0)};--h:${pick(PAL.hair, 3)};--i:${pick(PAL.iris, 13)};--s:${pick(PAL.shirt, 6)};--j:${pick(PAL.jacket, 27)};--t:${pick(PAL.tie, 16)};--p:${pick(PAL.pants, 24)}`,
+  };
+}
+
+/** 头部（.head 整组点头）：脸、眼（.eyes 眨眼：眼白 → .look 瞳孔看向屏幕 → 睫毛）、额前发、眉、眼镜。 */
+const head = (v) => `<g class="head"><use href="#face"/><g class="eyes" style="animation-delay:-${v.h % 6000}ms"><use href="#sclera"/><g class="look"><use href="#iris"/></g><use href="#lash${v.lash}"/></g>` +
+  `<use href="#${v.hair[1]}"/><use href="#brows"/>${v.specs ? `<use href="#specs"/>` : ""}</g>`;
+const backHair = (v) => (v.hair[0] ? `<use href="#${v.hair[0]}"/>` : "");
+
+/** 坐在等角办公桌后的小人（面向镜头的立牌精灵）：光环、椅子、腿、脑后发、上身、头、桌盒、桌面小物、屏光、全息屏与代码行、双手。 */
+function worker(x, y, agentName, roomName) {
+  const v = look(agentName), fit = OUTFIT[roomName] || "cardigan", coat = fit === "suit" || fit === "blazer";
+  const g = mk("g", { class: "worker", "data-role": agentName, transform: `translate(${x},${y})`, style: `${v.vars};--a:var(${coat ? "--j" : "--s"})`, tabindex: 0, role: "button", "aria-label": `${agentName} · ${roomName}` });
+  put(g, `<rect class="hit" x="-2" width="58" height="64"/><ellipse class="sel" cx="24" cy="56" rx="27" ry="10.5"/><use class="ring" href="#ring"/><use href="#chair"/><use href="#legs"/>` +
+    backHair(v) + `<use href="#${fit}"/>` + head(v) + `<use href="#desk"/><use href="#prop${v.prop}"/><use class="glow" href="#glowS"/>` +
+    `<path class="screen" d="M34.6 34.4 45.4 29V16.4L34.6 21.8Z"/><path class="code" d="M35.8 24.4l7.6-3.8"/><path class="code c2" d="M35.8 27.4l8.6-4.3"/><path class="code c3" d="M37.4 30l5.6-2.8"/>` +
+    `<use class="arm-l" href="#armL"/><use class="arm-r" href="#armR"/>`);
+  g.appendChild(mk("title", {}, `${agentName} · ${roomName}`));
+  const choose = () => { selected = agentName; if (state) paint(state); };
+  const show = () => zoom(g, roomName), hide = () => zoomSrc === g && zoom(null);
+  g.addEventListener("click", choose);
+  g.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); choose(); } });
+  g.addEventListener("pointerenter", show);
+  g.addEventListener("pointerleave", hide);
+  g.addEventListener("focus", show);
+  g.addEventListener("blur", hide);
+  return g;
+}
+
+/** 放大镜：把悬停/聚焦的小人克隆进顶层 #zoom，CSS scale(3) 展示五官与服装细节；位置夹在画布内。 */
+function zoom(g, room) {
+  const z = document.getElementById("zoom");
+  z.textContent = "";
+  zoomSrc = g;
+  if (!g) return;
+  const m = g.transform.baseVal.consolidate().matrix;
+  const cx = Math.min(1140, Math.max(100, m.e + 28)), cy = Math.min(702, Math.max(114, m.f + 30));
+  const fig = g.cloneNode(true);
+  for (const a of ["data-role", "tabindex", "role", "aria-label"]) fig.removeAttribute(a);
+  fig.setAttribute("class", "worker" + (g.classList.contains("working") ? " working" : ""));
+  fig.setAttribute("transform", "translate(-28 -30)");
+  fig.querySelector("title")?.remove();
+  const wrapG = mk("g", { transform: `translate(${cx} ${cy})` }), box = mk("g", { class: "zoomBox" }), s = mk("g", { class: "zoomFig" });
+  put(box, `<rect class="zPanel" x="-96" y="-110" width="192" height="228" rx="3"/><path class="brk" d="M-96-96v-14h14M82-110h14v14M96 104v14H82M-82 118h-14v-14"/>`);
+  s.appendChild(fig);
+  box.appendChild(s);
+  box.appendChild(mk("text", { class: "zRoom", y: -98, "text-anchor": "middle" }, room.toUpperCase()));
+  box.appendChild(mk("text", { class: "zName", y: 110, "text-anchor": "middle" }, g.dataset.role));
+  wrapG.appendChild(box);
+  z.appendChild(wrapG);
+}
+
+/** 站着的小人（1F 大厅里的来访工人）：访客证、手持平板（.screen），工作时同样亮屏打字、脚下脉冲。 */
+function stander(x, y, label, working) {
+  const v = look(label);
+  const g = mk("g", { class: "worker visitor" + (working ? " working" : ""), transform: `translate(${x},${y})`, style: `${v.vars};--a:var(--s)` });
+  put(g, `<ellipse cx="18" cy="56" rx="11" ry="4" fill="#000" opacity=".5"/><ellipse class="vpulse" cx="18" cy="56" rx="18" ry="7"/>` +
+    backHair(v) + `<use href="#legsS"/><use href="#shirt"/><use href="#badge"/>` + head(v) +
+    `<use class="glow" href="#glowT"/><use href="#tablet"/><rect class="screen" x="13.1" y="29.5" width="9.8" height="5.8" rx=".6"/>` +
+    `<path class="code" d="M14.2 31.2h5"/><path class="code c2" d="M14.2 33.4h6.8"/><use class="arm-l" href="#armLs"/><use class="arm-r" href="#armRs"/>`);
+  return g;
+}
+
+function activeRoles() {
+  const hits = new Set();
+  for (const a of (state.audit?.agents || [])) if (a.active > 0) hits.add(a.agent);
+  for (const w of state.workers) {
+    if (!isWorking(w)) continue;
+    const blob = [w.taskTitle, w.taskSpec, w.label, w.worktreeName, w.agent].filter(Boolean).join(" ").toLowerCase();
+    for (const a of roster.agents) if (blob.includes(a.name.toLowerCase())) hits.add(a.name);
+  }
+  return hits;
+}
+
+/** 房间里的座位：固定三排进深（前/中/后），列数 = ceil(人数/3)，人少时居中那几排；返回楼板坐标 (u,d)。 */
+function seats(room, agents) {
+  const R = ISO.ROWS.length, cols = Math.max(1, Math.ceil(agents.length / R)), rows = Math.ceil(agents.length / cols) || 1;
+  const step = (room.w - 2 * ISO.PAD) / cols, first = Math.floor((R - rows) / 2);
+  return agents.map((a, i) => ({ agent: a, u: room.u0 + ISO.PAD + step * ((i % cols) + .5), d: ISO.ROWS[first + Math.floor(i / cols)] }));
+}
+
+/** 每层房间沿楼板宽度依次排开：每间先保证放得下自己的列数（不少于 MIN），剩余宽度按人数分；最后一间吃掉取整误差，恰好铺满 0–L 不重叠。 */
+function roomGeometry(perRoom) {
+  const out = [];
+  for (const f of FLOORS) {
+    if (!f.rooms.length) continue;
+    const need = f.rooms.map((r) => Math.max(ISO.MIN, Math.ceil((perRoom[r] || 0) / ISO.ROWS.length) * ISO.SU + 2 * ISO.PAD));
+    const sum = need.reduce((a, b) => a + b, 0), k = Math.min(1, ISO.L / sum);
+    const total = f.rooms.reduce((n, r) => n + (perRoom[r] || 0), 0) || 1, spare = Math.max(0, ISO.L - sum);
+    let u = 0;
+    f.rooms.forEach((name, i) => {
+      const w = i === f.rooms.length - 1 ? ISO.L - u : Math.round(need[i] * k + (spare * (perRoom[name] || 0)) / total);
+      out.push({ name, floor: f, u0: u, w });
+      u += w;
+    });
+  }
+  return out;
+}
+
+// 霓虹描边绿植（立牌）、服务器机柜（等角盒）、显示屏墙（波形 + 柱状 + 扫描线）
+const plant = (px, py) => `<g transform="translate(${px} ${py})"><ellipse rx="10" ry="4" fill="#000" opacity=".4"/><path class="neon" d="M-6-12h12l-1.6 11.4h-8.8Z"/>` +
+  `<path class="neon" d="M0-12C-1-20-6-24-10-25c1 5 4 9 10 13ZM0-12C1-21 5-26 10-27c-1 6-4 11-10 15ZM0-12c-.5-9 0-16 2-21 2 6 1 13-2 21Z"/></g>`;
+const rack = (x, y) => isoBox(x, y, 16, 38, 14, `<circle class="led" cx="${x + 4}" cy="${y - 31}" r="1.1"/><circle class="led l2" cx="${x + 4}" cy="${y - 21}" r="1.1"/><circle class="led l3" cx="${x + 4}" cy="${y - 11}" r="1.1"/>`);
+function wallScreen(x, y, bw, seed, cls) {
+  const ww = bw - 50;
+  let bars = "", wave = "M4 13";
+  for (let i = 0; i < 6; i++) { const bh = 5 + ((seed >>> (i * 3)) & 7) * 2; bars += `<rect class="bar" x="${bw - 42 + i * 6}" y="${23 - bh}" width="3.6" height="${bh}"/>`; }
+  for (let i = 1; i <= 8; i++) wave += `L${(4 + (ww * i) / 8).toFixed(1)} ${(13 + (((seed >>> (i * 2)) & 7) - 3.5) * 1.4).toFixed(1)}`;
+  return `<g class="${cls}" transform="translate(${x} ${y})" style="--bw:${ww}px"><rect class="wp" width="${bw}" height="26" rx="2"/><path class="wave" d="${wave}"/><path class="wscan" d="M4 3v20"/>${bars}</g>`;
+}
+/** 后墙（正对镜头的矩形）：墙面、下沿玻璃竖棂、顶部发光沿、四角括号。 */
+function backWall(x, y, w) {
+  let mull = "";
+  for (let mx = x + 18; mx < x + w - 6; mx += 18) mull += `M${mx} ${y + 38}v14`;
+  return `<rect class="wall" x="${x}" y="${y}" width="${w}" height="${ISO.HW}"/><path class="mull" d="${mull}"/><path class="wallTop" d="M${x} ${y}h${w}"/>` +
+    `<path class="brk" d="M${x} ${y + 9}v-9h9M${x + w - 9} ${y}h9v9M${x + w} ${y + ISO.HW - 9}v9h-9M${x + 9} ${y + ISO.HW}h-9v-9"/>`;
+}
+
+const metaText = (n, busy) => `${n} ${n === 1 ? "SEAT" : "SEATS"} · ${busy} ACTIVE`;
+
+/** 楼板底层：板下辉光、板厚正面与右侧面、楼层号；1F 额外画大厅地面、后墙、中庭徽记、导向箭头。 */
+function plateBase(f, mine) {
+  const { X0, L, D, HW, T } = ISO, seatsN = mine.reduce((n, r) => n + r.n, 0);
+  let s = `<rect x="${X0}" y="${f.y + T}" width="${L}" height="34" fill="url(#under)" class="vig"/>` +
+    `<rect class="slabF" x="${X0}" y="${f.y}" width="${L}" height="${T}"/><path class="slabR" d="M${X0 + L} ${f.y}l${D} ${-D / 2}v${T}l${-D} ${D / 2}Z"/>` +
+    `<text class="floorNo" x="${X0 + 10}" y="${f.y - 160}">${f.name}</text>` +
+    `<text class="floorSub" x="${X0 + 12}" y="${f.y - 146}">${mine.length ? `${mine.length} ROOMS · ${seatsN} SEATS` : "LOBBY · VISITOR BAY"}</text>`;
+  if (!mine.length) {
+    const [hx, hy] = XY(f, L / 2, 150), wx = X0 + D, wy = f.y - D / 2 - HW;
+    let chev = "";
+    for (let u = 70; u < L - 60; u += 70) if (Math.abs(u - L / 2) > 60) { const [cx, cy] = XY(f, u, 60), dir = u < L / 2 ? 1 : -1; chev += `M${cx - 3 * dir} ${cy - 4}l${4 * dir} 4-${4 * dir} 4`; }
+    s += `<path class="lobbyFloor" d="${flat(f, 0, L, 0, D)}"/><ellipse class="vig" cx="${hx}" cy="${hy}" rx="${L * .55}" ry="120" fill="url(#pool)"/>` +
+      `<ellipse class="hubRing" cx="${hx}" cy="${hy}" rx="120" ry="46"/><ellipse class="hubRing in" cx="${hx}" cy="${hy}" rx="80" ry="30"/>` +
+      `<text class="corridorLabel" x="${hx}" y="${hy + 3}" text-anchor="middle">ORCA HUB</text><path class="chev" d="${chev}"/>` +
+      backWall(wx, wy, L) + `<path class="endWall" d="${side(f, 0, 0, D, HW)}"/>` +
+      `<text class="roomTitle" x="${wx + 12}" y="${wy + 18}">ORCA LOBBY</text><text class="roomMeta" x="${wx + 12}" y="${wy + 31}">VISITOR BAY · SUPERVISED WORKERS</text>` +
+      wallScreen(wx + L - 300, wy + 8, 200, 2654435761, "wscr on") +
+      `<g transform="translate(${wx + L - 58} ${wy + 12})"><rect width="40" height="14" rx="2" fill="rgba(46,230,200,.1)" stroke="#2ee6c8" stroke-opacity=".8"/><text class="exit" x="20" y="9.8" text-anchor="middle">EXIT ▸</text></g>` +
+      plant(...XY(f, 24, D - 30)) + plant(...XY(f, L - 24, D - 30)) +
+      `<text class="sign" x="${X0 + L / 2}" y="${f.y + 10}" text-anchor="middle" style="fill:var(--muted);font:600 7.5px var(--mono);letter-spacing:.24em">MAIN ENTRANCE</text>`;
+  }
+  return s;
+}
+
+/** 楼板前层（画在人物之后）：前沿与右端矮玻璃（每间房一扇门）、门框、板沿高光，以及立在本层撑起上一层的柱子。 */
+function plateFront(f, up, mine) {
+  const { X0, L, D, T } = ISO, gaps = mine.length ? mine.map((r) => [r.u0 + 12, r.u0 + 40]) : [[L / 2 - 44, L / 2 + 44]];
+  let glass = "", posts = "", a = 0;
+  for (const [g0, g1] of gaps) {
+    glass += `M${X0 + a} ${f.y}h${g0 - a}v-20h${a - g0}Z`;
+    posts += `M${X0 + g0} ${f.y}v-26M${X0 + g1} ${f.y}v-26M${X0 + g0} ${f.y - 26}h${g1 - g0}`;
+    a = g1;
+  }
+  glass += `M${X0 + a} ${f.y}h${L - a}v-20h${a - L}Z` + side(f, L, 0, D, 20);
+  let s = `<path class="glassF" d="${glass}"/><path class="doorF" d="${posts}"/><path class="edge" d="M${X0} ${f.y}h${L}l${D} ${-D / 2}"/>`;
+  if (up) {
+    const top = up.y + T, h = f.y - top;
+    for (const [cx, dy] of [[X0, 0], [X0 + L, 0], [X0 + L + D, D / 2]]) s += `<rect class="col" x="${cx - 3}" y="${top - dy}" width="6" height="${h}"/><rect class="cap" x="${cx - 4}" y="${top - dy}" width="8" height="2"/>`;
+  }
+  return s;
+}
+
+/** 一间房（g[data-room]）：地面（.roomBox）、光池、忙碌描边、后墙与墙上标识、左侧隔断（首间为实墙）、机柜/绿植、楼板正面的门牌。 */
+function roomGroup(room, code) {
+  const f = room.floor, { u0, w, n } = room, u1 = u0 + w, { X0, D, HW } = ISO, label = room.name.toUpperCase();
+  const wx = X0 + u0 + D, wy = f.y - D / 2 - HW, [cx, cy] = XY(f, u0 + w / 2, D / 2);
+  const g = mk("g", { "data-room": room.name });
+  g.appendChild(mk("path", { class: "roomBox", d: flat(f, u0, u1, 0, D) }));
+  let s = `<ellipse class="pool" cx="${cx}" cy="${cy}" rx="${w / 2 + 70}" ry="60" fill="url(#pool)"/><path class="hotEdge" d="${flat(f, u0, u1, 0, D)}"/>` + backWall(wx, wy, w);
+  const x0 = wx + 10 + Math.max(label.length * 9, metaText(n, n).length * 5.8) + 12, x1 = wx + w - (w >= 160 ? 44 : 10), bw = Math.min(170, x1 - x0);
+  if (bw >= 60) s += wallScreen(x1 - bw, wy + 8, bw, look(room.name).h, "wscr");
+  s += `<path class="${u0 ? "glassSide" : "endWall"}" d="${side(f, u0, 0, D, u0 ? 20 : HW)}"/>`;
+  if (n === 1) s += rack(...XY(f, u0 + 16, D - 36));
+  s += plant(...XY(f, u1 - 20, D - 26));
+  put(g, s);
+  g.appendChild(mk("text", { class: "roomTitle", x: wx + 10, y: wy + 17 }, label));
+  g.appendChild(mk("text", { class: "roomMeta", x: wx + 10, y: wy + 30, "data-meta": room.name }, metaText(n, 0)));
+  g.appendChild(mk("circle", { class: "rdot", cx: wx + w - 10, cy: wy + 11, r: 3 }));
+  if (w >= 160) g.appendChild(mk("text", { class: "rcode", x: wx + w - 18, y: wy + 14, "text-anchor": "end" }, code));
+  const sg = mk("g", { class: "sign" });
+  sg.appendChild(mk("text", { x: X0 + u0 + 12, y: f.y + 10 }, `${code} · ${label}`));
+  g.appendChild(sg);
+  return g;
+}
+
+function drawPlan() {
+  const perRoom = {};
+  for (const r of roster.rooms) perRoom[r] = roster.agents.filter((a) => a.room === r).length;
+  const svg = document.getElementById("plan");
+  const rooms = roomGeometry(perRoom).map((r) => ({ ...r, n: perRoom[r.name] || 0 }));
+  svg.innerHTML = DEFS +
+    `<text class="planTitle" x="12" y="22">AGENT STUDIO // TOWER VIEW</text>` +
+    `<text class="planTitle" x="1228" y="22" text-anchor="end">${roster.agents.length} ROLES · ${roster.rooms.length} ROOMS · ${FLOORS.length} FLOORS · ISO 2:1</text>`;
+  let idx = 0;
+  FLOORS.forEach((f, fi) => {
+    const mine = rooms.filter((r) => r.floor === f);
+    put(svg, plateBase(f, mine));
+    const all = [];
+    for (const room of mine) {
+      svg.appendChild(roomGroup(room, `R${String(++idx).padStart(2, "0")}`));
+      const agents = roster.agents.filter((a) => a.room === room.name);
+      for (const seat of seats(room, agents)) all.push(seat);
+    }
+    // 深度排序：后排先画（d 大），同排从左到右（视点在右前方，u 大的更近）
+    const layer = mk("g", { class: "sprites", id: mine.length ? "" : "vis" });
+    all.sort((a, b) => b.d - a.d || a.u - b.u);
+    for (const seat of all) {
+      const [x, y] = XY(f, seat.u, seat.d);
+      layer.appendChild(worker(x - 24, y - 56, seat.agent.name, seat.agent.room));
+    }
+    if (mine.length) layer.removeAttribute("id");
+    svg.appendChild(layer);
+    put(svg, plateFront(f, FLOORS[fi - 1], mine));
+  });
+  put(svg, `<rect class="vig" width="1240" height="824" fill="url(#vign)"/><g id="zoom" pointer-events="none" aria-hidden="true"></g>`);
+}
+
+function paint(st) {
+  state = st;
+  const hits = activeRoles();
+  const svg = document.getElementById("plan"), zl = document.getElementById("zoom"), vis = document.getElementById("vis");
+
+  for (const w of svg.querySelectorAll(".worker[data-role]")) {
+    w.classList.toggle("working", hits.has(w.dataset.role));
+    w.classList.toggle("picked", w.dataset.role === selected);
+  }
+  const zf = zl.querySelector(".worker");
+  if (zf && zoomSrc) zf.classList.toggle("working", zoomSrc.classList.contains("working"));
+  for (const g of svg.querySelectorAll("g[data-room]")) {
+    const room = g.dataset.room;
+    const members = roster.agents.filter((a) => a.room === room);
+    const busy = members.filter((a) => hits.has(a.name)).length;
+    g.querySelector(".roomBox").classList.toggle("hot", busy > 0);
+    const meta = g.querySelector(`[data-meta="${room}"]`);
+    if (meta) meta.textContent = metaText(members.length, busy);
+  }
+
+  // 1F 大厅：来访工人站成一排（进深 120），气泡带尾巴指向头顶
+  for (const old of svg.querySelectorAll("g[data-visitor], .corrEmpty")) old.remove();
+  const lobby = FLOORS[FLOORS.length - 1], visitors = state.workers.filter(isPresent).slice(0, 7);
+  visitors.forEach((w, i) => {
+    const [X, Y] = XY(lobby, 105 + i * 118, 120), on = isWorking(w), who = w.label || w.dispatchId, top = Y - 112;
+    const g = mk("g", { class: "v" + (on ? " on" : ""), "data-visitor": w.dispatchId });
+    g.appendChild(mk("path", { class: "bubble", d: `M${X - 50} ${top}h100a6 6 0 0 1 6 6v34a6 6 0 0 1-6 6H${X + 6}l-6 6-6-6H${X - 50}a6 6 0 0 1-6-6v-34a6 6 0 0 1 6-6Z` }));
+    const [l1, l2] = wrap(w.taskTitle || who, 17), t = mk("text", { class: "visitorText", x: X - 48, y: top + 14 });
+    t.appendChild(mk("tspan", { x: X - 48, dy: 0 }, l1));
+    if (l2) t.appendChild(mk("tspan", { x: X - 48, dy: 12 }, l2));
+    g.appendChild(t);
+    g.appendChild(mk("circle", { class: "vdot" + (on ? " on" : w.dispatchStatus === "pending" ? " wait" : ""), cx: X - 46, cy: top + 36.6, r: 2.6 }));
+    g.appendChild(mk("text", { class: "visitorState", x: X - 40, y: top + 39.5 }, clip(`${w.workerState || w.dispatchStatus || "-"} · ${w.liveness || "-"}`.toUpperCase(), 16)));
+    g.appendChild(stander(X - 18, Y - 56, who, on));
+    g.appendChild(mk("title", {}, [who, w.taskTitle].filter(Boolean).join(" — ")));
+    vis.appendChild(g);
+  });
+  if (!visitors.length) {
+    const [ex, ey] = XY(lobby, ISO.L / 2, 120);
+    vis.appendChild(mk("text", { class: "corridorLabel corrEmpty", x: ex, y: ey - 52, "text-anchor": "middle" }, "LOBBY CLEAR — NO ORCA-SUPERVISED WORKERS"));
+  }
+
+  // KPI 与楼层一致：亮着的小人数 = 活跃角色数（审计流 ∪ 工人任务文本）
+  document.getElementById("k-work").textContent = hits.size;
+  document.getElementById("k-sub").textContent = (state.audit?.agents || []).reduce((n, a) => n + a.active, 0);
+  document.getElementById("k-visit").textContent = state.workers.filter(isPresent).length;
+  document.getElementById("k-kb").textContent = state.kanban.length;
+  document.getElementById("sub").textContent = `SYNC ${new Date(state.ts).toLocaleTimeString("en-GB")} · ${state.worktrees.length} REPOS · ${hits.size} ROLES WORKING`;
+
+  const detail = document.getElementById("detail");
+  detail.textContent = "";
+  if (!selected) {
+    detail.appendChild(Object.assign(document.createElement("div"), { className: "empty", textContent: "Click any figure on the floors. A lit screen means the role is working." }));
+  } else {
+    const a = roster.agents.find((x) => x.name === selected);
+    const last = (state.audit?.events || []).filter((e) => e.agent === selected).slice(-1)[0];
+    const floor = FLOORS.find((f) => f.rooms.includes(a.room));
+    const rows = [
+      ["ROOM", `${a.room}${floor ? " · " + floor.name : ""}`],
+      ["MODEL", a.model],
+      ["TIER", `T${a.tier}`],
+      ["STATUS", hits.has(a.name) ? "WORKING" : "IDLE"],
+      ["LAST AUDIT", last ? `${last.kind === "invoked" ? "▶ invoked" : "■ completed"} ${last.ts.slice(-6)}` : "No record"],
+    ];
+    for (const [k, v] of rows) {
+      const row = document.createElement("div");
+      row.className = "row";
+      row.appendChild(Object.assign(document.createElement("span"), { textContent: k }));
+      row.appendChild(Object.assign(document.createElement("b"), { className: "role" + (k === "STATUS" && hits.has(a.name) ? " on" : ""), textContent: String(v) }));
+      detail.appendChild(row);
+    }
+    const desc = document.createElement("div");
+    desc.className = "hint";
+    desc.textContent = a.desc;
+    detail.appendChild(desc);
+    document.getElementById("detail-title").textContent = a.name;
+  }
+
+  // 活跃列表按卡片剩余高度截断，超出部分折成 "+N MORE"，侧栏永不出现滚动条
+  const act = document.getElementById("active");
+  act.textContent = "";
+  const list = [...hits].sort(), cap = Math.max(1, Math.floor(act.clientHeight / 26)), shown = list.length > cap ? list.slice(0, cap - 1) : list;
+  if (!list.length) act.appendChild(Object.assign(document.createElement("div"), { className: "empty", textContent: "None" }));
+  for (const role of shown) {
+    const row = document.createElement("div");
+    row.className = "row";
+    row.appendChild(Object.assign(document.createElement("span"), { className: "role", textContent: role }));
+    row.appendChild(Object.assign(document.createElement("b"), { textContent: roster.agents.find((a) => a.name === role)?.room ?? "—" }));
+    act.appendChild(row);
+  }
+  if (shown.length < list.length) {
+    const row = document.createElement("div");
+    row.className = "row";
+    row.appendChild(Object.assign(document.createElement("span"), { className: "more", textContent: `+${list.length - shown.length} MORE` }));
+    act.appendChild(row);
+  }
+}
+
+// 舞台等比缩放：min(视口宽/1600, 视口高/900)，左上为原点再平移居中
+const stage = document.getElementById("stage");
+const fit = () => {
+  const s = Math.min(innerWidth / 1600, innerHeight / 900);
+  stage.style.transform = `translate(${(innerWidth - 1600 * s) / 2}px,${(innerHeight - 900 * s) / 2}px) scale(${s})`;
+};
+addEventListener("resize", fit);
+fit();
+
+async function tick() {
+  try { paint(await (await fetch("/state", { cache: "no-store" })).json()); document.body.classList.remove("down"); }
+  catch (e) { document.body.classList.add("down"); document.getElementById("sub").textContent = "LINK DOWN — " + e.message; }
+}
+(async () => {
+  roster = await (await fetch("/roster.json")).json();
+  drawPlan();
+  await tick();
+  setInterval(tick, 2000);
+})();
+</script>
+</body>
+</html>

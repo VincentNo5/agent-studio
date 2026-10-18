@@ -1,129 +1,417 @@
 <!doctype html>
-<html lang="zh">
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Agent Studio — 多 agent 工作室</title>
+<title>Agent Studio — Command Overview</title>
 <style>
   :root{
-    --bg:#0b0d10; --panel:#14171c; --panel2:#191d23; --border:#252a31;
-    --fg:#e7ebf0; --muted:#8b939e; --accent:#5b9dff; --ok:#3fb950; --warn:#d29922; --err:#f85149; --idle:#39414b;
+    --bg:#05070d; --bg2:#0a0f18; --panel:rgba(13,20,32,.72); --hair:rgba(77,214,255,.22);
+    --cyan:#4dd6ff; --teal:#2ee6c8; --amber:#ffb648; --alert:#ff4d6d; --fg:#e6f1ff; --muted:#7d8fa8;
+    --archived:#7f97b8; --offline:#4a5668;
+    --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+    --sans:ui-sans-serif,-apple-system,"SF Pro Text","Segoe UI",Roboto,sans-serif;
+    /* shared period + wall-clock phase so re-rendered nodes keep one rhythm across 2s polls */
+    --P:2.4s; --ph:0ms;
+    --hex:polygon(7px 0,calc(100% - 7px) 0,100% 50%,calc(100% - 7px) 100%,7px 100%,0 50%);
+    --glass:inset 0 1px 0 rgba(77,214,255,.08),inset 0 0 32px rgba(77,214,255,.04),0 0 0 1px rgba(0,0,0,.35),0 18px 40px -18px rgba(0,0,0,.9),0 0 30px -18px rgba(77,214,255,.45);
   }
   *{box-sizing:border-box}
-  body{margin:0;background:var(--bg);color:var(--fg);font:13px/1.5 ui-sans-serif,-apple-system,"SF Pro Text",Segoe UI,Roboto,sans-serif}
-  header{display:flex;align-items:baseline;gap:14px;padding:14px 18px;border-bottom:1px solid var(--border);position:sticky;top:0;background:rgba(11,13,16,.92);backdrop-filter:blur(6px);z-index:5}
-  h1{font-size:15px;margin:0;letter-spacing:.02em}
-  .sub{color:var(--muted);font-size:12px}
-  .kpis{margin-left:auto;display:flex;gap:16px;font-variant-numeric:tabular-nums}
-  .kpi b{display:block;font-size:16px}
-  .kpi span{color:var(--muted);font-size:11px;text-transform:uppercase;letter-spacing:.06em}
-  main{padding:16px 18px 40px;display:grid;gap:16px}
-  section{border:1px solid var(--border);background:var(--panel);border-radius:10px;overflow:hidden}
-  section>h2{margin:0;padding:10px 14px;font-size:12px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);border-bottom:1px solid var(--border);display:flex;gap:10px;align-items:center}
-  section>h2 em{font-style:normal;color:var(--fg);opacity:.75;text-transform:none;letter-spacing:0}
-  .body{padding:12px 14px}
-  .workers{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:10px}
-  .w{border:1px solid var(--border);background:var(--panel2);border-radius:8px;padding:10px 12px;opacity:.72}
-  .w.present{opacity:.9}
-  .w.live{border-color:rgba(63,185,80,.5);opacity:1}
-  .w .top{display:flex;align-items:center;gap:8px;margin-bottom:6px}
-  .w .label{font-weight:600;font-size:12.5px}
-  .w .state{margin-left:auto;font-size:11px;padding:1px 7px;border-radius:20px;border:1px solid var(--border);color:var(--muted)}
-  .w .id{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11px;color:var(--muted)}
-  .w .meta{color:var(--muted);font-size:11.5px;display:flex;flex-wrap:wrap;gap:8px;margin-top:4px}
-  .dot{width:8px;height:8px;border-radius:50%;background:var(--idle);flex:none}
-  .dot.live{background:var(--ok);box-shadow:0 0 0 0 rgba(63,185,80,.6);animation:pulse 1.6s infinite}
-  .dot.present{background:var(--accent)}
-  .dot.failed{background:var(--err)} .dot.pending{background:var(--warn)}
-  @keyframes pulse{70%{box-shadow:0 0 0 7px rgba(63,185,80,0)}100%{box-shadow:0 0 0 0 rgba(63,185,80,0)}}
-  table{width:100%;border-collapse:collapse;font-size:12px}
-  th{text-align:left;color:var(--muted);font-weight:500;font-size:11px;text-transform:uppercase;letter-spacing:.06em;padding:4px 8px;border-bottom:1px solid var(--border)}
-  td{padding:4px 8px;border-bottom:1px dashed rgba(255,255,255,.05);font-variant-numeric:tabular-nums}
-  td.role{font-weight:600}
-  .badge{display:inline-block;min-width:18px;text-align:center;padding:0 6px;border-radius:20px;border:1px solid var(--border)}
-  .badge.on{border-color:var(--ok);color:var(--fg);background:rgba(63,185,80,.18)}
-  .lanes{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
-  @media (min-width:1100px){.lanes{grid-template-columns:repeat(8,1fr)}}
-  .lane{border:1px solid var(--border);border-radius:8px;padding:8px;min-height:64px}
-  .lane.dim{opacity:.45}
-  .lane h3{margin:0 0 6px;font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;display:flex;justify-content:space-between}
-  .lane .card{background:var(--panel2);border:1px solid var(--border);border-radius:6px;padding:5px 7px;font-size:11.5px;margin-bottom:5px}
-  .rooms{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:10px}
-  .room{border:1px solid var(--border);border-radius:8px;padding:9px 10px;background:var(--panel2)}
-  .room.hot{border-color:rgba(63,185,80,.5)}
-  .room h3{margin:0 0 7px;font-size:11.5px;letter-spacing:.04em;color:var(--muted);display:flex;justify-content:space-between}
+  [hidden]{display:none!important}
+  html,body{height:100%;margin:0;overflow:hidden}
+  html{color-scheme:dark;background:var(--bg)}
+  body{color:var(--fg);font:14px/1.45 var(--sans);-webkit-font-smoothing:antialiased;
+    background:radial-gradient(1100px 560px at 72% -12%,rgba(77,214,255,.11),transparent 62%),
+      radial-gradient(900px 640px at -8% 108%,rgba(46,230,200,.07),transparent 60%),
+      linear-gradient(180deg,var(--bg2),var(--bg) 46%)}
+  /* blueprint grid, faded toward the edges */
+  body::before{content:"";position:fixed;inset:0;pointer-events:none;
+    background:linear-gradient(rgba(77,214,255,.05) 1px,transparent 1px) 0 0/48px 48px,
+      linear-gradient(90deg,rgba(77,214,255,.05) 1px,transparent 1px) 0 0/48px 48px;
+    -webkit-mask:radial-gradient(ellipse 80% 70% at 50% 30%,#000 15%,transparent 80%);
+    mask:radial-gradient(ellipse 80% 70% at 50% 30%,#000 15%,transparent 80%)}
+  /* CRT scanlines */
+  body::after{content:"";position:fixed;inset:0;pointer-events:none;z-index:60;
+    background:repeating-linear-gradient(0deg,rgba(230,241,255,.022) 0 1px,transparent 1px 3px)}
+  .beam{position:fixed;left:0;right:0;top:-140px;height:140px;pointer-events:none;z-index:59;
+    background:linear-gradient(180deg,transparent,rgba(77,214,255,.035) 70%,rgba(77,214,255,.09) 99%,transparent);
+    animation:beam 11s linear infinite}
+
+  /* ---------- 1600×900 stage, scaled to the viewport by fit() ---------- */
+  .stage{position:absolute;left:0;top:0;z-index:1;width:1600px;height:900px;transform-origin:0 0;overflow:hidden;
+    display:grid;grid-template-rows:60px 100px minmax(0,1fr) 46px;gap:16px;padding:20px 24px}
+
+  /* ---------- corner brackets (shared) ---------- */
+  .panel::before,.kpi::before,.nav::before{content:"";position:absolute;inset:0;pointer-events:none;
+    --g:linear-gradient(var(--bc),var(--bc));
+    background:var(--g) 0 0/var(--l,10px) 1px,var(--g) 0 0/1px var(--l,10px),
+      var(--g) 100% 0/var(--l,10px) 1px,var(--g) 100% 0/1px var(--l,10px),
+      var(--g) 0 100%/var(--l,10px) 1px,var(--g) 0 100%/1px var(--l,10px),
+      var(--g) 100% 100%/var(--l,10px) 1px,var(--g) 100% 100%/1px var(--l,10px);
+    background-repeat:no-repeat}
+
+  /* ---------- command bar ---------- */
+  .bar{position:relative;display:flex;align-items:center;gap:20px;padding:0 4px;border-bottom:1px solid var(--hair)}
+  .bar::after{content:"";position:absolute;left:0;right:0;bottom:-1px;height:1px;opacity:.6;
+    background:linear-gradient(90deg,transparent,var(--cyan) 28%,var(--teal) 50%,var(--cyan) 72%,transparent)}
+  .brand{display:flex;align-items:center;gap:12px}
+  .brand svg{width:36px;height:36px;flex:none;filter:drop-shadow(0 0 6px rgba(77,214,255,.55))}
+  .spin{transform-box:fill-box;transform-origin:center;animation:spin 18s linear infinite}
+  .brand h1{margin:0;font-size:14px;font-weight:600;letter-spacing:.32em;text-transform:uppercase}
+  .brand small{display:block;font:11px/1.3 var(--mono);color:var(--muted);letter-spacing:.18em}
+  .pill{display:inline-flex;align-items:center;gap:9px;min-width:0;max-width:640px;margin-left:auto;padding:6px 15px 6px 12px;
+    border:1px solid var(--hair);border-radius:999px;background:rgba(13,20,32,.6);font:12px/1.4 var(--mono);color:var(--muted);
+    letter-spacing:.06em;font-variant-numeric:tabular-nums}
+  .pill span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .pill i{width:7px;height:7px;border-radius:50%;flex:none;background:var(--amber);box-shadow:0 0 8px var(--amber)}
+  .pill.ok{border-color:rgba(46,230,200,.35);color:#b9cce3}
+  .pill.ok i{background:var(--teal);box-shadow:0 0 9px var(--teal);animation:blink var(--P) ease-in-out infinite}
+  .pill.err{border-color:rgba(255,77,109,.55);color:#ffc2cd;background:rgba(255,77,109,.08)}
+  .pill.err i{background:var(--alert);box-shadow:0 0 10px var(--alert)}
+  .nav{position:relative;flex:none;--bc:var(--cyan);--l:6px;padding:8px 15px;font:600 12px/1 var(--mono);letter-spacing:.18em;color:var(--cyan);
+    text-decoration:none;border:1px solid var(--hair);background:rgba(77,214,255,.05);
+    transition:background .2s,border-color .2s,color .2s,box-shadow .2s}
+  .nav:hover{background:rgba(77,214,255,.13);border-color:rgba(77,214,255,.7);color:#fff;box-shadow:0 0 18px -4px var(--cyan)}
+  .nav:active{transform:translateY(1px);background:rgba(77,214,255,.2)}
+  .nav:focus-visible{outline:2px solid var(--cyan);outline-offset:3px}
+
+  /* ---------- KPI band ---------- */
+  .kpis{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:16px}
+  .kpi{position:relative;--bc:rgba(77,214,255,.65);--c:var(--cyan);display:flex;align-items:center;gap:16px;padding:0 20px;
+    border:1px solid var(--hair);background:linear-gradient(135deg,rgba(77,214,255,.05),transparent 55%),var(--panel);box-shadow:var(--glass)}
+  .kpi::after{content:"";position:absolute;left:14px;right:14px;top:-1px;height:1px;opacity:.2;
+    background:linear-gradient(90deg,transparent,var(--c),transparent);transition:opacity .4s}
+  .kpi.on::after{opacity:1}
+  .ring{width:62px;height:62px;flex:none;color:var(--c)}
+  .ring circle{fill:none;transform-box:fill-box;transform-origin:center}
+  .ring .tks{stroke:var(--hair);stroke-width:2;stroke-dasharray:1 4.5;animation:spin 40s linear infinite}
+  .ring .trk{stroke:rgba(77,214,255,.1);stroke-width:3}
+  .ring .arc{stroke:currentColor;stroke-width:3;stroke-linecap:round;stroke-dasharray:18 76.25;opacity:.35;transform:rotate(-90deg);
+    transition:stroke-dasharray .6s cubic-bezier(.2,.7,.2,1),opacity .4s}
+  .kpi.on .arc{opacity:1;stroke-dasharray:66 28.25;filter:drop-shadow(0 0 3px currentColor);animation:orbit 7s linear infinite}
+  .kpi b{display:block;font:600 34px/1 var(--mono);font-variant-numeric:tabular-nums;color:#9fb1c8;transition:color .4s,text-shadow .4s}
+  .kpi.on b{color:var(--c);text-shadow:0 0 14px color-mix(in srgb,var(--c) 65%,transparent)}
+  .kpi span{display:block;margin-top:7px;font:600 11px/1 var(--mono);letter-spacing:.18em;color:var(--fg);opacity:.85}
+  .kpi small{display:block;margin-top:4px;font:11px/1.2 var(--mono);color:var(--muted)}
+
+  /* ---------- deck ---------- */
+  .deck{display:grid;grid-template-columns:1fr 1.12fr 1fr;grid-template-rows:minmax(0,1fr) minmax(0,1fr);gap:16px;min-height:0}
+  .p-floor{grid-area:1/1} .p-board{grid-area:2/1} .p-roster{grid-area:1/2/3/3} .p-sub{grid-area:1/3/3/4}
+  .panel{position:relative;--bc:rgba(77,214,255,.85);display:flex;flex-direction:column;min-height:0;border:1px solid var(--hair);overflow:hidden;
+    box-shadow:var(--glass);background:linear-gradient(180deg,rgba(77,214,255,.04),transparent 140px),var(--panel);
+    -webkit-backdrop-filter:blur(6px);backdrop-filter:blur(6px)}
+  .panel::after{content:"";position:absolute;top:0;bottom:0;left:0;width:34%;pointer-events:none;
+    background:linear-gradient(100deg,transparent,rgba(77,214,255,.065) 50%,transparent);transform:translateX(-120%);
+    animation:sweep 14s linear infinite;animation-delay:var(--d,0s)}
+  .ph{flex:none;display:flex;align-items:center;gap:10px;height:40px;padding:0 14px;border-bottom:1px solid var(--hair);
+    background:linear-gradient(90deg,rgba(77,214,255,.09),transparent 62%)}
+  .ph b,.ix{flex:none;font:600 10.5px/1 var(--mono);color:var(--cyan);opacity:.75;letter-spacing:.08em;padding:3px 5px;border:1px solid var(--hair)}
+  .ph h2,.strip h2{margin:0;flex:none;font-size:12px;font-weight:600;letter-spacing:.18em;text-transform:uppercase;white-space:nowrap}
+  .ph em{margin-left:auto;min-width:0;font:normal 11.5px/1.3 var(--mono);color:var(--muted);text-align:right;
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .pb{flex:1;min-height:0;padding:14px;overflow:hidden}
+  .stack{display:flex;flex-direction:column;gap:16px;min-height:0}
+  .lbl{display:block;font:600 10.5px/1 var(--mono);letter-spacing:.18em;color:var(--muted);text-transform:uppercase}
+
+  .empty{display:flex;flex-direction:column;gap:4px;padding:16px 18px;border:1px dashed var(--hair);color:var(--muted);
+    font:12px/1.5 var(--mono);background:repeating-linear-gradient(135deg,rgba(77,214,255,.025) 0 8px,transparent 8px 16px)}
+  .empty b{color:var(--fg);font-weight:600;letter-spacing:.12em;text-transform:uppercase;font-size:11.5px}
+  .hint{font:11px/1.5 var(--mono);color:var(--muted);opacity:.85;overflow-wrap:anywhere}
+
+  /* ---------- 01 live floor: state dial ---------- */
+  .split{display:grid;grid-template-columns:180px minmax(0,1fr);grid-template-rows:180px auto;gap:10px 20px;align-items:center}
+  .dial,.gauge{position:relative;flex:none}
+  .dial{width:180px;height:180px}
+  .dial svg,.gauge svg{display:block;width:100%;height:100%}
+  .dial circle,.gauge circle{fill:none;transform-box:fill-box;transform-origin:center}
+  .dial .dtk{stroke:var(--hair);stroke-width:2;stroke-dasharray:1 5.6;animation:spin 60s linear infinite}
+  .dial .dtr{stroke:rgba(77,214,255,.08);stroke-width:14}
+  .dial .din{stroke:var(--hair);stroke-dasharray:4 3;animation:spin 30s linear infinite reverse}
+  .seg{--s:var(--muted);stroke:var(--s);stroke-width:14;stroke-dasharray:0 503;transform:rotate(-90deg);
+    filter:drop-shadow(0 0 4px var(--s));transition:stroke-dasharray .6s cubic-bezier(.2,.7,.2,1),stroke-dashoffset .6s cubic-bezier(.2,.7,.2,1)}
+  [data-k=live]{--s:var(--teal)} [data-k=present]{--s:var(--cyan)} [data-k=pending]{--s:var(--amber)}
+  [data-k=failed]{--s:var(--alert)} [data-k=archived]{--s:var(--archived)} [data-k=idle]{--s:var(--offline)}
+  /* finished / offline buckets stay calm: no glow */
+  .seg[data-k=archived],.seg[data-k=idle]{filter:none}
+  .dc{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;pointer-events:none}
+  .dc b{font:600 42px/1 var(--mono);font-variant-numeric:tabular-nums;color:var(--fg);text-shadow:0 0 16px rgba(77,214,255,.5)}
+  .dc span{margin-top:6px;font:600 10px/1 var(--mono);letter-spacing:.18em;color:var(--muted);text-transform:uppercase}
+  .states{list-style:none;margin:0;padding:0;display:grid;gap:5px}
+  .states li{display:grid;grid-template-columns:8px minmax(0,1fr) auto 42px;align-items:center;gap:12px;height:24px;padding:0 10px;
+    border:1px solid rgba(77,214,255,.1);background:linear-gradient(90deg,color-mix(in srgb,var(--s) 13%,transparent),transparent 70%);transition:opacity .4s}
+  .states li i{width:8px;height:8px;transform:rotate(45deg);background:var(--s);box-shadow:0 0 7px var(--s)}
+  .states li[data-k=archived] i,.states li[data-k=idle] i{box-shadow:none}
+  .states li[data-k=live]:not(.z) i{animation:blink var(--P) ease-in-out infinite}
+  .states li span{font:600 11px/1 var(--mono);letter-spacing:.18em;color:#b3c3d8}
+  .states li b{font:600 16px/1 var(--mono);font-variant-numeric:tabular-nums;color:var(--s)}
+  .states li em{font:normal 11px/1 var(--mono);color:var(--muted);text-align:right}
+  .states li.z{opacity:.38} .states li.z i{box-shadow:none}
+  .wnote{grid-column:1/-1;margin:0;font:11.5px/1.4 var(--mono);color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .wnote b{color:var(--fg);font-weight:600;letter-spacing:.1em;text-transform:uppercase}
+
+  /* ---------- 02 task board: lane bars ---------- */
+  [data-lane]{--s:var(--cyan)} [data-lane=running]{--s:var(--teal)} [data-lane=blocked]{--s:var(--alert)}
+  [data-lane=review],[data-lane=scheduled]{--s:var(--amber)} [data-lane=done]{--s:#6a809c}
+  .pipe{display:flex;gap:2px;height:8px;margin-bottom:12px}
+  .pipe i{flex:0 1 0;min-width:4px;background:var(--s);box-shadow:0 0 7px -1px var(--s);transition:flex-grow .6s}
+  .lrow{display:grid;grid-template-columns:90px minmax(0,1fr) 36px;align-items:center;gap:12px;height:19px;margin-top:5px}
+  .lrow span{font:600 10.5px/1 var(--mono);letter-spacing:.16em;text-transform:uppercase;color:#b3c3d8}
+  .lrow .bar{position:relative;height:8px;background:rgba(77,214,255,.07)}
+  .lrow .bar::after{content:"";position:absolute;inset:0;background:repeating-linear-gradient(90deg,transparent 0 calc(10% - 1px),rgba(5,7,13,.9) calc(10% - 1px) 10%)}
+  .lrow .bar i{position:absolute;left:0;top:0;bottom:0;width:0;background:linear-gradient(90deg,color-mix(in srgb,var(--s) 30%,transparent),var(--s));
+    box-shadow:0 0 9px -1px var(--s);transition:width .6s cubic-bezier(.2,.7,.2,1)}
+  .lrow b{font:600 15px/1 var(--mono);font-variant-numeric:tabular-nums;color:var(--s);text-align:right}
+
+  /* ---------- 03 studio roster ---------- */
+  .hero{flex:none;display:flex;align-items:center;gap:24px}
+  .gauge{width:140px;height:140px}
+  .gauge .hx{fill:rgba(77,214,255,.03);stroke:var(--hair)}
+  .gauge .hx2{fill:none;stroke:rgba(77,214,255,.3);stroke-dasharray:3 4}
+  .gauge .gtr{stroke:rgba(77,214,255,.1);stroke-width:6}
+  .gauge .garc{stroke:var(--teal);stroke-width:6;stroke-dasharray:0 289.03;transform:rotate(-90deg);transition:stroke-dasharray .6s cubic-bezier(.2,.7,.2,1)}
+  .gauge.on .garc{filter:drop-shadow(0 0 5px var(--teal))}
+  .gauge .dc b{font-size:36px;color:#9fb1c8;text-shadow:none}
+  .gauge.on .dc b{color:var(--teal);text-shadow:0 0 16px rgba(46,230,200,.7)}
+  .facts{flex:1;min-width:0;margin:0;display:grid;gap:4px}
+  .facts div{display:flex;justify-content:space-between;align-items:baseline;gap:12px;padding:8px 0;border-bottom:1px solid rgba(77,214,255,.08)}
+  .facts dt{font:600 10.5px/1 var(--mono);letter-spacing:.18em;color:var(--muted)}
+  .facts dd{margin:0;min-width:0;font:600 16px/1 var(--mono);color:#9fb1c8;text-transform:uppercase;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .facts dd.on{color:var(--teal);text-shadow:0 0 10px rgba(46,230,200,.6)}
+  .rooms{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+  .room{padding:8px 10px;border:1px solid rgba(77,214,255,.12);background:rgba(7,11,19,.6)}
+  .room.hot{border-color:rgba(46,230,200,.5);box-shadow:0 0 22px -10px rgba(46,230,200,.8),inset 0 0 20px -12px var(--teal);
+    background:linear-gradient(180deg,rgba(46,230,200,.1),transparent 80%),rgba(7,11,19,.6)}
+  .room h3{display:flex;align-items:center;gap:8px;margin:0 0 7px;font:600 10.5px/1 var(--mono);letter-spacing:.16em;text-transform:uppercase}
   .room h3 b{color:var(--fg);font-weight:600}
-  .chips{display:flex;flex-wrap:wrap;gap:5px}
-  .chip{font-size:11px;padding:2px 7px;border-radius:20px;border:1px solid var(--border);color:var(--muted);white-space:nowrap}
-  .chip.t1{border-color:#4b5b74} .chip.t2{border-color:#3d5162}
-  .chip.opus{background:rgba(91,157,255,.12)}
-  .chip.sonnet{background:rgba(63,185,80,.10)}
-  .chip.busy{border-color:var(--ok);color:var(--fg);background:rgba(63,185,80,.20);animation:pulse 1.6s infinite}
-  .ticker{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11.5px;max-height:170px;overflow:auto}
-  .ticker div{padding:2px 0;border-bottom:1px dashed rgba(255,255,255,.05);color:var(--muted)}
-  .ticker b{color:var(--fg);font-weight:500}
-  .empty{color:var(--muted);font-size:12px}
-  .hint{color:var(--muted);font-size:11.5px;margin-top:6px}
+  .room h3 span{margin-left:auto;color:var(--muted);font-variant-numeric:tabular-nums}
+  .room h3 span.on{color:var(--teal);text-shadow:0 0 8px rgba(46,230,200,.6)}
+  .room.hot h3::before{content:"";width:6px;height:6px;flex:none;border-radius:50%;background:var(--teal);box-shadow:0 0 8px var(--teal);
+    animation:blink var(--P) ease-in-out var(--ph) infinite}
+  .ticks{display:flex;gap:2px;height:7px}
+  .ticks i{flex:1;background:rgba(77,214,255,.14)}
+  .ticks i.on{background:var(--teal);box-shadow:0 0 6px var(--teal)}
+  .actv{margin-top:auto}
+  .chips{display:flex;flex-wrap:wrap;gap:6px;max-height:60px;margin-top:8px;padding:2px;overflow:hidden}
+  .chip{--e:var(--teal);--f:#0e3b38;display:inline-block;filter:drop-shadow(0 0 5px rgba(46,230,200,.6));animation:glow var(--P) ease-in-out var(--ph) infinite}
+  .chip>span{display:block;padding:1px;background:var(--e);clip-path:var(--hex)}
+  .chip>span>span{display:block;max-width:200px;padding:2px 11px;background:var(--f);clip-path:var(--hex);font:11.5px/1.5 var(--mono);color:#eafffb;
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .chip.more{--e:var(--hair);--f:rgba(9,14,23,.96);filter:none;animation:none}
+  .chip.more>span>span{color:var(--muted)}
+  .none{font:12px/1.5 var(--mono);color:var(--muted)}
+
+  /* ---------- 04 subagent activity ---------- */
+  .tot{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}
+  .tot div{padding:11px 12px;border:1px solid rgba(77,214,255,.12);background:rgba(7,11,19,.6)}
+  .tot b{display:block;font:600 26px/1 var(--mono);font-variant-numeric:tabular-nums;color:#c4d3e6}
+  .tot span{display:block;margin-top:7px;font:600 9.5px/1 var(--mono);letter-spacing:.16em;color:var(--muted)}
+  .tot div.on{border-color:rgba(46,230,200,.5);background:linear-gradient(180deg,rgba(46,230,200,.12),transparent),rgba(7,11,19,.6)}
+  .tot div.on b{color:var(--teal);text-shadow:0 0 12px rgba(46,230,200,.7)}
+  .meter{display:grid;grid-template-columns:auto minmax(0,1fr) 44px;align-items:center;gap:12px}
+  .meter .bar{position:relative;height:6px;background:rgba(77,214,255,.08)}
+  .meter .bar i{position:absolute;left:0;top:0;bottom:0;background:linear-gradient(90deg,rgba(77,214,255,.35),var(--cyan));box-shadow:0 0 8px -1px var(--cyan)}
+  .meter b{font:600 14px/1 var(--mono);color:var(--cyan);text-align:right}
+  .top{display:grid;gap:6px}
+  .role{display:grid;grid-template-columns:22px minmax(0,1fr) auto 30px;align-items:center;gap:4px 10px;padding:7px 10px 6px;
+    border:1px solid rgba(77,214,255,.1);background:rgba(7,11,19,.6)}
+  .role>b{font:600 10.5px/1 var(--mono);color:var(--cyan);opacity:.7}
+  .role .nm{font-weight:600;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .role .ct{font:11px/1 var(--mono);color:var(--muted);font-variant-numeric:tabular-nums}
+  .role>i{grid-column:1/-1;height:2px;background:linear-gradient(90deg,var(--cyan) calc(var(--r) * 100%),rgba(77,214,255,.12) 0)}
+  .role.on{border-color:rgba(46,230,200,.45);background:linear-gradient(90deg,rgba(46,230,200,.1),transparent 70%),rgba(7,11,19,.6)}
+  .role.on .nm{color:var(--teal);text-shadow:0 0 8px rgba(46,230,200,.5)}
+  .role.on>i{background:linear-gradient(90deg,var(--teal) calc(var(--r) * 100%),rgba(46,230,200,.18) 0)}
+  .badge{display:inline-block;min-width:26px;padding:1px 5px;text-align:center;font:600 11px/1.3 var(--mono);border:1px solid var(--hair);color:var(--muted)}
+  .badge.on{border-color:var(--teal);color:#04120f;background:var(--teal);box-shadow:0 0 10px var(--teal)}
+  .rhythm{display:flex;align-items:flex-end;gap:2px;height:28px;margin-top:8px;border-bottom:1px solid var(--hair)}
+  .rhythm i{flex:1;max-width:10px;height:38%;background:rgba(77,214,255,.5)}
+  .rhythm i.invoked{height:100%;background:var(--teal);box-shadow:0 0 5px -1px var(--teal)}
+  .evs{margin-top:auto}
+  .evs:not(:empty)::before{content:"Last events";display:block;margin-bottom:6px;font:600 10.5px/1 var(--mono);letter-spacing:.18em;color:var(--muted);text-transform:uppercase}
+  .ev{display:grid;grid-template-columns:auto auto minmax(0,1fr);gap:9px;align-items:baseline;padding:5px 0;font:12px/1.45 var(--mono);color:var(--muted);border-bottom:1px dashed rgba(77,214,255,.08)}
+  .ev time{color:#9fb1c8;font-variant-numeric:tabular-nums}
+  .ev b{font-weight:400;color:var(--cyan)}
+  .ev.invoked b{color:var(--teal);text-shadow:0 0 6px var(--teal)}
+  .ev span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .ev span em{font-style:normal;color:var(--fg)}
+
+  /* ---------- 05 activity strip ---------- */
+  .strip{flex-direction:row;align-items:center;gap:12px;padding:0 16px}
+  .ticker{flex:1;min-width:0;display:flex;align-items:center;gap:24px;margin-left:10px;font:12px/1 var(--mono)}
+  .tk{--s:var(--cyan);flex:1 1 0;min-width:0;display:flex;align-items:center;gap:10px;color:#c4d3e6;white-space:nowrap}
+  .tk::before{content:"";flex:none;width:7px;height:7px;background:var(--s);box-shadow:0 0 7px var(--s);transform:rotate(45deg)}
+  .tk+.tk{padding-left:24px;border-left:1px solid var(--hair);opacity:.6}
+  .tk time{flex:none;color:var(--muted);font-variant-numeric:tabular-nums}
+  .tk span{overflow:hidden;text-overflow:ellipsis}
+  .tk.sys{--s:var(--teal)} .tk.task{--s:var(--amber)}
+  .tk.live{--s:var(--teal)} .tk.present{--s:var(--cyan)} .tk.failed{--s:var(--alert)} .tk.pending{--s:var(--amber)}
+  .tk.archived{--s:var(--archived)} .tk.idle{--s:var(--offline)}
+  .tk.archived::before,.tk.idle::before{box-shadow:none}
+  .tk.fresh{animation:flash 1.4s ease-out}
+  .wait{color:var(--muted)}
+  .sr{flex:none;font:600 10.5px/1 var(--mono);letter-spacing:.16em;color:var(--muted)}
+
+  @keyframes beam{to{transform:translateY(calc(100vh + 140px))}}
+  @keyframes spin{to{transform:rotate(1turn)}}
+  @keyframes orbit{from{transform:rotate(-90deg)}to{transform:rotate(270deg)}}
+  @keyframes sweep{0%{transform:translateX(-120%)}36%,100%{transform:translateX(400%)}}
+  @keyframes blink{50%{opacity:.35}}
+  @keyframes glow{50%{filter:drop-shadow(0 0 10px rgba(46,230,200,.95))}}
+  @keyframes flash{from{background:rgba(77,214,255,.2);transform:translateX(-6px)}to{background:transparent;transform:none}}
+
+  @media (prefers-reduced-motion:reduce){
+    *,*::before,*::after{animation:none!important;transition:none!important}
+    .beam,.panel::after{display:none}
+    .chip{filter:drop-shadow(0 0 8px rgba(46,230,200,.9))}
+  }
 </style>
 </head>
 <body>
-<header>
-  <h1>Agent Studio</h1>
-  <span class="sub" id="sub">连接中…</span>
-  <div class="kpis">
-    <div class="kpi"><b id="k-work">0</b><span>working</span></div>
-    <div class="kpi"><b id="k-present">0</b><span>present</span></div>
-    <div class="kpi"><b id="k-sub">0</b><span>subagents</span></div>
-    <div class="kpi"><b id="k-term">0</b><span>terminals</span></div>
-    <div class="kpi"><b id="k-kb">0</b><span>kanban</span></div>
-  </div>
-</header>
-<main>
-  <section>
-    <h2>Live floor <em>Orca 监督中的工人 · 卡片标题 = 该工人自己的终端标题</em></h2>
-    <div class="body"><div class="workers" id="workers"></div></div>
-  </section>
-  <section>
-    <h2>CCGS subagents <em id="audit-note">审计流</em></h2>
-    <div class="body">
-      <div id="audit-table"></div>
-      <div class="ticker" id="audit-events" style="margin-top:10px"></div>
+<div class="beam" aria-hidden="true"></div>
+<div class="stage" id="stage">
+  <header class="bar">
+    <div class="brand">
+      <svg viewBox="0 0 40 40" aria-hidden="true">
+        <g fill="none" stroke="#4dd6ff">
+          <polygon points="20,1.5 36,10.75 36,29.25 20,38.5 4,29.25 4,10.75" stroke-opacity=".55"/>
+          <polygon class="spin" points="20,8 30.4,14 30.4,26 20,32 9.6,26 9.6,14" stroke-dasharray="3 2.4"/>
+          <circle cx="20" cy="20" r="4.6" fill="#2ee6c8" fill-opacity=".3" stroke="#2ee6c8"/>
+        </g>
+      </svg>
+      <div><h1>Agent Studio</h1><small>COMMAND OVERVIEW // POLL 2S</small></div>
     </div>
+    <div class="pill" id="pill"><i aria-hidden="true"></i><span id="sub">Connecting…</span></div>
+    <a class="nav" href="/floor">FLOOR PLAN →</a>
+  </header>
+
+  <section class="kpis" aria-label="Key metrics">
+    <div class="kpi" style="--c:var(--teal)"><svg class="ring" viewBox="0 0 48 48" aria-hidden="true"><circle class="tks" cx="24" cy="24" r="21"/><circle class="trk" cx="24" cy="24" r="15"/><circle class="arc" cx="24" cy="24" r="15"/></svg><div><b id="k-work">0</b><span>WORKING</span><small>Unsettled dispatches</small></div></div>
+    <div class="kpi"><svg class="ring" viewBox="0 0 48 48" aria-hidden="true"><circle class="tks" cx="24" cy="24" r="21"/><circle class="trk" cx="24" cy="24" r="15"/><circle class="arc" cx="24" cy="24" r="15"/></svg><div><b id="k-present">0</b><span>PRESENT</span><small>Live or pending</small></div></div>
+    <div class="kpi" style="--c:var(--teal)"><svg class="ring" viewBox="0 0 48 48" aria-hidden="true"><circle class="tks" cx="24" cy="24" r="21"/><circle class="trk" cx="24" cy="24" r="15"/><circle class="arc" cx="24" cy="24" r="15"/></svg><div><b id="k-sub">0</b><span>SUBAGENTS</span><small>CCGS in flight</small></div></div>
+    <div class="kpi"><svg class="ring" viewBox="0 0 48 48" aria-hidden="true"><circle class="tks" cx="24" cy="24" r="21"/><circle class="trk" cx="24" cy="24" r="15"/><circle class="arc" cx="24" cy="24" r="15"/></svg><div><b id="k-term">0</b><span>TERMINALS</span><small>Orca sessions</small></div></div>
+    <div class="kpi" style="--c:var(--amber)"><svg class="ring" viewBox="0 0 48 48" aria-hidden="true"><circle class="tks" cx="24" cy="24" r="21"/><circle class="trk" cx="24" cy="24" r="15"/><circle class="arc" cx="24" cy="24" r="15"/></svg><div><b id="k-kb">0</b><span>KANBAN</span><small>Tasks on board</small></div></div>
   </section>
-  <section>
-    <h2>Kanban <em>hermes 持久任务板</em></h2>
-    <div class="body"><div class="lanes" id="lanes"></div></div>
-  </section>
-  <section>
-    <h2>Studio rooms <em id="rooms-note">49 个角色 · 来自 CCGS 花名册</em></h2>
-    <div class="body"><div class="rooms" id="rooms"></div></div>
-  </section>
-  <section>
-    <h2>Activity <em>状态差分</em></h2>
-    <div class="body"><div class="ticker" id="ticker"></div></div>
-  </section>
-</main>
+
+  <main class="deck">
+    <section class="panel p-floor" aria-labelledby="h-floor">
+      <div class="ph"><b>01</b><h2 id="h-floor">Live Floor</h2><em>Orca-supervised workers by state</em></div>
+      <div class="pb split" id="workers">
+        <div class="dial">
+          <svg viewBox="0 0 200 200" aria-hidden="true">
+            <circle class="dtk" cx="100" cy="100" r="96"/>
+            <circle class="dtr" cx="100" cy="100" r="80"/>
+            <circle class="seg" data-k="live" cx="100" cy="100" r="80"/>
+            <circle class="seg" data-k="present" cx="100" cy="100" r="80"/>
+            <circle class="seg" data-k="pending" cx="100" cy="100" r="80"/>
+            <circle class="seg" data-k="failed" cx="100" cy="100" r="80"/>
+            <circle class="seg" data-k="archived" cx="100" cy="100" r="80"/>
+            <circle class="seg" data-k="idle" cx="100" cy="100" r="80"/>
+            <circle class="din" cx="100" cy="100" r="62"/>
+          </svg>
+          <div class="dc"><b id="w-total">0</b><span>Supervised</span></div>
+        </div>
+        <ul class="states">
+          <li class="z" data-k="live"><i></i><span>WORKING</span><b>0</b><em>—</em></li>
+          <li class="z" data-k="present"><i></i><span>PRESENT</span><b>0</b><em>—</em></li>
+          <li class="z" data-k="pending"><i></i><span>PENDING</span><b>0</b><em>—</em></li>
+          <li class="z" data-k="failed"><i></i><span>FAILED</span><b>0</b><em>—</em></li>
+          <li class="z" data-k="archived"><i></i><span>ARCHIVED</span><b>0</b><em>—</em></li>
+          <li class="z" data-k="idle"><i></i><span>OFFLINE</span><b>0</b><em>—</em></li>
+        </ul>
+        <p class="wnote" id="w-note">Awaiting first sync…</p>
+      </div>
+    </section>
+
+    <section class="panel p-board" style="--d:-4s" aria-labelledby="h-board">
+      <div class="ph"><b>02</b><h2 id="h-board">Task Board</h2><em id="kb-note">Hermes persistent kanban</em></div>
+      <div class="pb"><div id="lanes"></div></div>
+    </section>
+
+    <section class="panel p-roster" style="--d:-8s" aria-labelledby="h-roster">
+      <div class="ph"><b>03</b><h2 id="h-roster">Studio Roster</h2><em id="rooms-note">CCGS roster</em></div>
+      <div class="pb stack">
+        <div class="hero">
+          <div class="gauge" id="roles-gauge">
+            <svg viewBox="0 0 140 140" aria-hidden="true">
+              <polygon class="hx" points="70,4 127.2,37 127.2,103 70,136 12.8,103 12.8,37"/>
+              <polygon class="hx2 spin" points="70,12 120.2,41 120.2,99 70,128 19.8,99 19.8,41"/>
+              <circle class="gtr" cx="70" cy="70" r="46"/>
+              <circle class="garc" id="roles-arc" cx="70" cy="70" r="46"/>
+            </svg>
+            <div class="dc"><b id="roles-n">0</b><span id="roles-of">Active</span></div>
+          </div>
+          <dl class="facts" id="roles-facts"></dl>
+        </div>
+        <div class="rooms" id="rooms"></div>
+        <div class="actv"><span class="lbl">Active roles</span><div class="chips" id="roles-list"></div></div>
+      </div>
+    </section>
+
+    <section class="panel p-sub" style="--d:-2s" aria-labelledby="h-sub">
+      <div class="ph"><b>04</b><h2 id="h-sub">Subagent Activity</h2><em id="audit-note">Audit stream</em></div>
+      <div class="pb stack">
+        <div class="stack" id="audit-table"></div>
+        <div class="evs" id="audit-events"></div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="panel strip" style="--d:-6s" aria-labelledby="h-act">
+    <b class="ix">05</b><h2 id="h-act">Activity</h2>
+    <div class="ticker" id="ticker"><span class="wait">Awaiting state changes…</span></div>
+    <span class="sr">STATE DIFF · <span id="ev-n">0</span> EVENTS</span>
+  </footer>
+</div>
 <script>
 const LANES = ["triage","todo","scheduled","ready","running","review","blocked","done"];
 const SETTLED = ["succeeded","failed","stopped","cancelled"];
-let roster = null, prev = null;
+const STATES = ["live","present","pending","failed","archived","idle"];
+const P = 2400; // must match --P
+const POLL = 2000, POLL_BACKOFF = 5000; // back off after 2+ consecutive failures
+const SW = 1600, SH = 900; // stage size
+const DIAL_C = 2 * Math.PI * 80, ROLE_C = 2 * Math.PI * 46;
+let roster = null, prev = null, fails = 0;
 const events = [];
-let seeded = false;
+let seeded = false, seq = 0, seen = 0;
+
+// Scale the fixed stage to fit the viewport (letterboxed, centred).
+const stage = document.getElementById("stage");
+const fit = () => {
+  const s = Math.min(innerWidth / SW, innerHeight / SH);
+  stage.style.transform = `translate(${(innerWidth - SW * s) / 2}px,${(innerHeight - SH * s) / 2}px) scale(${s})`;
+};
+addEventListener("resize", fit);
+fit();
 
 const el = (t, c, x) => { const n = document.createElement(t); if (c) n.className = c; if (x != null) n.textContent = x; return n; };
 const short = (s, n = 18) => { const v = s || ""; return v.length > n ? v.slice(0, n) + "…" : v; };
-
-// 在场 = 终端还活着；工作中 = 尚未结算。
-const isPresent = (w) => w.liveness === "live" || w.dispatchStatus === "pending";
-const isWorking = (w) => isPresent(w) && !SETTLED.includes(w.workerState || "");
-const dotClass = (w) => {
-  if (w.liveness === "live") return isWorking(w) ? "live" : "present";
-  if (w.liveness === "exited" || w.workerState === "failed") return "failed";
-  if (w.liveness === "unverifiable" || w.dispatchStatus === "pending") return "pending";
-  return "";
+const clock = (d) => d.toLocaleTimeString([], { hour12: false });
+const ts6 = (s) => { const v = (s || "").slice(-6); return /^\d{6}$/.test(v) ? v.replace(/(\d\d)(\d\d)(\d\d)/, "$1:$2:$3") : v; };
+const log = (k, text) => events.unshift({ id: ++seq, t: clock(new Date()), k, text });
+const setKpi = (id, n) => { const b = document.getElementById(id); b.textContent = n; b.closest(".kpi").classList.toggle("on", n > 0); };
+const chip = (name, cls, title) => {
+  const c = el("span", "chip" + (cls ? " " + cls : ""));
+  if (title) c.title = title;
+  const edge = el("span");
+  edge.appendChild(el("span", null, name));
+  c.appendChild(edge);
+  return c;
 };
 
-// 活跃角色 = CCGS 审计流里 active>0 的真子 agent ∪ 正在工作的工人任务描述里点名的角色。
+// Present = terminal still alive; working = not yet settled.
+const isPresent = (w) => w.liveness === "live" || w.dispatchStatus === "pending";
+const isWorking = (w) => isPresent(w) && !SETTLED.includes(w.workerState || "");
+// One floor bucket per worker. A terminal that exited after a clean settle is archived, not failed;
+// one that exited while the worker was still unsettled died mid-task and counts as failed.
+const floorState = (w) => {
+  if (w.workerState === "failed") return "failed";
+  if (w.liveness === "live") return isWorking(w) ? "live" : "present";
+  if (w.liveness === "exited") return SETTLED.includes(w.workerState || "") ? "archived" : "failed";
+  if (w.liveness === "unverifiable" || w.dispatchStatus === "pending") return "pending";
+  return "idle";
+};
+
+// Active roles = audit agents with active>0 ∪ roles named in a working worker's task text.
 function activeRoles(state) {
   const hits = new Set();
   for (const a of (state.audit?.agents || [])) if (a.active > 0) hits.add(a.agent);
@@ -135,50 +423,155 @@ function activeRoles(state) {
   return hits;
 }
 
+// Task board rows are built once; renders only update counts so bar widths can transition.
+const lanesEl = document.getElementById("lanes");
+const pipe = el("div", "pipe");
+pipe.setAttribute("aria-hidden", "true");
+lanesEl.appendChild(pipe);
+const laneRows = {};
+for (const name of LANES) {
+  const seg = el("i");
+  seg.dataset.lane = name;
+  pipe.appendChild(seg);
+  const r = el("div", "lrow");
+  r.dataset.lane = name;
+  r.appendChild(el("span", null, name));
+  const bar = el("div", "bar");
+  const fill = el("i");
+  bar.appendChild(fill);
+  r.appendChild(bar);
+  const b = el("b", null, "0");
+  r.appendChild(b);
+  lanesEl.appendChild(r);
+  laneRows[name] = { seg, r, fill, b };
+}
+const kbEmpty = el("div", "empty");
+kbEmpty.appendChild(el("b", null, "Board clear"));
+kbEmpty.appendChild(el("span", null, "No tasks in any lane."));
+lanesEl.appendChild(kbEmpty);
+
 function render(state) {
+  // Lock recreated nodes' pulse animations to wall-clock phase so they don't restart every poll.
+  document.documentElement.style.setProperty("--ph", -(Date.now() % P) + "ms");
+  document.getElementById("pill").className = "pill ok";
   document.getElementById("sub").textContent =
-    `状态 ${new Date(state.ts).toLocaleTimeString()} · ${state.worktrees.length} 仓库 · ${state.terminals.length} 终端`;
+    `SYNC ${clock(new Date(state.ts))} · ${state.worktrees.length} worktrees · ${state.terminals.length} terminals`;
   const working = state.workers.filter(isWorking).length;
   const present = state.workers.filter(isPresent).length;
   const subActive = (state.audit?.agents || []).reduce((n, a) => n + a.active, 0);
-  document.getElementById("k-work").textContent = working;
-  document.getElementById("k-present").textContent = present;
-  document.getElementById("k-sub").textContent = subActive;
-  document.getElementById("k-term").textContent = state.terminals.length;
-  document.getElementById("k-kb").textContent = state.kanban.length;
+  setKpi("k-work", working);
+  setKpi("k-present", present);
+  setKpi("k-sub", subActive);
+  setKpi("k-term", state.terminals.length);
+  setKpi("k-kb", state.kanban.length);
 
   if (!seeded) {
     seeded = true;
-    events.unshift(`已连接 · 工作中 ${working} / 在场 ${present} / 子 agent ${subActive} / 终端 ${state.terminals.length} / kanban ${state.kanban.length}`);
+    log("sys", `Link established · working ${working} / present ${present} / subagents ${subActive} / terminals ${state.terminals.length} / kanban ${state.kanban.length}`);
   }
 
-  // live floor
-  const wrap = document.getElementById("workers");
-  wrap.textContent = "";
-  const rank = (w) => (isWorking(w) ? 0 : isPresent(w) ? 1 : 2);
-  const ordered = [...state.workers].sort((a, b) => rank(a) - rank(b));
-  if (!ordered.length) {
-    wrap.appendChild(el("div", "empty", "当前没有 Orca 监督的工人（orca orchestration worker-start 派发后出现在这里）"));
+  // 01 live floor: state partition dial
+  const floor = document.getElementById("workers");
+  const counts = { live: 0, present: 0, pending: 0, failed: 0, archived: 0, idle: 0 };
+  for (const w of state.workers) counts[floorState(w)]++;
+  const total = state.workers.length;
+  const gap = STATES.filter(k => counts[k]).length > 1 ? 3 : 0;
+  let off = 0;
+  for (const k of STATES) {
+    const n = counts[k], len = total ? DIAL_C * n / total : 0;
+    const seg = floor.querySelector(`circle[data-k=${k}]`);
+    seg.style.strokeDasharray = `${Math.max(0, len - gap)} ${DIAL_C}`;
+    seg.style.strokeDashoffset = String(-off);
+    off += len;
+    const li = floor.querySelector(`li[data-k=${k}]`);
+    li.classList.toggle("z", !n);
+    li.querySelector("b").textContent = n;
+    li.querySelector("em").textContent = total ? Math.round(n / total * 100) + "%" : "—";
   }
-  for (const w of ordered.slice(0, 24)) {
-    const cls = "w" + (isWorking(w) ? " live" : isPresent(w) ? " present" : "");
-    const card = el("div", cls);
-    const top = el("div", "top");
-    top.appendChild(el("span", "dot " + dotClass(w)));
-    top.appendChild(el("span", "label", short(w.label || w.dispatchId, 34)));
-    top.appendChild(el("span", "state", w.workerState || w.dispatchStatus || "-"));
-    card.appendChild(top);
-    card.appendChild(el("div", "id", short(w.dispatchId, 20) + (w.worktreeName ? " · " + w.worktreeName : "")));
-    const meta = el("div", "meta");
-    meta.appendChild(el("span", null, "liveness: " + (w.liveness || "-") + (w.livenessReason ? ` (${w.livenessReason})` : "")));
-    meta.appendChild(el("span", null, "term: " + (w.terminalState || "-")));
-    if (w.taskTitle) meta.appendChild(el("span", null, "task: " + short(w.taskTitle, 26)));
-    if (w.nextAction) meta.appendChild(el("span", null, "next: " + w.nextAction));
-    card.appendChild(meta);
-    wrap.appendChild(card);
+  document.getElementById("w-total").textContent = total;
+  const wNote = document.getElementById("w-note");
+  wNote.textContent = "";
+  if (!total) {
+    wNote.appendChild(el("b", null, "No supervised workers"));
+    wNote.appendChild(document.createTextNode(" · dispatch with orca orchestration worker-start"));
+  } else {
+    const parts = [`${counts.live} working`, `${counts.present} present`, `${counts.archived} archived`];
+    if (counts.failed) parts.push(`${counts.failed} failed`);
+    if (counts.pending) parts.push(`${counts.pending} pending`);
+    wNote.textContent = parts.join(" · ");
   }
 
-  // CCGS subagents（审计流）
+  // 02 task board: non-empty lanes as bars
+  const byStatus = {};
+  for (const t of state.kanban) (byStatus[t.status || "todo"] ||= []).push(t);
+  const lc = LANES.map(n => Number((byStatus[n] || []).length || (state.kanbanStats?.[n] ?? 0)) || 0);
+  const max = Math.max(1, ...lc);
+  const sum = lc.reduce((a, b) => a + b, 0);
+  LANES.forEach((name, i) => {
+    const c = lc[i], x = laneRows[name];
+    x.r.hidden = !c;
+    x.seg.hidden = !c;
+    x.seg.style.flexGrow = c;
+    x.fill.style.width = (c / max * 100) + "%";
+    x.b.textContent = c;
+  });
+  pipe.hidden = !sum;
+  kbEmpty.hidden = sum > 0;
+  document.getElementById("kb-note").textContent = `Hermes · ${sum} tasks · ${lc.filter(Boolean).length} of ${LANES.length} lanes`;
+
+  // 03 studio roster: aggregate per room + capped active list
+  const hits = activeRoles(state);
+  const rooms = document.getElementById("rooms");
+  rooms.textContent = "";
+  let hot = 0, lead = null, leadN = 0;
+  for (const room of roster.rooms) {
+    const members = roster.agents.filter(a => a.room === room);
+    const busy = members.filter(a => hits.has(a.name)).length;
+    if (busy) hot++;
+    if (busy > leadN) { leadN = busy; lead = room; }
+    const box = el("div", "room" + (busy ? " hot" : ""));
+    box.title = `${room}: ${busy} of ${members.length} roles active`;
+    const h = el("h3");
+    h.appendChild(el("b", null, room));
+    h.appendChild(el("span", busy ? "on" : null, `${busy} / ${members.length}`));
+    box.appendChild(h);
+    const ticks = el("div", "ticks");
+    ticks.setAttribute("aria-hidden", "true");
+    for (const a of members) ticks.appendChild(el("i", hits.has(a.name) ? "on" : null));
+    box.appendChild(ticks);
+    rooms.appendChild(box);
+  }
+  const nRoles = roster.agents.length;
+  const t1 = roster.agents.filter(a => a.tier === 1);
+  const t1Busy = t1.filter(a => hits.has(a.name)).length;
+  document.getElementById("roles-n").textContent = hits.size;
+  document.getElementById("roles-of").textContent = `of ${nRoles} active`;
+  document.getElementById("roles-arc").style.strokeDasharray = `${ROLE_C * Math.min(1, hits.size / (nRoles || 1))} ${ROLE_C}`;
+  document.getElementById("roles-gauge").classList.toggle("on", hits.size > 0);
+  const facts = document.getElementById("roles-facts");
+  facts.textContent = "";
+  for (const [k, v, on] of [
+    ["HOT ROOMS", `${hot} / ${roster.rooms.length}`, hot > 0],
+    ["LEAD ROOM", lead || "—", !!lead],
+    ["TIER 1 ACTIVE", `${t1Busy} / ${t1.length}`, t1Busy > 0],
+  ]) {
+    const d = el("div");
+    d.appendChild(el("dt", null, k));
+    d.appendChild(el("dd", on ? "on" : null, v));
+    facts.appendChild(d);
+  }
+  const list = document.getElementById("roles-list");
+  list.textContent = "";
+  const names = [...hits];
+  if (!names.length) list.appendChild(el("span", "none", "No active roles"));
+  for (const name of names.slice(0, 6)) {
+    const a = roster.agents.find(x => x.name === name);
+    list.appendChild(chip(name, null, a ? `${a.room} · ${a.model} · ${a.desc}` : name));
+  }
+  if (names.length > 6) list.appendChild(chip(`+${names.length - 6} more`, "more", names.slice(6).join(", ")));
+  document.getElementById("rooms-note").textContent = `${nRoles} roles · ${roster.rooms.length} rooms · ${hits.size} active`;
+
+  // 04 CCGS subagents (audit stream): totals, top 3, last 2 events
   const note = document.getElementById("audit-note");
   const table = document.getElementById("audit-table");
   const auditEvents = document.getElementById("audit-events");
@@ -186,78 +579,71 @@ function render(state) {
   auditEvents.textContent = "";
   const agents = state.audit?.agents || [];
   if (!state.audit?.source || !agents.length) {
-    note.textContent = state.audit?.source ? `无记录：${state.audit.source}` : "未配置审计源（CCGS_ROOT / AGENT_STUDIO_AUDIT）";
-    table.appendChild(el("div", "empty", "在 CCGS 项目里由 claude 启动子 agent 后，这里会显示每个角色的 invoked/completed。"));
-    table.appendChild(el("div", "hint", "hook：.claude/hooks/log-agent.sh · log-agent-stop.sh → production/session-logs/agent-audit.log"));
+    note.textContent = state.audit?.source ? `No records · ${state.audit.source}` : "No audit source (CCGS_ROOT / AGENT_STUDIO_AUDIT)";
+    const e = el("div", "empty");
+    e.appendChild(el("b", null, "No subagent activity"));
+    e.appendChild(el("span", null, "Launch subagents with claude inside the CCGS project to see per-role invoked / completed counts."));
+    table.appendChild(e);
+    table.appendChild(el("div", "hint", "Hooks: .claude/hooks/log-agent.sh · log-agent-stop.sh → production/session-logs/agent-audit.log"));
   } else {
-    note.textContent = `${agents.length} 个角色有记录 · ${short(state.audit.source, 46)}`;
-    const t = el("table");
-    const head = el("tr");
-    for (const label of ["角色", "invoked", "completed", "active", "最后活动"]) head.appendChild(el("th", null, label));
-    t.appendChild(head);
-    for (const a of [...agents].sort((x, y) => (y.active - x.active) || (y.invoked - x.invoked)).slice(0, 12)) {
-      const tr = el("tr");
-      tr.appendChild(el("td", "role", a.agent));
-      tr.appendChild(el("td", null, String(a.invoked)));
-      tr.appendChild(el("td", null, String(a.completed)));
-      const td = el("td");
-      td.appendChild(el("span", "badge" + (a.active > 0 ? " on" : ""), String(a.active)));
-      tr.appendChild(td);
-      tr.appendChild(el("td", null, a.lastTs.slice(-6)));
-      t.appendChild(tr);
+    note.textContent = `${agents.length} roles recorded · ${short(state.audit.source, 46)}`;
+    note.title = state.audit.source;
+    const inv = agents.reduce((n, a) => n + a.invoked, 0);
+    const done = agents.reduce((n, a) => n + a.completed, 0);
+    const tot = el("div", "tot");
+    for (const [k, v, on] of [["ROLES", agents.length], ["INVOKED", inv], ["COMPLETED", done], ["ACTIVE", subActive, subActive > 0]]) {
+      const d = el("div", on ? "on" : null);
+      d.appendChild(el("b", null, String(v)));
+      d.appendChild(el("span", null, k));
+      tot.appendChild(d);
     }
-    table.appendChild(t);
-    for (const e of [...(state.audit.events || [])].reverse().slice(0, 8)) {
-      const d = el("div");
-      d.appendChild(el("b", null, `${e.ts.slice(-6)}  ${e.kind === "invoked" ? "▶" : "■"} `));
-      d.appendChild(document.createTextNode(`${e.agent} · session ${short(e.session, 10)}`));
+    table.appendChild(tot);
+    const pct = inv ? Math.min(100, Math.round(done / inv * 100)) : 0;
+    const meter = el("div", "meter");
+    meter.appendChild(el("span", "lbl", "Completion"));
+    const bar = el("div", "bar");
+    const fill = el("i");
+    fill.style.width = pct + "%";
+    bar.appendChild(fill);
+    meter.appendChild(bar);
+    meter.appendChild(el("b", null, pct + "%"));
+    table.appendChild(meter);
+    const top = el("div", "top");
+    top.appendChild(el("span", "lbl", "Top roles"));
+    [...agents].sort((x, y) => (y.active - x.active) || (y.invoked - x.invoked)).slice(0, 3).forEach((a, i) => {
+      const r = el("div", "role" + (a.active > 0 ? " on" : ""));
+      r.title = `${a.agent} · last ${ts6(a.lastTs)}`;
+      r.appendChild(el("b", null, String(i + 1).padStart(2, "0")));
+      r.appendChild(el("span", "nm", a.agent));
+      r.appendChild(el("span", "ct", `${a.invoked} inv · ${a.completed} done`));
+      r.appendChild(el("span", "badge" + (a.active > 0 ? " on" : ""), String(a.active)));
+      const ratio = el("i");
+      ratio.style.setProperty("--r", a.invoked ? Math.min(1, a.completed / a.invoked) : 0);
+      r.appendChild(ratio);
+      top.appendChild(r);
+    });
+    table.appendChild(top);
+    const evs = state.audit.events || [];
+    if (evs.length) {
+      const rh = el("div");
+      rh.appendChild(el("span", "lbl", `Event rhythm · last ${evs.length}`));
+      const strip = el("div", "rhythm");
+      strip.setAttribute("aria-hidden", "true");
+      for (const e of evs) strip.appendChild(el("i", e.kind));
+      rh.appendChild(strip);
+      table.appendChild(rh);
+    }
+    for (const e of [...evs].reverse().slice(0, 2)) {
+      const d = el("div", "ev " + e.kind);
+      d.appendChild(el("time", null, ts6(e.ts)));
+      d.appendChild(el("b", null, e.kind === "invoked" ? "▶" : "■"));
+      const txt = el("span");
+      txt.appendChild(el("em", null, e.agent));
+      txt.appendChild(document.createTextNode(` · session ${short(e.session, 10)}`));
+      d.appendChild(txt);
       auditEvents.appendChild(d);
     }
   }
-
-  // kanban
-  const lanes = document.getElementById("lanes");
-  lanes.textContent = "";
-  const byStatus = {};
-  for (const t of state.kanban) (byStatus[t.status || "todo"] ||= []).push(t);
-  for (const name of LANES) {
-    const count = (byStatus[name] || []).length || (state.kanbanStats?.[name] ?? 0);
-    const lane = el("div", "lane" + (count ? "" : " dim"));
-    const h = el("h3");
-    h.appendChild(el("span", null, name));
-    h.appendChild(el("b", null, String(count)));
-    lane.appendChild(h);
-    for (const t of (byStatus[name] || []).slice(0, 6)) {
-      const card = el("div", "card");
-      card.appendChild(el("div", null, short(t.title || t.id, 24)));
-      card.appendChild(el("div", "empty", t.assignee || "unassigned"));
-      lane.appendChild(card);
-    }
-    lanes.appendChild(lane);
-  }
-
-  // rooms
-  const hits = activeRoles(state);
-  const rooms = document.getElementById("rooms");
-  rooms.textContent = "";
-  for (const room of roster.rooms) {
-    const members = roster.agents.filter(a => a.room === room);
-    const busy = members.filter(a => hits.has(a.name)).length;
-    const box = el("div", "room" + (busy ? " hot" : ""));
-    const h = el("h3");
-    h.appendChild(el("b", null, room));
-    h.appendChild(el("span", null, `${members.length}${busy ? " · " + busy + " 忙" : ""}`));
-    box.appendChild(h);
-    const chips = el("div", "chips");
-    for (const a of members) {
-      const chip = el("span", "chip t" + a.tier + (a.model !== "inherit" ? " " + a.model : "") + (hits.has(a.name) ? " busy" : ""), a.name);
-      chip.title = `${a.model} · ${a.desc}`;
-      chips.appendChild(chip);
-    }
-    box.appendChild(chips);
-    rooms.appendChild(box);
-  }
-  document.getElementById("rooms-note").textContent = `49 个角色 · 来自 CCGS 花名册 · ${hits.size} 个角色活跃`;
 
   // diff → activity
   if (prev) {
@@ -265,35 +651,47 @@ function render(state) {
     for (const w of prev.workers) pW[w.dispatchId] = w;
     for (const w of state.workers) {
       const p = pW[w.dispatchId];
-      if (!p) events.unshift(`worker 出现 · ${short(w.label || w.dispatchId, 26)} · ${w.workerState || w.dispatchStatus}`);
+      if (!p) log(floorState(w), `Worker online · ${short(w.label || w.dispatchId, 26)} · ${w.workerState || w.dispatchStatus}`);
       else if (p.workerState !== w.workerState || p.liveness !== w.liveness)
-        events.unshift(`worker ${short(w.dispatchId, 14)} ${p.workerState}/${p.liveness} → ${w.workerState}/${w.liveness}`);
+        log(floorState(w), `Worker ${short(w.dispatchId, 14)} ${p.workerState}/${p.liveness} → ${w.workerState}/${w.liveness}`);
     }
     const pK = {};
     for (const t of (prev.kanban || [])) pK[t.id] = t.status;
-    for (const t of state.kanban) if (pK[t.id] !== undefined && pK[t.id] !== t.status) events.unshift(`task ${short(t.title || t.id, 20)} ${pK[t.id]} → ${t.status}`);
+    for (const t of state.kanban) if (pK[t.id] !== undefined && pK[t.id] !== t.status) log("task", `Task ${short(t.title || t.id, 20)} ${pK[t.id]} → ${t.status}`);
   }
   prev = state;
+  events.length = Math.min(events.length, 40);
 
+  // 05 activity: one-line ticker, latest two events
   const tick = document.getElementById("ticker");
   tick.textContent = "";
-  if (!events.length) tick.appendChild(el("div", "empty", "等待状态变化…"));
-  for (const line of events.slice(0, 12)) {
-    const d = el("div");
-    d.appendChild(el("b", null, new Date().toLocaleTimeString() + "  "));
-    d.appendChild(document.createTextNode(line));
+  if (!events.length) tick.appendChild(el("span", "wait", "Awaiting state changes…"));
+  for (const e of events.slice(0, 2)) {
+    const d = el("div", "tk " + e.k + (e.id > seen ? " fresh" : ""));
+    d.title = e.text;
+    d.appendChild(el("time", null, e.t));
+    d.appendChild(el("span", null, e.text));
     tick.appendChild(d);
   }
+  seen = seq;
+  document.getElementById("ev-n").textContent = seq;
 }
 
+// Self-scheduling poll: 2s while healthy, 5s after consecutive failures, back to 2s on the next success.
 async function tick() {
   try {
+    roster ||= await (await fetch("/roster.json")).json();
     render(await (await fetch("/state", { cache: "no-store" })).json());
+    fails = 0;
   } catch (e) {
-    document.getElementById("sub").textContent = "服务未响应：" + e.message;
+    fails++;
+    document.getElementById("pill").className = "pill err";
+    document.getElementById("sub").textContent =
+      `Server unreachable: ${e.message} · retry in ${(fails >= 2 ? POLL_BACKOFF : POLL) / 1000}s`;
   }
+  setTimeout(tick, fails >= 2 ? POLL_BACKOFF : POLL);
 }
-(async () => { roster = await (await fetch("/roster.json")).json(); await tick(); setInterval(tick, 2000); })();
+tick();
 </script>
 </body>
 </html>
