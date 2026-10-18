@@ -68,6 +68,9 @@
   .pill.ok i{background:var(--teal);box-shadow:0 0 9px var(--teal);animation:blink var(--P) ease-in-out infinite}
   .pill.err{border-color:rgba(255,77,109,.55);color:#ffc2cd;background:rgba(255,77,109,.08)}
   .pill.err i{background:var(--alert);box-shadow:0 0 10px var(--alert)}
+  .pill.stale{border-color:rgba(255,182,72,.55);color:#ffcf7a;background:rgba(255,182,72,.08)}
+  .pill.stale i{background:var(--amber);box-shadow:0 0 10px var(--amber);animation:none}
+  .stage.stale{filter:saturate(.72) brightness(.9)}
   .nav{position:relative;flex:none;--bc:var(--cyan);--l:6px;padding:8px 15px;font:600 12px/1 var(--mono);letter-spacing:.18em;color:var(--cyan);
     text-decoration:none;border:1px solid var(--hair);background:rgba(77,214,255,.05);
     transition:background .2s,border-color .2s,color .2s,box-shadow .2s}
@@ -453,9 +456,14 @@ lanesEl.appendChild(kbEmpty);
 function render(state) {
   // Lock recreated nodes' pulse animations to wall-clock phase so they don't restart every poll.
   document.documentElement.style.setProperty("--ph", -(Date.now() % P) + "ms");
-  document.getElementById("pill").className = "pill ok";
-  document.getElementById("sub").textContent =
-    `SYNC ${clock(new Date(state.ts))} · ${state.worktrees.length} worktrees · ${state.terminals.length} terminals`;
+  const age = Math.max(0, Date.now() - Number(state.ts));
+  const stale = age > 10000;
+  const pill = document.getElementById("pill");
+  pill.className = "pill " + (stale ? "stale" : "ok");
+  stage.classList.toggle("stale", stale);
+  document.getElementById("sub").textContent = stale
+    ? `STALE ${Math.floor(age / 1000)}s`
+    : `SYNC ${clock(new Date(state.ts))} · AGE ${(age / 1000).toFixed(1)}s`;
   const working = state.workers.filter(isWorking).length;
   const present = state.workers.filter(isPresent).length;
   const subActive = (state.audit?.agents || []).reduce((n, a) => n + a.active, 0);
