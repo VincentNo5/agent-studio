@@ -121,6 +121,19 @@
   .hubRing.in{stroke-opacity:.22;stroke-dasharray:2 6;animation-direction:reverse}
   .chev{fill:none;stroke:var(--cyan);stroke-opacity:.25;stroke-width:1.2}
   .corridorLabel{fill:var(--muted);font:600 8.5px var(--mono);letter-spacing:.24em}
+  .taskWallFrame{fill:rgba(6,11,20,.94);stroke:var(--cyan);stroke-opacity:.65;stroke-width:1}
+  .taskWallGlass{fill:rgba(13,31,46,.88);stroke:rgba(77,214,255,.28);stroke-width:.6}
+  .taskWallRule{stroke:rgba(77,214,255,.35);stroke-width:.6}
+  .taskWallHeading,.taskWallMeta{font:600 7px var(--mono);letter-spacing:.2em;fill:var(--cyan)}
+  .taskWallMeta{fill:var(--fg);letter-spacing:.08em}
+  .taskWallLabel,.taskWallCount,.taskWallTitles{font-family:var(--mono);font-size:6.2px;font-weight:600}
+  .taskWallCount{text-anchor:end;font-variant-numeric:tabular-nums}
+  .taskWallTitles{font-weight:400;fill:#b9cce3}
+  .taskWallRow[data-lane="running"] .taskWallLabel,.taskWallRow[data-lane="running"] .taskWallCount{fill:var(--teal)}
+  .taskWallRow[data-lane="blocked"] .taskWallLabel,.taskWallRow[data-lane="blocked"] .taskWallCount{fill:var(--alert)}
+  .taskWallRow[data-lane="review"] .taskWallLabel,.taskWallRow[data-lane="review"] .taskWallCount,.taskWallRow[data-lane="scheduled"] .taskWallLabel,.taskWallRow[data-lane="scheduled"] .taskWallCount{fill:var(--amber)}
+  .taskWallRow[data-lane="done"] .taskWallLabel,.taskWallRow[data-lane="done"] .taskWallCount{fill:#8da2be}
+  .taskWallRow .taskWallLabel,.taskWallRow .taskWallCount{fill:var(--cyan)}
   .exit{fill:var(--teal);font:700 7.5px var(--mono);letter-spacing:.12em}
   .bubble{fill:rgba(7,13,23,.92);stroke:var(--hair)}
   .v.on .bubble{stroke:var(--teal);animation:bub 2.2s ease-in-out infinite}
@@ -575,10 +588,40 @@ function drawPlan() {
     put(svg, plateFront(f, FLOORS[fi - 1], mine));
   });
   put(svg, `<rect class="vig" width="1240" height="824" fill="url(#vign)"/><g id="zoom" pointer-events="none" aria-hidden="true"></g>`);
+  put(svg, `<g id="taskwall" aria-label="Task wall"><rect class="taskWallFrame" x="1070" y="648" width="150" height="130" rx="3"/><rect class="taskWallGlass" x="1075" y="653" width="140" height="120" rx="2"/><path class="taskWallRule" d="M1080 669h130"/><text class="taskWallHeading" x="1081" y="665">TASK WALL</text><text class="taskWallMeta" data-meta="kanban" x="1209" y="665" text-anchor="end">0</text><g class="taskWallRows"></g></g>`);
+}
+
+function updateTaskWall() {
+  const wall = document.getElementById("taskwall"), rows = wall.querySelector(".taskWallRows"), stats = state.kanbanStats || {};
+  rows.textContent = "";
+  const grouped = new Map();
+  for (const task of state.kanban || []) {
+    const lane = task.status || "todo";
+    if (!grouped.has(lane)) grouped.set(lane, []);
+    grouped.get(lane).push(task);
+  }
+  const lanes = [...new Set([...Object.keys(stats), ...grouped.keys()])];
+  const order = ["triage", "todo", "scheduled", "ready", "running", "review", "blocked", "done"];
+  lanes.sort((a, b) => (order.indexOf(a) < 0 ? order.length : order.indexOf(a)) - (order.indexOf(b) < 0 ? order.length : order.indexOf(b)) || a.localeCompare(b));
+  wall.querySelector('[data-meta="kanban"]').textContent = String((state.kanban || []).length);
+  if (!(state.kanban || []).length) {
+    rows.appendChild(mk("text", { class: "taskWallTitles", x: 1081, y: 710 }, "BOARD CLEAR — NO TASKS"));
+    return;
+  }
+  lanes.slice(0, 8).forEach((lane, i) => {
+    const tasks = grouped.get(lane) || [], count = Math.max(tasks.length, Number(stats[lane]) || 0);
+    const y = 680 + i * 12, row = mk("g", { class: "taskWallRow", "data-lane": lane });
+    row.appendChild(mk("text", { class: "taskWallLabel", x: 1081, y }, lane.toUpperCase()));
+    row.appendChild(mk("text", { class: "taskWallCount", x: 1128, y }, String(count)));
+    const titles = tasks.slice(0, 3).map((task) => clip(task.title || task.id || "Untitled task", 5)).join(" · ");
+    row.appendChild(mk("text", { class: "taskWallTitles", x: 1135, y }, titles));
+    rows.appendChild(row);
+  });
 }
 
 function paint(st) {
   state = st;
+  updateTaskWall();
   const hits = activeRoles();
   const svg = document.getElementById("plan"), zl = document.getElementById("zoom"), vis = document.getElementById("vis");
 
