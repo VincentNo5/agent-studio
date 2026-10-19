@@ -580,6 +580,21 @@ function isAllowed(address: string | null | undefined): boolean {
   });
 }
 
+/** Bounded live output for one dispatch, straight from `orca orchestration worker-read`. */
+async function workerOutput(rawId: string): Promise<Response> {
+  const id = decodeURIComponent(rawId);
+  // The id is an argv element (no shell is involved), but keep it to the ids Orca emits.
+  if (!/^[A-Za-z0-9_.:-]{1,128}$/.test(id)) {
+    return Response.json({ error: "invalid dispatch id" }, { status: 400 });
+  }
+  const raw = await run(["orca", "orchestration", "worker-read", "--dispatch", id, "--source", "auto", "--json"], 8000);
+  const parsed = readJson(raw) as { result?: unknown; error?: unknown } | null;
+  if (!parsed || parsed.result === undefined) {
+    return Response.json({ error: parsed?.error ?? "worker-read returned no result" }, { status: 502 });
+  }
+  return Response.json(parsed.result, { headers: { "cache-control": "no-store" } });
+}
+
 Bun.serve({
   port: PORT,
   idleTimeout: 60,
@@ -602,6 +617,9 @@ Bun.serve({
     }
     if (path === "/mobile") {
       return new Response(Bun.file(`${DIR}/mobile.html`), { headers: { "content-type": "text/html; charset=utf-8" } });
+    }
+    if (path.startsWith("/worker/")) {
+      return workerOutput(path.slice("/worker/".length));
     }
     return new Response(Bun.file(`${DIR}/index.html`), { headers: { "content-type": "text/html; charset=utf-8" } });
   },

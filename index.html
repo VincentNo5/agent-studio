@@ -203,6 +203,23 @@
   .rh-w span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .rh-w .ai{color:var(--cyan);letter-spacing:.06em}
   .rh-w .st{letter-spacing:.1em;text-transform:uppercase;color:var(--s,var(--muted))}
+  .rh-w{cursor:pointer}
+  .rh-w:hover{background:rgba(77,214,255,.06)}
+  .rh-hint{padding:4px 7px 0;font:9.5px/1 var(--mono);letter-spacing:.14em;color:var(--muted);text-transform:uppercase}
+
+  /* ---------- worker output overlay: the tail Orca holds for one dispatch ---------- */
+  .out{position:absolute;right:24px;bottom:70px;z-index:40;display:flex;flex-direction:column;width:860px;max-height:560px;
+    background:rgba(8,13,21,.97);border:1px solid var(--hair);box-shadow:0 26px 60px -22px #000}
+  .out[hidden]{display:none}
+  .out-head{display:flex;align-items:center;gap:10px;padding:9px 12px;border-bottom:1px solid var(--hair);
+    font:600 10px/1 var(--mono);letter-spacing:.16em;color:var(--muted);text-transform:uppercase}
+  .out-head b{color:var(--fg);font-weight:600;letter-spacing:.04em;text-transform:none}
+  .out-head .ai{color:var(--cyan);letter-spacing:.04em;text-transform:none}
+  .out-head button{margin-left:auto;background:none;border:1px solid var(--hair);color:var(--cyan);cursor:pointer;
+    font:600 10px/1 var(--mono);letter-spacing:.14em;padding:4px 8px}
+  .out-head button:hover{color:var(--fg);border-color:var(--cyan)}
+  .out-body{margin:0;padding:10px 12px;overflow:auto;max-height:480px;white-space:pre-wrap;word-break:break-word;
+    font:11px/1.45 var(--mono);color:#c8d6e6}
 
   /* ---------- 02 task board: lane bars ---------- */
   [data-lane]{--s:var(--cyan)} [data-lane=running]{--s:var(--teal)} [data-lane=blocked]{--s:var(--alert)}
@@ -428,6 +445,16 @@
     <div class="ticker" id="ticker"><span class="wait">Awaiting state changes…</span></div>
     <span class="sr">STATE DIFF · <span id="ev-n">0</span> EVENTS</span>
   </footer>
+
+  <div class="out" id="out" hidden>
+    <div class="out-head">
+      <b id="out-id">dispatch</b>
+      <span class="ai" id="out-agent"></span>
+      <span id="out-state"></span>
+      <button id="out-close">close ✕</button>
+    </div>
+    <pre class="out-body" id="out-body">Loading…</pre>
+  </div>
 </div>
 <script>
 const LANES = ["triage","todo","scheduled","ready","running","review","blocked","done"];
@@ -636,11 +663,63 @@ function renderRuns() {
     row.appendChild(el("span", null, short(w.label || w.taskTitle || w.dispatchId || "(dispatch)", 40)));
     row.appendChild(el("span", "ai", w.agent || "—"));
     row.appendChild(el("span", "st", state));
+    row.addEventListener("click", () => openOutput(w.dispatchId, w.label || w.taskTitle, w.agent));
     det.appendChild(row);
   }
   if (!picked.workers.length) det.appendChild(el("div", "rh-w", "No dispatches recorded for this run."));
+  else det.appendChild(el("div", "rh-hint", "click a dispatch for its output"));
   box.appendChild(det);
 }
+
+// ---- worker output: the tail Orca holds for one dispatch, read on demand ----
+let outOpen = null;   // dispatch id under watch
+let outTimer = null;
+
+async function refreshOutput() {
+  if (!outOpen) return;
+  const body = document.getElementById("out-body");
+  try {
+    const res = await fetch(`/worker/${encodeURIComponent(outOpen)}`, { cache: "no-store" });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data && data.error ? data.error : `HTTP ${res.status}`);
+    const term = data.terminal || {};
+    const status = data.status || {};
+    document.getElementById("out-state").textContent = [status.worker, status.terminal, status.liveness].filter(Boolean).join(" / ");
+    const lines = term.tail || [];
+    body.textContent = lines.length
+      ? lines.join("\n")
+      : [
+          "(no output buffered)",
+          "",
+          `source: ${data.source || "—"}   terminal: ${term.status || "—"}   lines: ${term.returnedLineCount ?? 0}`,
+          data.fallbackReason ? `note: ${data.fallbackReason}` : null,
+          "Orca holds a terminal tail only while that terminal lives, so a finished dispatch reads empty.",
+        ].filter((line) => line !== null).join("\n");
+  } catch (err) {
+    body.textContent = `worker-read failed: ${(err && err.message) || err}`;
+  }
+}
+
+function openOutput(dispatchId, label, agent) {
+  if (!dispatchId) return;
+  outOpen = dispatchId;
+  document.getElementById("out-id").textContent = short(label || dispatchId, 52);
+  document.getElementById("out-agent").textContent = agent || "";
+  document.getElementById("out").hidden = false;
+  document.getElementById("out-body").textContent = "Loading…";
+  refreshOutput();
+  if (outTimer) clearInterval(outTimer);
+  outTimer = setInterval(refreshOutput, 2000);
+}
+
+function closeOutput() {
+  outOpen = null;
+  if (outTimer) { clearInterval(outTimer); outTimer = null; }
+  document.getElementById("out").hidden = true;
+}
+
+document.getElementById("out-close").addEventListener("click", closeOutput);
+document.addEventListener("keydown", (event) => { if (event.key === "Escape") closeOutput(); });
 
 function render(state) {
   // Lock recreated nodes' pulse animations to wall-clock phase so they don't restart every poll.

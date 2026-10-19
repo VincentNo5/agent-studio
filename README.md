@@ -76,6 +76,12 @@ left out; the panel prints that under the dial.
 it up for the dispatches on the floor and for the newest run, caches it per dispatch — it never
 changes — and the floor, the history detail and the mobile view all name it (`ORCA · claude`).
 
+**Worker output.** `/worker/<dispatch-id>` proxies `orca orchestration worker-read --source auto`
+(bounded tail) for one dispatch. The history detail opens it in an overlay and refreshes it every
+two seconds while open; ids are validated, and a dispatch Orca cannot read answers `502` rather
+than an empty box. Orca holds a terminal tail only while that terminal lives, so a finished
+dispatch reads empty — the overlay says so, with the source, terminal status and line count.
+
 Everything is read-only: the server only reads CLI output and log files.
 
 ## Layout: one screen, no scrolling
