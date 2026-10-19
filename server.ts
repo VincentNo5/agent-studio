@@ -58,9 +58,25 @@ const TTL_MS = Number(process.env.AGENT_STUDIO_TTL_MS ?? 1500);
 const FLOOR_GRACE_MS = Number(process.env.AGENT_STUDIO_FLOOR_GRACE_MS ?? 30 * 60_000);
 /** How many runs the history view keeps (newest first). */
 const RUN_HISTORY_LIMIT = Number(process.env.AGENT_STUDIO_RUN_HISTORY ?? 10);
+/** How many worker-show lookups one collect may spawn, to fill in the launched agent. */
+const AGENT_LOOKUP_LIMIT = Number(process.env.AGENT_STUDIO_AGENT_LOOKUPS ?? 12);
 
 /** A worker still moving: its terminal is live, or its dispatch has not settled. */
 const isMovingWorker = (w: WorkerView) => w.liveness === "live" || w.dispatchStatus === "pending";
+
+/** What `worker-show` reports about a dispatch's launch, cached because it never changes. */
+interface DispatchAgent {
+  agent: string | null;
+  model: string | null;
+  exitCause: string | null;
+}
+const agentByDispatch = new Map<string, DispatchAgent>();
+
+function applyDispatchAgent(worker: WorkerView, info: DispatchAgent): void {
+  worker.agent = info.agent ?? worker.agent;
+  worker.model = info.model;
+  worker.exitCause = info.exitCause;
+}
 
 interface OrcaWorkerRow {
   dispatchId?: string;
@@ -81,7 +97,16 @@ interface OrcaWorkerRow {
 
 interface OrcaTerminalRow { handle?: string; title?: string; status?: string }
 interface OrcaWorktreeRow { displayName?: string; branch?: string; path?: string }
-interface OrcaTaskRow { id?: string; title?: string; spec?: string; status?: string; assignee?: string }
+interface OrcaTaskRow {
+  id?: string;
+  /** Orca emits `task_title`; `title`/`display_name` cover older payloads. */
+  task_title?: string;
+  title?: string;
+  display_name?: string;
+  spec?: string;
+  status?: string;
+  assignee?: string;
+}
 interface OrcaRunRow {
   id?: string;
   objective?: string;
@@ -89,6 +114,16 @@ interface OrcaRunRow {
   legacy?: number;
   created_at?: string;
   updated_at?: string;
+}
+/** `orca orchestration worker-show` — the only place Orca records the launched agent. */
+interface OrcaDispatchDetail {
+  worker?: {
+    startOptions?: {
+      agent?: string;
+      launch?: { requested?: { agent?: string; model?: string }; effective?: { agent?: string; model?: string } };
+    };
+  };
+  terminal?: { exitCause?: { kind?: string } };
 }
 
 interface WorkerView {
@@ -109,7 +144,12 @@ interface WorkerView {
   liveness: string | null;
   livenessReason: string | null;
   nextAction: string | null;
+  /** Which AI the dispatch launched: worker-show only — worker-list reports a null agent. */
   agent: string | null;
+  /** Launched model, when worker-show reports one. */
+  model: string | null;
+  /** Terminal exit cause from worker-show, e.g. operator_close. */
+  exitCause: string | null;
   host: string | null;
 }
 
@@ -363,12 +403,14 @@ async function collect(): Promise<StudioState> {
       worktreeId,
       label: (handle ? titleByHandle[handle] : undefined) ?? null,
       worktreeName: (path ? nameByPath[path] : undefined) ?? worktreeLeaf(worktreeId),
-      taskTitle: task?.title ?? null,
+      taskTitle: task?.task_title ?? task?.title ?? task?.display_name ?? null,
       taskSpec: task?.spec ?? null,
       liveness: row.projection?.liveness?.verdict ?? null,
       livenessReason: row.projection?.liveness?.reason ?? null,
       nextAction: row.projection?.nextAction?.kind ?? null,
       agent: row.projection?.agent ?? null,
+      model: null,
+      exitCause: null,
       host: row.projection?.host?.id ?? null,
     };
   });
@@ -389,6 +431,43 @@ async function collect(): Promise<StudioState> {
 
   // The floor is a live view, not an archive: scope it to the current run.
   const { workers: onFloor, scope: workerScope } = selectFloor(workers, runRows, coordinator);
+
+  // `worker-list` reports a null projection.agent, so the AI a dispatch launched is only in
+  // `worker-show` — and it never changes, so one lookup per dispatch is cached for the life of
+  // the server. The floor's dispatches and the newest run's are filled first; misses are capped
+  // per collect, so a fresh run of 22 fills in over a few polls instead of stalling one.
+  const targets: WorkerView[] = [];
+  const seen = new Set<string>();
+  for (const worker of workers) {
+    if (!worker.dispatchId || seen.has(worker.dispatchId)) continue;
+    if (!isMovingWorker(worker) && (workerScope.runId === null || worker.runId !== workerScope.runId)) continue;
+    seen.add(worker.dispatchId);
+    targets.push(worker);
+  }
+  targets.sort((a, b) => Number(isMovingWorker(b)) - Number(isMovingWorker(a)));
+  let misses = 0;
+  await Promise.all(targets.map(async (worker) => {
+    const id = worker.dispatchId as string;
+    const cached = agentByDispatch.get(id);
+    if (cached) {
+      applyDispatchAgent(worker, cached);
+      return;
+    }
+    if (misses++ >= AGENT_LOOKUP_LIMIT) return;
+    const raw = await run(["orca", "orchestration", "worker-show", "--dispatch", id, "--json"]);
+    const detail = readJson(raw) as { result?: OrcaDispatchDetail } | null;
+    const launch = detail?.result?.worker?.startOptions?.launch;
+    const info: DispatchAgent = {
+      agent: launch?.effective?.agent ?? detail?.result?.worker?.startOptions?.agent ?? null,
+      model: launch?.effective?.model ?? launch?.requested?.model ?? null,
+      exitCause: detail?.result?.terminal?.exitCause?.kind ?? null,
+    };
+    agentByDispatch.set(id, info);
+    applyDispatchAgent(worker, info);
+  }));
+  if (agentByDispatch.size > 2000) {
+    for (const key of [...agentByDispatch.keys()].slice(0, 1000)) agentByDispatch.delete(key);
+  }
 
   // Everything the floor left out still has to be inspectable, so group the same dispatches
   // by run and hand the history to the panel. One entry per run Orca reports, newest first.
