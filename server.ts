@@ -285,20 +285,29 @@ function auditLogPath(): string | null {
  * it returns every dispatch of every run, newest first, forever. Left unfiltered, a finished
  * smoke test keeps its failures in the FAILED dial indefinitely.
  *
- * So: pick the newest non-legacy run for the configured coordinator (else the newest overall),
+ * So: pick the newest non-legacy run that still owns a moving worker, else the newest overall;
  * keep its dispatches while it is still moving or within FLOOR_GRACE_MS of its creation, and
  * never hide a worker that is still live or pending — a hidden live worker would be a lie.
+ *
+ * The configured coordinator is deliberately not a filter here: its newest run can be days old,
+ * and preferring it unconditionally hid every newer run started from another terminal (for
+ * example an omp session dispatching a `/team` batch).
  */
 function selectFloor(
   workers: WorkerView[],
   runs: OrcaRunRow[],
-  coordinator: string | undefined,
 ): { workers: WorkerView[]; scope: WorkerScope } {
   const candidates = runs.filter((r) => r.legacy !== 1 && r.id);
-  const owned = coordinator ? candidates.filter((r) => r.coordinator_handle === coordinator) : [];
-  const run = (owned.length ? owned : candidates)
+  const byNewest = candidates
     .slice()
-    .sort((a, b) => (b.created_at ?? "").localeCompare(a.created_at ?? ""))[0];
+    .sort((a, b) => (b.created_at ?? "").localeCompare(a.created_at ?? ""));
+  const movingRuns = new Set(
+    workers
+      .filter(isMovingWorker)
+      .map((w) => w.runId)
+      .filter((id): id is string => id !== null),
+  );
+  const run = byNewest.find((r) => r.id !== null && movingRuns.has(r.id)) ?? byNewest[0];
 
   if (!run?.id) {
     const moving = workers.filter(isMovingWorker);
@@ -449,7 +458,7 @@ async function collect(): Promise<StudioState> {
   }
 
   // The floor is a live view, not an archive: scope it to the current run.
-  const { workers: onFloor, scope: workerScope } = selectFloor(workers, runRows, coordinator);
+  const { workers: onFloor, scope: workerScope } = selectFloor(workers, runRows);
 
   // `worker-list` reports a null projection.agent, so the AI a dispatch launched is only in
   // `worker-show` — and it never changes, so one lookup per dispatch is cached for the life of

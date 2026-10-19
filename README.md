@@ -66,11 +66,13 @@ Environment:
 **Floor scope.** `orca orchestration worker-list` has no run binding when a service calls it, so its
 receipt says `scope.source: "all"` and it returns every dispatch of every run, newest first, forever:
 a finished smoke test would keep its failures in the FAILED dial for good. `/state` therefore scopes
-the floor to the newest non-legacy run for `ORCA_COORDINATOR` (else the newest run overall), keeps
-that run while it owns a live or pending worker or is within `AGENT_STUDIO_FLOOR_GRACE_MS` of its
-creation, and never hides a worker that is still live or pending — a hidden live worker would be a
-lie. The `workerScope` field reports the run shown, whether it is live, and how many dispatches were
-left out; the panel prints that under the dial.
+the floor to the newest non-legacy run that still owns a live or pending worker, else the newest run
+overall. It keeps that run while it owns a live or pending worker or is within
+`AGENT_STUDIO_FLOOR_GRACE_MS` of its creation, and never hides a worker that is still live or
+pending — a hidden live worker would be a lie. `ORCA_COORDINATOR` is not a floor filter: it only
+feeds the task board, so a run started from an omp `/team` session shows up too. The `workerScope`
+field reports the run shown, whether it is live, and how many dispatches were left out; the panel
+prints that under the dial.
 
 **Task board sources.** The board has two sources, and Orca wins. When `ORCA_COORDINATOR` is set
 and `orca orchestration task-list --from <handle>` returns any tasks, `/state` carries them in
