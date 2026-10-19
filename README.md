@@ -59,6 +59,7 @@ Environment:
 | `AGENT_STUDIO_TTL_MS` | `1500` | Shared `/state` cache window. Every collect spawns CLI processes, so all clients share one collect per TTL; concurrent callers join the in-flight promise. Before this, several tabs polling every 2 s queued behind each other and `/state` took ~9 s. |
 | `AGENT_STUDIO_FLOOR_GRACE_MS` | `1800000` (30 min) | How long a finished run keeps its dispatches on the floor before they fade. A run that still owns a live or pending worker is never hidden, whatever this says. |
 | `AGENT_STUDIO_RUN_HISTORY` | `10` | How many runs `/state` carries in `runs` for the history view, newest first. |
+| `AGENT_STUDIO_AGENT_LOOKUPS` | `12` | `worker-show` lookups per collect that fill in which AI a dispatch launched. Results are cached per dispatch, so this only bounds a cold start. |
 | `PATH` | inherited | **Must include the directories holding `orca` and `hermes`** — see the launchd note below |
 
 **Floor scope.** `orca orchestration worker-list` has no run binding when a service calls it, so its
@@ -69,6 +70,11 @@ that run while it owns a live or pending worker or is within `AGENT_STUDIO_FLOOR
 creation, and never hides a worker that is still live or pending — a hidden live worker would be a
 lie. The `workerScope` field reports the run shown, whether it is live, and how many dispatches were
 left out; the panel prints that under the dial.
+
+**Which AI is working.** `worker-list` reports a null `projection.agent`, so the launched agent
+(and model, and terminal exit cause) is only in `orca orchestration worker-show`. The server looks
+it up for the dispatches on the floor and for the newest run, caches it per dispatch — it never
+changes — and the floor, the history detail and the mobile view all name it (`ORCA · claude`).
 
 Everything is read-only: the server only reads CLI output and log files.
 

@@ -166,7 +166,8 @@
     $("present-count").textContent = workerPresent.length;
     $("pending-count").textContent = pending.length;
     const list = workerPresent.map((worker) => ({
-      source: "ORCA", name: worker.label || worker.agent || worker.dispatchId || "Unnamed worker",
+      source: worker.agent ? `ORCA · ${worker.agent}` : "ORCA",
+      name: worker.label || worker.taskTitle || worker.dispatchId || "Unnamed worker",
       state: working(worker) ? "working" : worker.dispatchStatus === "pending" ? "pending" : "present"
     }));
     const paseo = Array.isArray(state.paseo) ? state.paseo : [];

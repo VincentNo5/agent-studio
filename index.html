@@ -193,9 +193,10 @@
   .rh-run .n{font-variant-numeric:tabular-nums}
   .rh-run .bad{color:var(--alert);font-variant-numeric:tabular-nums}
   .rh-det{display:flex;flex-direction:column;gap:1px;min-height:0;overflow:hidden;border-top:1px dashed var(--hair);padding-top:4px}
-  .rh-w{display:grid;grid-template-columns:7px minmax(0,1fr) auto;align-items:center;gap:8px;font:10.5px/1.35 var(--mono);color:var(--muted)}
+  .rh-w{display:grid;grid-template-columns:7px minmax(0,1fr) auto auto;align-items:center;gap:8px;font:10.5px/1.35 var(--mono);color:var(--muted)}
   .rh-w i{width:6px;height:6px;transform:rotate(45deg);background:var(--s,var(--muted))}
   .rh-w span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .rh-w .ai{color:var(--cyan);letter-spacing:.06em}
   .rh-w .st{letter-spacing:.1em;text-transform:uppercase;color:var(--s,var(--muted))}
 
   /* ---------- 02 task board: lane bars ---------- */
@@ -595,12 +596,19 @@ function renderRuns() {
   for (const run of runsCache.slice(0, 5)) {
     const row = el("div", "rh-run");
     row.dataset.on = run.id === runsPick ? "1" : "0";
-    row.title = [run.objective || run.id, `coordinator: ${run.coordinatorHandle || "—"}`, `started: ${run.createdAt || "—"}`].join("\n");
+    // Orca records the launched AI per dispatch, so a run can name it when they all agree.
+    const agents = [...new Set(run.workers.map((w) => w.agent).filter(Boolean))];
+    row.title = [
+      run.objective || run.id,
+      `coordinator: ${run.coordinatorHandle || "—"}`,
+      `started: ${run.createdAt || "—"}`,
+      agents.length ? `agents: ${agents.join(", ")}` : null,
+    ].filter(Boolean).join("\n");
     const dot = el("i");
     dot.style.setProperty("--s", run.live ? FLOOR_TONE.live : run.failed ? FLOOR_TONE.failed : "var(--archived)");
     row.appendChild(dot);
     row.appendChild(el("b", null, short(run.objective || run.id, 32) + (run.legacy ? " · legacy" : "")));
-    row.appendChild(el("span", "n", `${run.total} dispatch${run.total === 1 ? "" : "es"}`));
+    row.appendChild(el("span", "n", `${agents.length === 1 ? `${agents[0]} · ` : ""}${run.total} dispatch${run.total === 1 ? "" : "es"}`));
     row.appendChild(el("span", run.failed ? "bad" : "n", run.failed ? `${run.failed} failed` : `${ageLabel(run.createdAt)} ago`));
     row.addEventListener("click", () => { runsPick = runsPick === run.id ? null : run.id; renderRuns(); });
     list.appendChild(row);
@@ -612,12 +620,14 @@ function renderRuns() {
   for (const w of picked.workers.slice(0, 6)) {
     const state = floorState(w);
     const row = el("div", "rh-w");
-    row.title = [w.dispatchId, w.workerState, w.dispatchStatus, w.liveness && `liveness: ${w.liveness}`, w.livenessReason, w.taskTitle]
+    row.title = [w.dispatchId, w.agent && `agent: ${w.agent}`, w.model && `model: ${w.model}`, w.workerState, w.dispatchStatus,
+      w.liveness && `liveness: ${w.liveness}`, w.livenessReason, w.exitCause && `exit: ${w.exitCause}`, w.taskTitle]
       .filter(Boolean).join(" · ");
     const dot = el("i");
     dot.style.setProperty("--s", FLOOR_TONE[state]);
     row.appendChild(dot);
-    row.appendChild(el("span", null, short(w.label || w.taskTitle || w.dispatchId || "(dispatch)", 46)));
+    row.appendChild(el("span", null, short(w.label || w.taskTitle || w.dispatchId || "(dispatch)", 40)));
+    row.appendChild(el("span", "ai", w.agent || "—"));
     row.appendChild(el("span", "st", state));
     det.appendChild(row);
   }

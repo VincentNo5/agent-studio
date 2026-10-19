@@ -681,7 +681,8 @@ function paint(st) {
   for (const old of svg.querySelectorAll("g[data-visitor], .corrEmpty")) old.remove();
   const lobby = FLOORS[FLOORS.length - 1], visitors = state.workers.filter(isPresent).slice(0, 7);
   visitors.forEach((w, i) => {
-    const [X, Y] = XY(lobby, 105 + i * 118, 120), on = isWorking(w), who = w.label || w.dispatchId, top = Y - 112;
+    const [X, Y] = XY(lobby, 105 + i * 118, 120), on = isWorking(w), top = Y - 112;
+    const who = [w.agent, w.label || w.dispatchId].filter(Boolean).join(" · ");
     const g = mk("g", { class: "v" + (on ? " on" : ""), "data-visitor": w.dispatchId });
     g.appendChild(mk("path", { class: "bubble", d: `M${X - 50} ${top}h100a6 6 0 0 1 6 6v34a6 6 0 0 1-6 6H${X + 6}l-6 6-6-6H${X - 50}a6 6 0 0 1-6-6v-34a6 6 0 0 1 6-6Z` }));
     const [l1, l2] = wrap(w.taskTitle || who, 17), t = mk("text", { class: "visitorText", x: X - 48, y: top + 14 });
