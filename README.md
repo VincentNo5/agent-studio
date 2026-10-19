@@ -58,6 +58,7 @@ Environment:
 | `AGENT_STUDIO_AUDIT` | unset | Point directly at an audit log file (overrides `CCGS_ROOT`) |
 | `AGENT_STUDIO_TTL_MS` | `1500` | Shared `/state` cache window. Every collect spawns CLI processes, so all clients share one collect per TTL; concurrent callers join the in-flight promise. Before this, several tabs polling every 2 s queued behind each other and `/state` took ~9 s. |
 | `AGENT_STUDIO_FLOOR_GRACE_MS` | `1800000` (30 min) | How long a finished run keeps its dispatches on the floor before they fade. A run that still owns a live or pending worker is never hidden, whatever this says. |
+| `AGENT_STUDIO_RUN_HISTORY` | `10` | How many runs `/state` carries in `runs` for the history view, newest first. |
 | `PATH` | inherited | **Must include the directories holding `orca` and `hermes`** — see the launchd note below |
 
 **Floor scope.** `orca orchestration worker-list` has no run binding when a service calls it, so its
