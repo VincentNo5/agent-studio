@@ -51,6 +51,9 @@ interface QuotaView {
 }
 
 
+import { resolve, sep } from "node:path";
+import { realpath } from "node:fs/promises";
+
 const DIR = import.meta.dir;
 const PORT = Number(process.env.PORT ?? 8787);
 const TTL_MS = Number(process.env.AGENT_STUDIO_TTL_MS ?? 1500);
@@ -634,6 +637,28 @@ Bun.serve({
       });
     }
     const path = new URL(req.url).pathname;
+    // Desktop assets only. Reject encoded traversal, Windows separators and symlink escapes.
+    if (path.startsWith("/assets/") || path.startsWith("/vendor/three/")) {
+      const vendor = path.startsWith("/vendor/three/");
+      const root = resolve(DIR, vendor ? "node_modules/three" : "public");
+      let relative: string;
+      try { relative = decodeURIComponent(path.slice(vendor ? 14 : 8)); }
+      catch { return new Response("Bad path", { status: 400 }); }
+      if (!relative || relative.includes("\\") || relative.includes("\0") || relative.split("/").some(p => p === ".." || p === ".")) {
+        return new Response("Forbidden", { status: 403 });
+      }
+      const target = resolve(root, relative);
+      if (!target.startsWith(root + sep)) return new Response("Forbidden", { status: 403 });
+      try {
+        const [realRoot, realTarget] = await Promise.all([realpath(root), realpath(target)]);
+        if (!realTarget.startsWith(realRoot + sep)) return new Response("Forbidden", { status: 403 });
+        const file = Bun.file(realTarget);
+        if (!(await file.exists())) return new Response("Not found", { status: 404 });
+        const ext = relative.split(".").pop() || "";
+        const types: Record<string, string> = { js: "text/javascript; charset=utf-8", css: "text/css; charset=utf-8", json: "application/json", svg: "image/svg+xml", png: "image/png", woff2: "font/woff2" };
+        return new Response(file, { headers: { "content-type": types[ext] || "application/octet-stream", "x-content-type-options": "nosniff", ...(vendor ? {} : { "cache-control": "no-store" }) } });
+      } catch { return new Response("Not found", { status: 404 }); }
+    }
     if (path === "/state") {
       return Response.json(await stateForClients(), { headers: { "cache-control": "no-store" } });
     }

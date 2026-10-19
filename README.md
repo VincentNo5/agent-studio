@@ -1,16 +1,15 @@
 # Agent Studio
 
-A live **studio floor** for multi-agent work: two views of the same state — a one-screen command
-overview and an isometric studio tower. Both fit a single screen with no page scrolling.
+A live **three-dimensional headquarters** for multi-agent work, with a cinematic command
+HUD and two desktop views of the same read-only state.
 
-**Command Overview** (`/`) — summary only: KPIs, worker-state ring, room heat, subagent totals, activity:
+**Command Overview** (`/`) — the complete three-level tower, task lanes, active roles,
+agent inspection, live events, and operational panels.
 
-![Command Overview](docs/studio.png)
-
-**Studio Tower** (`/floor`) — isometric 3D: three stacked floors, one anime-style character per role,
-a lobby where Orca-supervised workers wait as visitors:
-
-![Studio Tower](docs/floor.png)
+**Studio Floor** (`/floor`) — the same world, initially focused on Engineering & Design,
+with live worker output in the inspection sidebar. Orbit, zoom, select characters, or use
+the floor navigator to inspect any level. All 49 roster roles have stable workstations;
+Orca dispatches occupy the lobby.
 
 **Mobile** (`/mobile`) — phone-first single screen (390×844, no scrolling): quota bars, worker
 counts, active agents, rooms. This is the view to open from an iPhone; see
@@ -100,33 +99,43 @@ nothing is running it falls back to the newest run, so the card is never blank.
 
 Everything is read-only: the server only reads CLI output and log files.
 
-## Layout: one screen, no scrolling
+## Desktop rendering and controls
 
-Both pages render a fixed **1600×900 stage** inside `html,body{height:100%;overflow:hidden}` and scale
-it to the viewport with a few lines of JS:
+Both desktop pages use the same `public/hq3d.js` Three.js scene and `public/studio.js`
+controller. There is no framework, CDN, or build step. The import map loads the installed
+Three.js package through `/vendor/three/`; `/assets/` serves `public/`. Static routes reject
+traversal and symlink escapes. The responsive HUD is designed for 1280×720 and above;
+use `/mobile` for the phone interface.
 
-```js
-const s = Math.min(innerWidth / 1600, innerHeight / 900);
-stage.style.transform = `translate(${(innerWidth - 1600 * s) / 2}px, ${(innerHeight - 900 * s) / 2}px) scale(${s})`;
+- Drag to orbit; scroll/pinch to zoom; right-drag to pan.
+- The top bar and building navigator focus a floor. Reset camera returns to the tower.
+- With the canvas focused, `1`, `2`, `3` focus floors and `Home` resets.
+- Click a character, active role, or roster entry to inspect it. Associated dispatches
+  offer **View full logs**. Clicking a worker stops automatic worker following.
+- Task lanes filter the task inspector and highlight matching characters.
+- Run history, audit, quotas, Paseo, and the full roster open in keyboard-accessible dialogs.
+- Particle and low-performance settings persist locally. Low-performance mode disables
+  bloom and shadows, reduces particles, and caps rendering at 1× device pixel ratio.
+
+The scene uses procedural geometry, instanced character parts, merged static architecture,
+local canvas labels, and generated environment lighting. Animation pauses in hidden tabs;
+reduced-motion preferences stop ambient movement. Normal rendering caps DPR at 1.65.
+No operational activity is simulated. Missing state is labeled as unavailable, and failed
+JSON requests retain the last scene with a retryable connection indicator.
+
+## Verification
+
+```bash
+bun test
+bun build public/hq3d.js --outdir /tmp/astra-check --target browser
+PORT=8788 bun run server.ts   # separate from the 8787 service
+curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8788/
 ```
 
-Measured: no page scroll, no clipping and no internal scrollbars at 1600×900 (`s=1`), 1440×900
-(`s=0.9`) and 1280×800 (`s=0.8`). Fixed-size design is why the layout has no breakpoints — the stage
-is the breakpoint.
-
-`/` is deliberately **summary only** (aggregate ring, room heat, totals, one-line activity); the
-per-worker detail lives on `/floor`, where clicking a character fills the side panel.
-
-## Adding a view (the cheap way)
-
-Both views are plain HTML files reading the same `/state` and `/roster.json`. A new view is:
-
-1. a new `something.html` that fetches `/state` on an interval and paints,
-2. four lines in `server.ts` serving it.
-
-No build step, no framework, no new endpoint. `floor.html` is exactly that: SVG drawn once at load
-from the roster, then only per-desk classes updated each poll — which is why it stays cheap at 49
-desks and 2-second polling.
+The tests cover state interpretation, non-JSON error handling, local module routing,
+traversal rejection, structural geometry, roster bounds, character instancing, and
+stable positions across polls. Route tests invoke the actual request handler without
+binding a socket; they do not replace a browser/GPU check. Stop the test server with Ctrl-C.
 
 ## Run it as a service (macOS launchd)
 
@@ -157,8 +166,10 @@ git config core.hooksPath .githooks   # once per clone
 ## Files
 
 - `server.ts` — Bun HTTP server: collects the sources, serves `/state`, `/roster.json`, `/`, `/floor`
-- `index.html` — panel view (no framework, no build step)
-- `floor.html` — office floor plan (inline SVG, desks per role, corridor for visiting workers)
+- `index.html` — command overview entry and local import map
+- `floor.html` — focused floor entry and local import map
+- `public/` — shared Three.js world, state interpretation, responsive HUD and styles
+- `tests/` — data, routing and procedural scene regression checks
 - `roster.json` — generated roster: `{ rooms: [...], agents: [{ name, model, desc, room, tier }] }`
 - `docs/*.png` — screenshots (redacted: repository names and local paths replaced)
 
@@ -171,14 +182,13 @@ git config core.hooksPath .githooks   # once per clone
 - Short tasks finish faster than a poll: a worker can go from `pending` to `succeeded` between two
   polls (2 s apart). Long tasks show the pulsing "working" state.
 - `hermes kanban` and `orca` must be on the server process's `PATH`.
-- The floor plan is top-down 2D on purpose: labels stay readable at 49 desks, and it needs no 3D
-  or canvas code. An isometric view is possible but costs legibility, not capability.
-- Characters are **generated SVG, not image assets**: hair, skin and shirt come from a hash of the
-  role name, so a role always looks the same across reloads and no binary art is committed.
-  Working state is animation only (typing arms, lit screen) — nothing is downloaded.
-- The floor plan builds ~4,300 SVG nodes for 49 characters (chairs, arms, monitors, gradients,
-  filters). Measured first paint in headless Chromium: **~5.5 s** on a cold load; the panel view is
-  far lighter. It is a dashboard left open, not a page you reload often.
+- Desktop 3D requires WebGL 2. If GPU initialization fails, the data HUD and operational
+  panels remain usable and show a renderer error.
+- Character motion is a stylized representation of reported status, not a reconstruction
+  of an agent's real-world actions. Matching roles to workers still depends on task text.
+- Provider quotas and Paseo sessions depend on their local services. No synthetic metrics
+  are substituted when a service reports nothing.
+- The committed screenshots in `docs/` predate the 3D redesign.
 
 ## Credits
 
