@@ -57,6 +57,29 @@
   #active .more{color:var(--cyan);font:600 9.5px var(--mono);letter-spacing:.16em}
   .hint{color:var(--muted);font-size:11.5px;line-height:1.55;margin:8px 0 10px}
   #detail .hint{margin:8px 0 0;padding-top:8px;border-top:1px solid var(--hair);font-size:12px;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+
+  /* ---------- LIVE WORK: the run on the floor, its agents, and one worker's live tail ---------- */
+  .card h2 .tag{float:right;font:600 9.5px var(--mono);letter-spacing:.14em;color:var(--muted);text-transform:none}
+  .card h2 .tag.live{color:var(--teal)}
+  #live{display:flex;flex-direction:column;gap:6px;flex:1;min-height:0}
+  #live-obj{overflow:hidden;white-space:nowrap;text-overflow:ellipsis;font:10px/1.35 var(--mono);color:var(--muted)}
+  #live-agents{display:flex;align-items:center;gap:7px;font:600 9.5px var(--mono);letter-spacing:.14em;color:var(--muted);text-transform:uppercase}
+  #live-agents b{color:var(--cyan);letter-spacing:.04em;text-transform:none}
+  #live-agents i{flex:none;width:6px;height:6px;transform:rotate(45deg);background:var(--cyan);opacity:.75}
+  #live-list{display:flex;flex-direction:column;gap:1px;overflow:hidden}
+  #live-list .w{display:grid;grid-template-columns:7px minmax(0,1fr) auto auto;align-items:center;gap:8px;height:19px;padding:0 4px;
+    font:10px/1 var(--mono);color:var(--muted);cursor:pointer;border-left:2px solid transparent}
+  #live-list .w:hover{background:rgba(77,214,255,.06)}
+  #live-list .w[data-on="1"]{border-left-color:var(--cyan);color:var(--fg);background:rgba(77,214,255,.05)}
+  #live-list .w i{width:6px;height:6px;transform:rotate(45deg);background:var(--s,var(--muted))}
+  #live-list .w span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  #live-list .w .ai{color:var(--cyan);letter-spacing:.06em}
+  #live-list .w .st{letter-spacing:.1em;text-transform:uppercase;color:var(--s,var(--muted))}
+  #live-out{flex:1;min-height:58px;margin:0;padding:7px 8px;overflow:auto;white-space:pre-wrap;word-break:break-word;
+    border-top:1px dashed var(--hair);font:10px/1.4 var(--mono);color:#c8d6e6}
+  .v{cursor:pointer}
+  .v[data-picked="1"] .visitorText{fill:var(--fg)}
+  .v[data-picked="1"] .bubble{stroke:var(--cyan);stroke-width:1.3}
   .lg{display:grid;grid-template-columns:1fr 1fr;gap:8px 12px;margin:0;padding:0;list-style:none;font:600 9.5px var(--mono);letter-spacing:.16em;color:var(--muted)}
   .lg li{display:flex;align-items:center;gap:9px}
   .lg i{flex:none;width:18px;height:11px;border-radius:2px}
@@ -233,6 +256,15 @@
       <div id="detail"><div class="empty">Click any figure on the floors. A lit screen means the role is working.</div></div>
     </section>
     <section class="card hud grow">
+      <h2>LIVE WORK<span class="tag" id="live-run">—</span></h2>
+      <div id="live">
+        <div id="live-obj">—</div>
+        <div id="live-agents"></div>
+        <div id="live-list"></div>
+        <pre id="live-out">No worker selected — click a figure in the lobby, or a row above.</pre>
+      </div>
+    </section>
+    <section class="card hud">
       <h2>ACTIVE ROLES</h2>
       <div id="active"><div class="empty">None</div></div>
     </section>
@@ -343,6 +375,8 @@ ${arm("armLs", "M10.8 24 9.6 30.4l2.6 2", 12.6, 32.6)}${arm("armRs", "M25.2 24 2
 <g id="prop2" stroke="#2ee6c8" stroke-width=".45"><path d="M3 33h4l-.5 3.6h-3Z" fill="none"/><path d="M5 33c-1.4-.6-2-2-1.6-3.2 1 .3 1.6 1 1.6 1.8.2-1.4.8-2.4 1.8-2.8.2 1.6-.4 3.2-1.8 4.2Z" fill="#2ee6c8" fill-opacity=".25"/></g>
 </defs>`;
 let roster = null, state = null, selected = null, zoomSrc = null;
+let pickedWorker = null;   // dispatch whose live output the LIVE WORK card shows
+let follow = true;         // auto-watch the first working worker until a click says otherwise
 
 const SVG = "http://www.w3.org/2000/svg";
 const mk = (tag, attrs, text) => {
@@ -683,7 +717,7 @@ function paint(st) {
   visitors.forEach((w, i) => {
     const [X, Y] = XY(lobby, 105 + i * 118, 120), on = isWorking(w), top = Y - 112;
     const who = [w.agent, w.label || w.dispatchId].filter(Boolean).join(" · ");
-    const g = mk("g", { class: "v" + (on ? " on" : ""), "data-visitor": w.dispatchId });
+    const g = mk("g", { class: "v" + (on ? " on" : ""), "data-visitor": w.dispatchId, "data-picked": pickedWorker === w.dispatchId ? "1" : "0" });
     g.appendChild(mk("path", { class: "bubble", d: `M${X - 50} ${top}h100a6 6 0 0 1 6 6v34a6 6 0 0 1-6 6H${X + 6}l-6 6-6-6H${X - 50}a6 6 0 0 1-6-6v-34a6 6 0 0 1 6-6Z` }));
     const [l1, l2] = wrap(w.taskTitle || who, 17), t = mk("text", { class: "visitorText", x: X - 48, y: top + 14 });
     t.appendChild(mk("tspan", { x: X - 48, dy: 0 }, l1));
@@ -693,6 +727,7 @@ function paint(st) {
     g.appendChild(mk("text", { class: "visitorState", x: X - 40, y: top + 39.5 }, clip(`${w.workerState || w.dispatchStatus || "-"} · ${w.liveness || "-"}`.toUpperCase(), 16)));
     g.appendChild(stander(X - 18, Y - 56, who, on));
     g.appendChild(mk("title", {}, [who, w.taskTitle].filter(Boolean).join(" — ")));
+    g.addEventListener("click", () => pickWorker(w.dispatchId));
     vis.appendChild(g);
   });
   if (!visitors.length) {
@@ -736,10 +771,75 @@ function paint(st) {
     document.getElementById("detail-title").textContent = a.name;
   }
 
+  // LIVE WORK：当前 run、背后的 agent，以及被选中工人的实时输出。地板为空时回退到最近一次 run，
+  // 否则两次运行之间这一栏什么也看不到。
+  const working = state.workers.filter(isWorking);
+  const scope = state.workerScope || {};
+  const lastRun = (state.runs || [])[0];
+  const source = working.length ? working : state.workers.length ? state.workers : (lastRun ? lastRun.workers : []);
+  const sourceLabel = working.length ? "working" : state.workers.length ? "on floor" : "last run";
+  if (follow && working.length && working[0].dispatchId !== pickedWorker) {
+    pickedWorker = working[0].dispatchId;
+    refreshOutput();
+  }
+  const age = (iso) => {
+    const t = Date.parse(iso || "");
+    if (!Number.isFinite(t)) return "";
+    const m = Math.max(0, Math.round((Date.now() - t) / 60000));
+    return m < 60 ? `${m}m ago` : m < 1440 ? `${Math.round(m / 60)}h ago` : `${Math.round(m / 1440)}d ago`;
+  };
+  const runTag = document.getElementById("live-run");
+  const started = scope.startedAt || lastRun?.createdAt;
+  runTag.textContent = scope.runId || lastRun
+    ? `${scope.live ? "LIVE" : "FINISHED"}${age(started) ? ` · ${age(started)}` : ""}`
+    : "NO RUN";
+  runTag.className = "tag" + (scope.live ? " live" : "");
+  const objective = scope.objective || lastRun?.objective || null;
+  const objLine = document.getElementById("live-obj");
+  objLine.textContent = objective ? `${objective} · ${source.length} dispatch${source.length === 1 ? "" : "es"}` : "No orchestration run recorded.";
+  objLine.title = [objective, scope.runId || lastRun?.id, lastRun?.coordinatorHandle].filter(Boolean).join(" · ");
+  const agentBox = document.getElementById("live-agents");
+  agentBox.textContent = "";
+  const groups = new Map();
+  for (const w of source) {
+    const key = w.agent || "unknown";
+    groups.set(key, (groups.get(key) ?? 0) + 1);
+  }
+  agentBox.appendChild(Object.assign(document.createElement("span"), { textContent: sourceLabel }));
+  if (!groups.size) agentBox.appendChild(Object.assign(document.createElement("b"), { textContent: "—" }));
+  for (const [agent, count] of [...groups.entries()].sort((a, b) => b[1] - a[1]).slice(0, 5)) {
+    agentBox.appendChild(document.createElement("i"));
+    agentBox.appendChild(Object.assign(document.createElement("b"), { textContent: `${agent} ×${count}` }));
+  }
+  const liveList = document.getElementById("live-list");
+  liveList.textContent = "";
+  const liveRows = source.slice(0, 6);
+  if (!liveRows.length) {
+    liveList.appendChild(Object.assign(document.createElement("div"), {
+      className: "empty",
+      textContent: scope.runId ? "No worker on the floor." : "No orchestration run recorded.",
+    }));
+  }
+  for (const w of liveRows) {
+    const row = document.createElement("div");
+    row.className = "w";
+    row.dataset.on = w.dispatchId === pickedWorker ? "1" : "0";
+    row.title = [w.dispatchId, w.agent, w.workerState, w.dispatchStatus, w.liveness, w.exitCause ? `exit: ${w.exitCause}` : null, w.taskTitle]
+      .filter(Boolean).join(" · ");
+    const dot = document.createElement("i");
+    dot.style.setProperty("--s", isWorking(w) ? "var(--teal)" : w.workerState === "failed" ? "var(--alert)" : "var(--archived)");
+    row.appendChild(dot);
+    row.appendChild(Object.assign(document.createElement("span"), { textContent: clip(w.taskTitle || w.label || w.dispatchId || "(dispatch)", 42) }));
+    row.appendChild(Object.assign(document.createElement("span"), { className: "ai", textContent: w.agent || "—" }));
+    row.appendChild(Object.assign(document.createElement("span"), { className: "st", textContent: isWorking(w) ? "working" : (w.workerState || "—") }));
+    row.addEventListener("click", () => pickWorker(w.dispatchId));
+    liveList.appendChild(row);
+  }
+
   // 活跃列表按卡片剩余高度截断，超出部分折成 "+N MORE"，侧栏永不出现滚动条
   const act = document.getElementById("active");
   act.textContent = "";
-  const list = [...hits].sort(), cap = Math.max(1, Math.floor(act.clientHeight / 26)), shown = list.length > cap ? list.slice(0, cap - 1) : list;
+  const list = [...hits].sort(), cap = Math.min(5, Math.max(1, Math.floor(act.clientHeight / 26))), shown = list.length > cap ? list.slice(0, cap - 1) : list;
   if (!list.length) act.appendChild(Object.assign(document.createElement("div"), { className: "empty", textContent: "None" }));
   for (const role of shown) {
     const row = document.createElement("div");
@@ -765,6 +865,35 @@ const fit = () => {
 addEventListener("resize", fit);
 fit();
 
+// ---- LIVE WORK: which agent is running, and the tail Orca holds for it ----
+function pickWorker(dispatchId) {
+  pickedWorker = dispatchId;
+  follow = false;
+  if (state) paint(state);
+  refreshOutput();
+}
+
+async function refreshOutput() {
+  const out = document.getElementById("live-out");
+  if (!pickedWorker) {
+    out.textContent = "No worker selected — click a figure in the lobby, or a row above.";
+    return;
+  }
+  try {
+    const res = await fetch(`/worker/${encodeURIComponent(pickedWorker)}`, { cache: "no-store" });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data && data.error ? data.error : `HTTP ${res.status}`);
+    const term = data.terminal || {}, status = data.status || {};
+    const lines = term.tail || [];
+    const head = `${(status.worker || "?").toUpperCase()} · ${(status.terminal || "?").toUpperCase()} · ${term.returnedLineCount ?? 0} LINES`;
+    out.textContent = lines.length
+      ? `${head}\n\n${lines.join("\n")}`
+      : `${head}\n\n(no output buffered)\nsource: ${data.source || "—"}${data.fallbackReason ? ` · ${data.fallbackReason}` : ""}\nOrca holds a tail only while the terminal lives, so a finished dispatch reads empty.`;
+  } catch (err) {
+    out.textContent = `worker-read failed: ${(err && err.message) || err}`;
+  }
+}
+
 async function tick() {
   try { paint(await (await fetch("/state", { cache: "no-store" })).json()); document.body.classList.remove("down"); }
   catch (e) { document.body.classList.add("down"); document.getElementById("sub").textContent = "LINK DOWN — " + e.message; }
@@ -774,6 +903,7 @@ async function tick() {
   drawPlan();
   await tick();
   setInterval(tick, 2000);
+  setInterval(() => { if (pickedWorker) refreshOutput(); }, 2000);
 })();
 </script>
 </body>

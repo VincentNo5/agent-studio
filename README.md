@@ -31,6 +31,7 @@ the roster is used as the *organizational* model.
 | **Task Board** | `hermes kanban list` + `stats` | The persistent task board by status lane |
 | **Studio Roster** / floor plan | `roster.json` (generated from CCGS `.claude/agents`) | 49 roles in 10 rooms; a seat lights when that role is active |
 | **Corridor** (floor view) | same worker feed | Supervised workers as visitors, with their task label |
+| **Live Work** (`/floor` sidebar) | `/state` + `/worker/<id>` | The run on the floor, the agents behind it, the tasks in flight, and the picked worker's live tail |
 | **Activity** | poll diff | Worker/task state transitions as they happen |
 
 All interface text is **English**; runtime data (task titles, role descriptions) is shown as-is.
@@ -81,6 +82,11 @@ changes — and the floor, the history detail and the mobile view all name it (`
 two seconds while open; ids are validated, and a dispatch Orca cannot read answers `502` rather
 than an empty box. Orca holds a terminal tail only while that terminal lives, so a finished
 dispatch reads empty — the overlay says so, with the source, terminal status and line count.
+
+The floor view (`/floor`) carries the same thing in its sidebar: **LIVE WORK** names the run on the
+floor, the agents behind it (`working · claude ×2 · codex ×1`) and the tasks in flight, and follows
+the first working worker's tail live. Click a row or a lobby figure to watch a different one. When
+nothing is running it falls back to the newest run, so the card is never blank.
 
 Everything is read-only: the server only reads CLI output and log files.
 
