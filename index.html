@@ -224,6 +224,7 @@
   /* ---------- 02 task board: lane bars ---------- */
   [data-lane]{--s:var(--cyan)} [data-lane=running]{--s:var(--teal)} [data-lane=blocked]{--s:var(--alert)}
   [data-lane=review],[data-lane=scheduled]{--s:var(--amber)} [data-lane=done]{--s:#6a809c}
+  [data-lane=dispatched]{--s:var(--teal)} [data-lane=failed]{--s:var(--alert)} [data-lane=completed]{--s:#6a809c} [data-lane=pending]{--s:var(--muted)}
   .pipe{display:flex;gap:2px;height:8px;margin-bottom:12px}
   .pipe i{flex:0 1 0;min-width:4px;background:var(--s);box-shadow:0 0 7px -1px var(--s);transition:flex-grow .6s}
   .lrow{display:grid;grid-template-columns:90px minmax(0,1fr) 36px;align-items:center;gap:12px;height:19px;margin-top:5px}
@@ -232,6 +233,7 @@
   .lrow .bar::after{content:"";position:absolute;inset:0;background:repeating-linear-gradient(90deg,transparent 0 calc(10% - 1px),rgba(5,7,13,.9) calc(10% - 1px) 10%)}
   .lrow .bar i{position:absolute;left:0;top:0;bottom:0;width:0;background:linear-gradient(90deg,color-mix(in srgb,var(--s) 30%,transparent),var(--s));
     box-shadow:0 0 9px -1px var(--s);transition:width .6s cubic-bezier(.2,.7,.2,1)}
+  #lanes.dense .lrow{height:15px;margin-top:2px} #lanes.dense .pipe{margin-bottom:8px}
   .lrow b{font:600 15px/1 var(--mono);font-variant-numeric:tabular-nums;color:var(--s);text-align:right}
   .paseo-summary{margin-top:8px;padding:6px 9px;border:1px solid rgba(46,230,200,.22);background:linear-gradient(90deg,rgba(46,230,200,.06),transparent 72%);font:10px/1.35 var(--mono);color:var(--muted);overflow:hidden}
   .paseo-summary strong{color:var(--teal);font-weight:600;letter-spacing:.12em}
@@ -458,6 +460,8 @@
 </div>
 <script>
 const LANES = ["triage","todo","scheduled","ready","running","review","blocked","done"];
+// Orca task statuses, in lifecycle order; any status not listed is appended after these.
+const ORCA_LANES = ["pending","ready","dispatched","running","blocked","completed","failed"];
 const SETTLED = ["succeeded","failed","stopped","cancelled"];
 const STATES = ["live","present","pending","failed","archived","idle"];
 const P = 2400; // must match --P
@@ -574,7 +578,9 @@ const pipe = el("div", "pipe");
 pipe.setAttribute("aria-hidden", "true");
 lanesEl.appendChild(pipe);
 const laneRows = {};
-for (const name of LANES) {
+// Rows are created on first use, so Orca statuses reuse the same bar/count row as Hermes lanes.
+function laneRow(name) {
+  if (laneRows[name]) return laneRows[name];
   const seg = el("i");
   seg.dataset.lane = name;
   pipe.appendChild(seg);
@@ -587,13 +593,14 @@ for (const name of LANES) {
   r.appendChild(bar);
   const b = el("b", null, "0");
   r.appendChild(b);
-  lanesEl.appendChild(r);
-  laneRows[name] = { seg, r, fill, b };
+  lanesEl.insertBefore(r, kbEmpty);
+  return (laneRows[name] = { seg, r, fill, b });
 }
 const kbEmpty = el("div", "empty");
 kbEmpty.appendChild(el("b", null, "Board clear"));
 kbEmpty.appendChild(el("span", null, "No tasks in any lane."));
 lanesEl.appendChild(kbEmpty);
+for (const name of LANES) laneRow(name);
 
 // ---- 01b run history: the floor is scoped to the current run, so finished runs live here ----
 const FLOOR_TONE = { live: "var(--teal)", present: "var(--cyan)", pending: "var(--amber)", failed: "var(--alert)", archived: "var(--archived)", idle: "var(--offline)" };
@@ -853,14 +860,28 @@ function render(state) {
   else if (runsCache.length && !runsClosed) runsOpen = true;
   renderRuns();
 
-  // 02 task board: non-empty lanes as bars
+  // 02 task board: non-empty lanes as bars. Orca tasks win when there are any; else Hermes kanban.
+  const orcaTasks = Array.isArray(state.orcaTasks) ? state.orcaTasks : [];
+  const fromOrca = orcaTasks.length > 0;
   const byStatus = {};
-  for (const t of state.kanban) (byStatus[t.status || "todo"] ||= []).push(t);
-  const lc = LANES.map(n => Number((byStatus[n] || []).length || (state.kanbanStats?.[n] ?? 0)) || 0);
+  let laneNames, lc;
+  if (fromOrca) {
+    for (const t of orcaTasks) (byStatus[t.status || "pending"] ||= []).push(t);
+    laneNames = [...ORCA_LANES, ...Object.keys(byStatus).filter(n => !ORCA_LANES.includes(n))];
+    lc = laneNames.map(n => (byStatus[n] || []).length);
+  } else {
+    for (const t of state.kanban) (byStatus[t.status || "todo"] ||= []).push(t);
+    laneNames = LANES;
+    lc = LANES.map(n => Number((byStatus[n] || []).length || (state.kanbanStats?.[n] ?? 0)) || 0);
+  }
   const max = Math.max(1, ...lc);
   const sum = lc.reduce((a, b) => a + b, 0);
-  LANES.forEach((name, i) => {
-    const c = lc[i], x = laneRows[name];
+  for (const name in laneRows) if (!laneNames.includes(name)) { laneRows[name].r.hidden = true; laneRows[name].seg.hidden = true; }
+  laneNames.forEach((name, i) => {
+    const c = lc[i], x = laneRow(name);
+    // Keep DOM order equal to lane order: shared laneNames (ready, running, blocked) sit in both lists.
+    pipe.appendChild(x.seg);
+    lanesEl.insertBefore(x.r, kbEmpty);
     x.r.hidden = !c;
     x.seg.hidden = !c;
     x.seg.style.flexGrow = c;
@@ -869,7 +890,12 @@ function render(state) {
   });
   pipe.hidden = !sum;
   kbEmpty.hidden = sum > 0;
-  document.getElementById("kb-note").textContent = `Hermes · ${sum} tasks · ${lc.filter(Boolean).length} of ${LANES.length} lanes`;
+  const lanesUsed = lc.filter(Boolean).length;
+  // Orca can light more lanes than the column holds at full spacing; Hermes keeps its spacing.
+  lanesEl.classList.toggle("dense", fromOrca && lanesUsed > 6);
+  document.getElementById("kb-note").textContent = fromOrca
+    ? `Orca · ${sum} tasks · ${lanesUsed} ${lanesUsed === 1 ? "lane" : "lanes"}`
+    : `Hermes · ${sum} tasks · ${lanesUsed} of ${LANES.length} lanes`;
 
   // 03 studio roster: aggregate per room + capped active list
   const hits = activeRoles(state);

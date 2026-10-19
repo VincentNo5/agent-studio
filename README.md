@@ -28,7 +28,7 @@ the roster is used as the *organizational* model.
 |---|---|---|
 | **Live Floor** | `orca orchestration worker-list` + `terminal list` | Every supervised Orca worker: label (the worker terminal's own title), state, liveness, terminal state, next action |
 | **Subagent Activity** | `$CCGS_ROOT/production/session-logs/agent-audit.log` | Real per-role activity from CCGS's `SubagentStart`/`SubagentStop` hooks (`invoked` / `completed` / `active`) |
-| **Task Board** | `hermes kanban list` + `stats` | The persistent task board by status lane |
+| **Task Board** | `orca orchestration task-list`, else `hermes kanban list` | Tasks by status lane — see *Task board sources* below |
 | **Studio Roster** / floor plan | `roster.json` (generated from CCGS `.claude/agents`) | 49 roles in 10 rooms; a seat lights when that role is active |
 | **Corridor** (floor view) | same worker feed | Supervised workers as visitors, with their task label |
 | **Live Work** (`/floor` sidebar) | `/state` + `/worker/<id>` | The run on the floor, the agents behind it, the tasks in flight, and the picked worker's live tail |
@@ -71,6 +71,14 @@ that run while it owns a live or pending worker or is within `AGENT_STUDIO_FLOOR
 creation, and never hides a worker that is still live or pending — a hidden live worker would be a
 lie. The `workerScope` field reports the run shown, whether it is live, and how many dispatches were
 left out; the panel prints that under the dial.
+
+**Task board sources.** The board has two sources, and Orca wins. When `ORCA_COORDINATOR` is set
+and `orca orchestration task-list --from <handle>` returns any tasks, `/state` carries them in
+`orcaTasks` (`id`, `title`, `spec`, `status`, `runId`) and the board draws one lane per Orca status
+(`pending`, `ready`, `dispatched`, `running`, `blocked`, `completed`, `failed`, then any other
+status it sees). With no Orca tasks it falls back to the Hermes kanban (`kanban`/`kanbanStats`)
+and its eight lanes. The header note always names the source: `Orca · 20 tasks · 2 lanes` or
+`Hermes · 3 tasks · 2 of 8 lanes`.
 
 **Which AI is working.** `worker-list` reports a null `projection.agent`, so the launched agent
 (and model, and terminal exit cause) is only in `orca orchestration worker-show`. The server looks
