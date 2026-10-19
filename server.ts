@@ -56,6 +56,11 @@ const PORT = Number(process.env.PORT ?? 8787);
 const TTL_MS = Number(process.env.AGENT_STUDIO_TTL_MS ?? 1500);
 /** A finished run keeps its dispatches on the floor for this long, then fades. */
 const FLOOR_GRACE_MS = Number(process.env.AGENT_STUDIO_FLOOR_GRACE_MS ?? 30 * 60_000);
+/** How many runs the history view keeps (newest first). */
+const RUN_HISTORY_LIMIT = Number(process.env.AGENT_STUDIO_RUN_HISTORY ?? 10);
+
+/** A worker still moving: its terminal is live, or its dispatch has not settled. */
+const isMovingWorker = (w: WorkerView) => w.liveness === "live" || w.dispatchStatus === "pending";
 
 interface OrcaWorkerRow {
   dispatchId?: string;
@@ -125,10 +130,25 @@ interface WorkerScope {
   hidden: number;
 }
 
+/** One orchestration run and the dispatches seen for it, for the history view. */
+interface RunView {
+  id: string;
+  objective: string | null;
+  coordinatorHandle: string | null;
+  createdAt: string | null;
+  legacy: boolean;
+  total: number;
+  counts: Record<string, number>;
+  failed: number;
+  live: number;
+  workers: WorkerView[];
+}
+
 interface StudioState {
   ts: number;
   workers: WorkerView[];
   workerScope: WorkerScope;
+  runs: RunView[];
   terminals: TerminalView[];
   worktrees: WorktreeView[];
   paseo: PaseoAgentView[];
@@ -223,7 +243,6 @@ function selectFloor(
   runs: OrcaRunRow[],
   coordinator: string | undefined,
 ): { workers: WorkerView[]; scope: WorkerScope } {
-  const isMoving = (w: WorkerView) => w.liveness === "live" || w.dispatchStatus === "pending";
   const candidates = runs.filter((r) => r.legacy !== 1 && r.id);
   const owned = coordinator ? candidates.filter((r) => r.coordinator_handle === coordinator) : [];
   const run = (owned.length ? owned : candidates)
@@ -231,7 +250,7 @@ function selectFloor(
     .sort((a, b) => (b.created_at ?? "").localeCompare(a.created_at ?? ""))[0];
 
   if (!run?.id) {
-    const moving = workers.filter(isMoving);
+    const moving = workers.filter(isMovingWorker);
     return {
       workers: moving,
       scope: { runId: null, objective: null, startedAt: null, live: moving.length > 0, hidden: workers.length - moving.length },
@@ -239,10 +258,10 @@ function selectFloor(
   }
 
   const mine = workers.filter((w) => w.runId === run.id);
-  const live = mine.some(isMoving);
+  const live = mine.some(isMovingWorker);
   const startedAt = run.created_at ? Date.parse(run.created_at) : NaN;
   const withinGrace = Number.isFinite(startedAt) && Date.now() - startedAt < FLOOR_GRACE_MS;
-  const onFloor = workers.filter((w) => isMoving(w) || (w.runId === run.id && (live || withinGrace)));
+  const onFloor = workers.filter((w) => isMovingWorker(w) || (w.runId === run.id && (live || withinGrace)));
   return {
     workers: onFloor,
     scope: {
@@ -371,7 +390,41 @@ async function collect(): Promise<StudioState> {
   // The floor is a live view, not an archive: scope it to the current run.
   const { workers: onFloor, scope: workerScope } = selectFloor(workers, runRows, coordinator);
 
-  return { ts: Date.now(), workers: onFloor, workerScope, terminals, worktrees, paseo, quotas, kanban, kanbanStats, audit };
+  // Everything the floor left out still has to be inspectable, so group the same dispatches
+  // by run and hand the history to the panel. One entry per run Orca reports, newest first.
+  const byRun = new Map<string, WorkerView[]>();
+  for (const w of workers) {
+    const key = w.runId ?? "";
+    const bucket = byRun.get(key);
+    if (bucket) bucket.push(w);
+    else byRun.set(key, [w]);
+  }
+  const runs: RunView[] = runRows
+    .filter((r): r is OrcaRunRow & { id: string } => typeof r.id === "string")
+    .map((r) => {
+      const list = byRun.get(r.id) ?? [];
+      const counts: Record<string, number> = {};
+      for (const w of list) {
+        const state = w.workerState ?? "unknown";
+        counts[state] = (counts[state] ?? 0) + 1;
+      }
+      return {
+        id: r.id,
+        objective: r.objective ?? null,
+        coordinatorHandle: r.coordinator_handle ?? null,
+        createdAt: r.created_at ?? null,
+        legacy: r.legacy === 1,
+        total: list.length,
+        counts,
+        failed: counts.failed ?? 0,
+        live: list.filter(isMovingWorker).length,
+        workers: list,
+      };
+    })
+    .sort((a, b) => (b.createdAt ?? "").localeCompare(a.createdAt ?? ""))
+    .slice(0, RUN_HISTORY_LIMIT);
+
+  return { ts: Date.now(), workers: onFloor, workerScope, runs, terminals, worktrees, paseo, quotas, kanban, kanbanStats, audit };
 }
 
 // One collect (six CLI spawns plus local HTTP) per TTL, shared by every client; concurrent callers join the in-flight promise.

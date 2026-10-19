@@ -175,6 +175,28 @@
   .states li.z{opacity:.38} .states li.z i{box-shadow:none}
   .wnote{grid-column:1/-1;margin:0;font:11.5px/1.4 var(--mono);color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .wnote b{color:var(--fg);font-weight:600;letter-spacing:.1em;text-transform:uppercase}
+  .wnote .hist{background:none;border:0;padding:0;font:inherit;color:var(--cyan);cursor:pointer;border-bottom:1px dotted var(--cyan)}
+  .wnote .hist:hover{color:var(--fg);border-bottom-color:var(--fg)}
+
+  /* ---------- 01b run history: the dispatches the floor left out ---------- */
+  .runhist{display:flex;flex-direction:column;gap:5px;min-height:0;overflow:hidden}
+  .rh-head{display:flex;align-items:center;justify-content:space-between;gap:10px;font:600 10px/1 var(--mono);letter-spacing:.18em;color:var(--muted);text-transform:uppercase}
+  .rh-head button{background:none;border:1px solid var(--hair);color:var(--cyan);font:600 10px/1 var(--mono);letter-spacing:.14em;padding:3px 7px;cursor:pointer}
+  .rh-head button:hover{color:var(--fg);border-color:var(--cyan)}
+  .rh-list{display:flex;flex-direction:column;gap:2px;min-height:0;overflow:hidden}
+  .rh-run{display:grid;grid-template-columns:8px minmax(0,1fr) auto auto;align-items:center;gap:9px;padding:3px 7px;
+    font:11px/1.3 var(--mono);color:var(--muted);cursor:pointer;border-left:2px solid transparent}
+  .rh-run:hover{background:rgba(77,214,255,.06)}
+  .rh-run[data-on="1"]{border-left-color:var(--cyan);color:var(--fg);background:rgba(77,214,255,.05)}
+  .rh-run i{width:7px;height:7px;transform:rotate(45deg);background:var(--s,var(--muted))}
+  .rh-run b{font-weight:600;color:var(--fg);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .rh-run .n{font-variant-numeric:tabular-nums}
+  .rh-run .bad{color:var(--alert);font-variant-numeric:tabular-nums}
+  .rh-det{display:flex;flex-direction:column;gap:1px;min-height:0;overflow:hidden;border-top:1px dashed var(--hair);padding-top:4px}
+  .rh-w{display:grid;grid-template-columns:7px minmax(0,1fr) auto;align-items:center;gap:8px;font:10.5px/1.35 var(--mono);color:var(--muted)}
+  .rh-w i{width:6px;height:6px;transform:rotate(45deg);background:var(--s,var(--muted))}
+  .rh-w span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .rh-w .st{letter-spacing:.1em;text-transform:uppercase;color:var(--s,var(--muted))}
 
   /* ---------- 02 task board: lane bars ---------- */
   [data-lane]{--s:var(--cyan)} [data-lane=running]{--s:var(--teal)} [data-lane=blocked]{--s:var(--alert)}
@@ -351,6 +373,7 @@
         </ul>
         <p class="wnote" id="w-note">Awaiting first sync…</p>
       </div>
+      <div class="pb runhist" id="runhist" hidden></div>
     </section>
 
     <section class="panel p-board" style="--d:-4s" aria-labelledby="h-board">
@@ -538,6 +561,70 @@ kbEmpty.appendChild(el("b", null, "Board clear"));
 kbEmpty.appendChild(el("span", null, "No tasks in any lane."));
 lanesEl.appendChild(kbEmpty);
 
+// ---- 01b run history: the floor is scoped to the current run, so finished runs live here ----
+const FLOOR_TONE = { live: "var(--teal)", present: "var(--cyan)", pending: "var(--amber)", failed: "var(--alert)", archived: "var(--archived)", idle: "var(--offline)" };
+const ageLabel = (iso) => {
+  const t = Date.parse(iso || "");
+  if (!Number.isFinite(t)) return "—";
+  const m = Math.max(0, Math.round((Date.now() - t) / 60000));
+  return m < 60 ? `${m}m` : m < 1440 ? `${Math.round(m / 60)}h` : `${Math.round(m / 1440)}d`;
+};
+let runsCache = [];
+let runsOpen = false;    // history shown in place of the dial
+let runsPick = null;     // selected run id
+let runsClosed = false;  // operator asked for the live floor; do not auto-open until work returns
+
+function renderRuns() {
+  const box = document.getElementById("runhist");
+  const split = document.getElementById("workers");
+  box.hidden = !runsOpen;
+  split.hidden = runsOpen;
+  if (!runsOpen) return;
+  box.textContent = "";
+  const head = el("div", "rh-head");
+  head.appendChild(el("b", null, `Run history · ${runsCache.length}`));
+  const back = el("button", null, "◂ live floor");
+  back.addEventListener("click", () => { runsOpen = false; runsClosed = true; renderRuns(); });
+  head.appendChild(back);
+  box.appendChild(head);
+  if (!runsCache.length) {
+    box.appendChild(el("div", "rh-run", "No orchestration runs recorded."));
+    return;
+  }
+  const list = el("div", "rh-list");
+  for (const run of runsCache.slice(0, 5)) {
+    const row = el("div", "rh-run");
+    row.dataset.on = run.id === runsPick ? "1" : "0";
+    row.title = [run.objective || run.id, `coordinator: ${run.coordinatorHandle || "—"}`, `started: ${run.createdAt || "—"}`].join("\n");
+    const dot = el("i");
+    dot.style.setProperty("--s", run.live ? FLOOR_TONE.live : run.failed ? FLOOR_TONE.failed : "var(--archived)");
+    row.appendChild(dot);
+    row.appendChild(el("b", null, short(run.objective || run.id, 32) + (run.legacy ? " · legacy" : "")));
+    row.appendChild(el("span", "n", `${run.total} dispatch${run.total === 1 ? "" : "es"}`));
+    row.appendChild(el("span", run.failed ? "bad" : "n", run.failed ? `${run.failed} failed` : `${ageLabel(run.createdAt)} ago`));
+    row.addEventListener("click", () => { runsPick = runsPick === run.id ? null : run.id; renderRuns(); });
+    list.appendChild(row);
+  }
+  box.appendChild(list);
+  const picked = runsCache.find((run) => run.id === runsPick);
+  if (!picked) return;
+  const det = el("div", "rh-det");
+  for (const w of picked.workers.slice(0, 6)) {
+    const state = floorState(w);
+    const row = el("div", "rh-w");
+    row.title = [w.dispatchId, w.workerState, w.dispatchStatus, w.liveness && `liveness: ${w.liveness}`, w.livenessReason, w.taskTitle]
+      .filter(Boolean).join(" · ");
+    const dot = el("i");
+    dot.style.setProperty("--s", FLOOR_TONE[state]);
+    row.appendChild(dot);
+    row.appendChild(el("span", null, short(w.label || w.taskTitle || w.dispatchId || "(dispatch)", 46)));
+    row.appendChild(el("span", "st", state));
+    det.appendChild(row);
+  }
+  if (!picked.workers.length) det.appendChild(el("div", "rh-w", "No dispatches recorded for this run."));
+  box.appendChild(det);
+}
+
 function render(state) {
   // Lock recreated nodes' pulse animations to wall-clock phase so they don't restart every poll.
   document.documentElement.style.setProperty("--ph", -(Date.now() % P) + "ms");
@@ -599,24 +686,31 @@ function render(state) {
   document.getElementById("w-total").textContent = total;
   const wNote = document.getElementById("w-note");
   const scope = state.workerScope || {};
-  // The floor is scoped to the current run (a finished one fades after its grace window),
-  // so the note has to say what was left out — otherwise entries just look missing.
-  const runLabel = scope.objective ? `${scope.objective.slice(0, 60)}${scope.objective.length > 60 ? "…" : ""}` : null;
-  const hiddenNote = scope.hidden
-    ? `${scope.hidden} hidden (${scope.live ? "other runs" : `finished run${runLabel ? `: ${runLabel}` : ""}`})`
-    : "";
   wNote.textContent = "";
   if (!total) {
     wNote.appendChild(el("b", null, "No supervised workers"));
-    const tail = [hiddenNote, "dispatch with orca orchestration worker-start"].filter(Boolean).join(" · ");
-    wNote.appendChild(document.createTextNode(` · ${tail}`));
+    if (!scope.hidden) wNote.appendChild(document.createTextNode(" · dispatch with orca orchestration worker-start"));
   } else {
     const parts = [`${counts.live} working`, `${counts.present} present`, `${counts.archived} archived`];
     if (counts.failed) parts.push(`${counts.failed} failed`);
     if (counts.pending) parts.push(`${counts.pending} pending`);
-    if (hiddenNote) parts.push(hiddenNote);
     wNote.textContent = parts.join(" · ");
   }
+  // The floor is scoped to the current run, so the note must say what it left out — and link
+  // into the history, or those dispatches just look missing.
+  if (scope.hidden) {
+    const link = el("button", "hist", `▸ ${scope.hidden} dispatch${scope.hidden === 1 ? "" : "es"} from ${scope.live ? "earlier runs" : "the finished run"}`);
+    link.title = scope.objective || "";
+    link.addEventListener("click", () => { runsOpen = true; runsClosed = false; renderRuns(); });
+    wNote.appendChild(document.createTextNode(" · "));
+    wNote.appendChild(link);
+  }
+
+  // Run history feeds this panel; live work always owns it whenever there is any.
+  runsCache = Array.isArray(state.runs) ? state.runs : [];
+  if (state.workers.length) { runsClosed = false; runsOpen = false; }
+  else if (runsCache.length && !runsClosed) runsOpen = true;
+  renderRuns();
 
   // 02 task board: non-empty lanes as bars
   const byStatus = {};
