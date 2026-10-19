@@ -35,10 +35,22 @@ the roster is used as the *organizational* model.
 
 All interface text is **English**; runtime data (task titles, role descriptions) is shown as-is.
 
-A role counts as active when either source says so:
+Every agent has exactly one status, derived only from reported fields (`agentStatuses` /
+`workerStatus` in `public/studio-data.js`), in this precedence:
 
-1. the CCGS audit log shows an unmatched `invoked` for that role, or
-2. a currently working worker's task title/spec names that role.
+| Status | Evidence |
+|---|---|
+| **Working** | a floor worker naming the role is live and unsettled, or the audit log has an unmatched `invoked` for it |
+| **Pending** | a matching dispatch is still `pending` |
+| **Failed** | a matching worker or dispatch reported `failed` |
+| **Completed** | a matching floor worker settled (`succeeded` / `stopped` / `cancelled`), or the role's last audit event is `completed` within 30 minutes |
+| **Idle** | none of the above |
+
+Only the floor-scoped `workers` count, never run history, and the 30-minute window keeps every
+role that ever finished from reading as freshly completed. Each status carries its evidence
+(`worker ctx_… · succeeded`, `audit completed 14:22`) and a `since` time only when an audit
+event provides one. The HUD pairs every status with an icon and a label, never colour alone;
+the scene gives each agent a status halo, a billboard badge and a desk strip in the same colours.
 
 ## Run
 

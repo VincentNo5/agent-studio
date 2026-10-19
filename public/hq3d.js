@@ -6,8 +6,12 @@ import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js'
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import { ROOM_COLORS, floorForRoom, hash, isWorking, matchesRole } from './studio-data.js';
+import { ROOM_COLORS, STATUS_META, floorForRoom, hash, workerStatus } from './studio-data.js';
 const CYAN = 0x36cfff, AMBER = 0xffbd72;
+// Status colours come from the same table as the HUD chips, converted to linear space.
+const STATUS_COLORS = Object.fromEntries(Object.entries(STATUS_META).map(([key, meta]) => [key, new THREE.Color(meta.color)]));
+const BADGE_INDEX = { working: 0, completed: 1, pending: 2, failed: 3, idle: 4 }, BADGE_CELLS = 6;
+const _matrix = new THREE.Matrix4(), _position = new THREE.Vector3(), _scale = new THREE.Vector3(), _color = new THREE.Color(), _quat = new THREE.Quaternion(), _ice = new THREE.Color(0xdff6ff);
 const roomLayout = {
     directors: [-8.6, -4.4], leads: [-8.6, 3.3], engineering: [6.8, -4.4], design: [6.8, 3.3],
     art: [-9, -4.6], audio: [0, -4.6], narrative: [9, -4.6], qa: [-9, 3.8], engines: [0, 3.8], community: [9, 3.8]
@@ -63,9 +67,10 @@ export class Headquarters {
         this.particles = true;
         this.reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
         this.floor = 0;
-        this.active = new Set();
+        this.statuses = new Map();
         this.lastEvent = null;
         this.pulse = 0;
+        this.clock = 0;
         this.lights();
         this.architecture();
         this.city();
@@ -73,12 +78,14 @@ export class Headquarters {
         this.makeParticles();
         this.composer = new EffectComposer(this.renderer);
         this.composer.addPass(new RenderPass(this.scene, this.camera));
-        this.bloom = new UnrealBloomPass(new THREE.Vector2(1, 1), .36, .45, 1.12);
+        // Soft bloom: screens and status lights glow without washing out the building or HUD.
+        this.bloom = new UnrealBloomPass(new THREE.Vector2(1, 1), .42, .5, 1.05);
         this.composer.addPass(this.bloom);
         this.composer.addPass(new OutputPass());
-        this.focusRing = this.ring(0, 0, 0, .65, .035, this.mat('selection', CYAN, 0, 3));
+        // The selection ring is neutral ice, outside the status halo, so it never hides the status colour.
+        this.focusRing = this.ring(0, 0, 0, .7, .022, this.mat('selection', 0xdff6ff, 0, 1.6));
         this.focusRing.visible = false;
-        this.focusLight = new THREE.PointLight(CYAN, 6, 4);
+        this.focusLight = new THREE.PointLight(0xfff1df, 5, 4);
         this.scene.add(this.focusLight);
         this.focusLight.visible = false;
         this.ray = new THREE.Raycaster();
@@ -120,10 +127,7 @@ export class Headquarters {
         obj.scale.set(sx, sy, sz);
         if (batched) {
             obj.updateMatrix();
-            const list = this.staticBatches.get(mat) || [];
-            const copy = geo.index ? geo.toNonIndexed() : geo.clone();
-            list.push(copy.applyMatrix4(obj.matrix));
-            this.staticBatches.set(mat, list);
+            this.batchGeometry(geo, mat, obj.matrix);
         }
         else {
             obj.castShadow = mat.opacity === 1;
@@ -131,6 +135,39 @@ export class Headquarters {
             parent.add(obj);
         }
         return obj;
+    }
+    batchGeometry(geo, mat, matrix) {
+        const list = this.staticBatches.get(mat) || [];
+        list.push((geo.index ? geo.toNonIndexed() : geo.clone()).applyMatrix4(matrix));
+        this.staticBatches.set(mat, list);
+    }
+    // Static furniture with a local frame (rotated chairs, angled lamp arms) still merges into the material batches.
+    batchGroup(x, y, z, ry, build) {
+        const group = new THREE.Group();
+        group.position.set(x, y, z);
+        group.rotation.y = ry;
+        build((geo, mat, px, py, pz, sx, sy, sz, rx = 0, rz = 0) => { const m = new THREE.Mesh(geo, mat); m.position.set(px, py, pz); m.scale.set(sx, sy, sz); m.rotation.set(rx, 0, rz); group.add(m); });
+        group.updateMatrixWorld(true);
+        for (const m of group.children)
+            this.batchGeometry(m.geometry, m.material, m.matrixWorld);
+    }
+    canvasTexture(width, height, paint) {
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        paint(canvas.getContext('2d'), width, height);
+        const texture = new THREE.CanvasTexture(canvas);
+        texture.colorSpace = THREE.SRGBColorSpace;
+        this.textures.add(texture);
+        return texture;
+    }
+    // Soft elliptical contact shadow shared by desks (merged) and characters (instanced).
+    contactMaterial() {
+        if (!this.materials.has('contact')) {
+            const map = this.canvasTexture(128, 128, c => { const g = c.createRadialGradient(64, 64, 4, 64, 64, 63); g.addColorStop(0, 'rgba(0,0,0,.62)'); g.addColorStop(.55, 'rgba(0,0,0,.3)'); g.addColorStop(1, 'rgba(0,0,0,0)'); c.fillStyle = g; c.fillRect(0, 0, 128, 128); });
+            this.materials.set('contact', new THREE.MeshBasicMaterial({ color: 0x000000, map, transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 }));
+        }
+        return this.materials.get('contact');
     }
     box(x, y, z, w, h, d, mat, parent = this.scene, batched = true) { return this.mesh(this.geo('box', () => new THREE.BoxGeometry(1, 1, 1)), mat, x, y, z, w, h, d, parent, batched); }
     cyl(x, y, z, r, h, mat, batched = true, parent = this.scene) { return this.mesh(this.geo('cyl', () => new THREE.CylinderGeometry(1, 1, 1, 32)), mat, x, y, z, r, h, r, parent, batched); }
@@ -146,7 +183,7 @@ export class Headquarters {
         parts.forEach(g => g.dispose());
         if (geo) {
             const m = new THREE.Mesh(geo, mat);
-            m.castShadow = mat.opacity === 1 && !mat.emissiveIntensity;
+            m.castShadow = !mat.transparent && mat.opacity === 1 && !mat.emissiveIntensity;
             m.receiveShadow = true;
             this.scene.add(m);
         }
@@ -165,11 +202,12 @@ export class Headquarters {
         const rim = new THREE.DirectionalLight(0x3189ff, 2.5);
         rim.position.set(10, 18, -15);
         this.scene.add(rim);
+        // Warm interiors on the working decks, cool rim from the dispatch side: cyan stays the energy accent.
         for (let f = 0; f < 3; f++) {
-            const light = new THREE.PointLight(AMBER, 90, 22, 2);
-            light.position.set(-7, f * 6 + 3, -3);
+            const light = new THREE.PointLight(f ? 0xffb066 : AMBER, f ? 125 : 90, 22, 2);
+            light.position.set(-7, f * 6 + 3.6, -2.5);
             this.scene.add(light);
-            const cool = new THREE.PointLight(0x43aaff, 65, 20, 2);
+            const cool = new THREE.PointLight(0x3f9dff, f ? 50 : 65, 20, 2);
             cool.position.set(7, f * 6 + 3, 2);
             this.scene.add(cool);
         }
@@ -177,33 +215,86 @@ export class Headquarters {
         hub.position.set(0, 2, 3);
         this.scene.add(hub);
     }
+    // Dark glass plate: vertical gradient, 1px hairline, inner top highlight and a department accent bar.
+    paintLabel(ctx, text, color, small = '', chips = null) {
+        const W = 768, H = 128, r = 16;
+        ctx.clearRect(0, 0, W, H);
+        ctx.beginPath();
+        ctx.moveTo(r, 1);
+        ctx.arcTo(W - 1, 1, W - 1, H - 1, r);
+        ctx.arcTo(W - 1, H - 1, 1, H - 1, r);
+        ctx.arcTo(1, H - 1, 1, 1, r);
+        ctx.arcTo(1, 1, W - 1, 1, r);
+        ctx.closePath();
+        const fill = ctx.createLinearGradient(0, 0, 0, H);
+        fill.addColorStop(0, 'rgba(14,38,60,.95)');
+        fill.addColorStop(1, 'rgba(3,13,25,.95)');
+        ctx.fillStyle = fill;
+        ctx.fill();
+        ctx.lineWidth = 2;
+        ctx.strokeStyle = 'rgba(132,205,236,.3)';
+        ctx.stroke();
+        ctx.fillStyle = 'rgba(255,255,255,.09)';
+        ctx.fillRect(r, 4, W - r * 2, 2);
+        ctx.fillStyle = color;
+        ctx.fillRect(14, 24, 5, H - 48);
+        const sub = small || chips;
+        const titleSize = sub ? 40 : Math.min(62, Math.floor(690 / (text.length * .62)));
+        ctx.font = `600 ${titleSize}px "Avenir Next", "Trebuchet MS", sans-serif`;
+        ctx.fillStyle = color;
+        ctx.fillText(text, 38, sub ? 58 : 82);
+        ctx.font = '500 27px "Avenir Next", "Trebuchet MS", sans-serif';
+        if (chips) {
+            let x = 38;
+            for (const chip of chips) {
+                ctx.fillStyle = chip.color;
+                ctx.beginPath();
+                ctx.arc(x + 7, 92, 7, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.fillStyle = '#c9dfec';
+                ctx.fillText(chip.text, x + 22, 101);
+                x += 22 + ctx.measureText(chip.text).width + 26;
+            }
+        }
+        else if (small) {
+            ctx.fillStyle = '#8eaec5';
+            ctx.fillText(small, 38, 101);
+        }
+    }
+    // Floor plates are fixed panels mounted just outside the facade. A billboard would swing
+    // its far half behind the mullions and get sliced; a plate in front of the deck edge cannot.
+    plate(text, x, y, z, width, color) {
+        const map = this.canvasTexture(768, 128, c => this.paintLabel(c, text, color));
+        map.anisotropy = 4;
+        const mesh = new THREE.Mesh(this.geo('plate', () => new THREE.PlaneGeometry(1, 1)), new THREE.MeshBasicMaterial({ map, transparent: true, depthWrite: false, toneMapped: false }));
+        mesh.position.set(x, y, z);
+        mesh.scale.set(width, width / 6, 1);
+        mesh.rotation.set(-.08, .18, 0);
+        mesh.renderOrder = 5;
+        this.scene.add(mesh);
+        return mesh;
+    }
+    // Floor plates and the roof sign belong to the tower overview; any close focus hides them.
+    showLabels(visible) {
+        for (const l of this.floorLabels)
+            l.visible = visible;
+        if (this.roofSign)
+            this.roofSign.visible = visible;
+    }
     label(text, x, y, z, width = 5, color = '#bdeaff', small = '') {
         const canvas = document.createElement('canvas');
         canvas.width = 768;
         canvas.height = 128;
-        const ctx = canvas.getContext('2d');
-        ctx.fillStyle = 'rgba(3,17,32,.93)';
-        ctx.fillRect(0, 0, 768, 128);
-        ctx.fillStyle = color;
-        ctx.fillRect(0, 0, 5, 128);
-        ctx.fillStyle = '#17465c';
-        ctx.fillRect(5, 126, 763, 2);
-        const titleSize = small ? 38 : Math.min(64, Math.floor(690 / (text.length * .62)));
-        ctx.font = `500 ${titleSize}px "Trebuchet MS", sans-serif`;
-        ctx.fillStyle = color;
-        ctx.fillText(text, 26, small ? 56 : 79);
-        if (small) {
-            ctx.font = '23px "Trebuchet MS", sans-serif';
-            ctx.fillStyle = '#8eaec5';
-            ctx.fillText(small, 26, 98);
-        }
+        this.paintLabel(canvas.getContext('2d'), text, color, small);
         const texture = new THREE.CanvasTexture(canvas);
         texture.colorSpace = THREE.SRGBColorSpace;
+        texture.anisotropy = 4;
         this.textures.add(texture);
         const mat = new THREE.SpriteMaterial({ map: texture, transparent: true, depthTest: true, toneMapped: false });
         const sprite = new THREE.Sprite(mat);
         sprite.position.set(x, y, z);
-        sprite.scale.set(width, width / 5, 1);
+        sprite.scale.set(width, width / 6, 1);
+        sprite.userData = { canvas, text, color };
         this.scene.add(sprite);
         return sprite;
     }
@@ -259,6 +350,19 @@ export class Headquarters {
                 this.box(x + .18, y + 2.8, -7.84, .06, 3.8, .06, amber);
             }
             this.box(0, y + 4.85, -8, 26, .22, .4, metal);
+            // Warm ceiling light strips: under the deck above, or under the crown frame on 3F.
+            const warmStrip = this.mat('ceilingWarm', 0xffd09a, .1, 2.4);
+            if (f < 2)
+                for (const z of [-4.8, -.6, 3.6])
+                    for (const x of [-7, 7]) {
+                        this.box(x, y + 5.47, z, 9.6, .06, .26, metal);
+                        this.box(x, y + 5.42, z, 9.2, .035, .12, warmStrip);
+                    }
+            else {
+                this.box(0, y + 4.98, -7.55, 24, .035, .12, warmStrip);
+                for (const x of [-13.25, 13.25])
+                    this.box(x, y + 4.98, -1, .12, .035, 12.5, warmStrip);
+            }
             for (const x of [-13.8, 13.8]) {
                 this.box(x, y + 2.5, -3.4, .035, 4.5, 8.7, glass);
                 this.box(x, y + 4.85, -3.3, .4, .24, 9, metal);
@@ -278,7 +382,7 @@ export class Headquarters {
             if (f < 2)
                 for (let i = 0; i < 19; i++)
                     this.box(11.7, y + i * .316 + .16, -6.8 + i * .49, 2.3, .14, .5, edge);
-            this.floorLabels.push(this.label(`${f + 1}F  ${floorNames[f]}`, -8, y + .45, 8.85, 7.4, '#a6eaff'));
+            this.floorLabels.push(this.plate(`${f + 1}F  ${floorNames[f]}`, -8, y + .5, 9.5, 7.4, '#a6eaff'));
         }
         // Crown roof frame keeps the upper storey open and legible.
         this.box(0, 17.15, -7.9, 28, .26, .65, metal);
@@ -369,38 +473,86 @@ export class Headquarters {
         if (this.roster)
             return;
         this.roster = roster;
+        const glass = this.materials.get('glass'), edge = this.materials.get('edge');
+        if (!this.materials.has('rug'))
+            this.materials.set('rug', new THREE.MeshStandardMaterial({ color: 0x3a2a20, roughness: .92, metalness: .05 }));
+        const rug = this.materials.get('rug');
         for (const room of roster.rooms) {
             const f = floorForRoom(room), [cx, cz] = roomLayout[room] || [0, 0], members = roster.agents.filter(a => a.room === room), color = ROOM_COLORS[room] || CYAN;
             const y = (f - 1) * 6;
-            this.roomSigns.set(room, this.label(room.toUpperCase(), cx, y + 3.55, cz - 1.3, room === 'engineering' ? 5 : 3.6, `#${color.toString(16)}`));
+            const sign = this.label(room.toUpperCase(), cx, y + 3.55, cz - 1.3, room === 'engineering' ? 5 : 3.8, `#${color.toString(16).padStart(6, '0')}`);
+            sign.userData.room = room;
+            this.roomSigns.set(room, sign);
             // Room partitions and low frame imply glass offices without hiding occupants.
-            this.box(cx, y + 1.6, cz - 2.1, f === 3 ? 8 : 6.6, 3.1, .025, this.materials.get('glass'));
-            this.box(cx, y + 3.18, cz - 2.1, f === 3 ? 8 : 6.6, .06, .06, this.materials.get('edge'));
+            this.box(cx, y + 1.6, cz - 2.1, f === 3 ? 8 : 6.6, 3.1, .025, glass);
+            this.box(cx, y + 3.18, cz - 2.1, f === 3 ? 8 : 6.6, .06, .06, edge);
+            this.box(cx, y + .16, cz - 2.1, f === 3 ? 8 : 6.6, .05, .06, this.materials.get('soft'));
             const cols = f === 3 ? 4 : members.length > 9 ? 5 : 3;
             const spacing = cols === 5 ? 1.45 : 1.75;
+            const rows = Math.ceil(members.length / cols), width = (Math.min(cols, members.length) - 1) * spacing;
+            // Warm floor zone under each department: warm interiors against the cool deck and cyan accents.
+            this.box(cx, y + .122, cz - 1 + (rows - 1) * .75 + .3, width + 2.3, .006, rows * 1.5 + 1.1, rug);
+            // Low glass side partitions between neighbouring departments.
+            for (const side of [-1, 1]) {
+                const px = cx + side * (width / 2 + 1.15);
+                if (Math.abs(px) > 13.2 || (f === 3 && Math.abs(px) < 3.2))
+                    continue;
+                this.box(px, y + .75, cz - .9 + (rows - 1) * .5, .02, 1.25, rows * 1.5 + .6, glass);
+                this.box(px, y + 1.39, cz - .9 + (rows - 1) * .5, .05, .04, rows * 1.5 + .6, edge);
+            }
             members.forEach((role, i) => {
                 const x = cx + (i % cols - (Math.min(cols, members.length) - 1) / 2) * spacing;
                 const z = cz + Math.floor(i / cols) * 1.5 - 1;
                 this.desk(x, y, z, color, role.name);
-                this.createActor(role.name, role, x, y + .08, z + .64, color);
+                const actor = this.createActor(role.name, role, x, y + .08, z + .64, color);
+                actor.desk = new THREE.Vector3(x, y, z);
             });
         }
         this.flushStatics();
+        this.statusAssets();
     }
     desk(x, y, z, color, key) {
-        const metal = this.materials.get('metal'), edge = this.materials.get('edge');
+        const metal = this.materials.get('metal'), edge = this.materials.get('edge'), box = this.geometries.get('box'), h = hash(key);
+        const cyl = this.geo('cyl', () => new THREE.CylinderGeometry(1, 1, 1, 32));
+        const fabric = this.mat('fabric', 0x24384c, .15), shade = this.mat('lampShade', 0x2a3644, .7), glow = this.mat('lampGlow', 0xffc887, .1, 2.6);
+        // Contact shadow grounds the desk and its chair.
+        this.mesh(this.geo('flat', () => new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2)), this.contactMaterial(), x + .15, y + .128, z + .35, 2.1, 1, 1.7);
         this.box(x, y + .8, z, 1.48, .12, .82, edge);
         this.box(x, y + .38, z, .08, .75, .65, metal);
         this.box(x, y + .05, z, 1, .08, .65, metal);
         this.box(x, y + 1.15, z - .17, 1.08, .61, .1, metal);
         this.box(x, y + .92, z - .17, .08, .23, .1, edge);
-        // Shared inactive screens have real architectural light; activity is added in update().
+        // Shared inactive screens have real architectural light; status is carried by the desk strip and halo.
         this.box(x, y + 1.16, z - .105, .97, .49, .015, this.mat(`screen${color}`, color, .1, .35));
         for (let i = 0; i < 3; i++)
             this.box(x - .3, y + 1.3 - i * .12, z - .09, .22 + (hash(key + i) % 5) * .09, .022, .01, this.mat('code', 0x8ebfd0, 0, .55));
         this.box(x, y + .88, z + .19, .65, .025, .23, metal);
-        this.cyl(x, y + .36, z + .65, .25, .12, metal);
-        this.box(x, y + .62, z + .94, .44, .48, .07, edge);
+        // Desk lamp: weighted base, angled arm and a warm practical head.
+        this.batchGroup(x - .64, y + .86, z - .22, .5, add => {
+            add(cyl, metal, 0, .012, 0, .075, .024, .075);
+            add(box, edge, 0, .17, 0, .022, .32, .022);
+            add(box, edge, .07, .33, .03, .022, .2, .022, 0, -1.1);
+            add(cyl, shade, .17, .37, .05, .07, .08, .07, 0, .5);
+            add(cyl, glow, .185, .335, .05, .055, .012, .055, 0, .5);
+        });
+        if (h % 3 !== 1) {
+            this.cyl(x + .64, y + .92, z - .22, .065, .12, this.mat('planter', 0x69757b, .6));
+            const green = this.mat('leaves', 0x38776e, .05), leaf = this.geo('leaf', () => new THREE.IcosahedronGeometry(1, 0));
+            for (let i = 0; i < 4; i++) {
+                const a = i * 1.7 + h % 7;
+                this.mesh(leaf, green, x + .64 + Math.sin(a) * .045, y + 1.04 + i * .03, z - .22 + Math.cos(a) * .045, .055, .12, .045);
+            }
+        }
+        // Chair with a backrest, pulled out beside the agent so the character stays readable.
+        this.batchGroup(x + .58, y, z + .86, -.55 + (h % 5) * .05, add => {
+            add(cyl, metal, 0, .045, 0, .24, .03, .24);
+            add(cyl, metal, 0, .24, 0, .035, .36, .035);
+            add(box, fabric, 0, .45, 0, .46, .08, .44);
+            add(box, fabric, 0, .76, .2, .44, .46, .07, -.12);
+            add(box, edge, 0, .76, .24, .3, .3, .02, -.12);
+            for (const side of [-1, 1])
+                add(box, edge, side * .23, .58, -.02, .035, .035, .3);
+        });
     }
     createActor(id, data, x, y, z, color, visitor = false) {
         const g = new THREE.Group();
@@ -418,7 +570,7 @@ export class Headquarters {
         const hairTones = [0x1a1e27, 0x3a2822, 0x6d4a33, 0xb07b45, 0xd9b47e, 0x27354d, 0x5c3450];
         const skin = this.mat(`skin${h % skinTones.length}`, skinTones[h % skinTones.length], .04);
         const hair = this.mat(`hair${h % hairTones.length}`, hairTones[h % hairTones.length], .12);
-        const outfit = this.mat(`coat${color}`, color, .1), trim = this.mat(`trim${color}`, color, .12, 1.3);
+        const outfit = this.mat(`coat${color}`, color, .1), trim = this.mat(`trim${color}`, color, .12, .55);
         const limbs = [];
         let head;
 
@@ -463,6 +615,7 @@ export class Headquarters {
                 const arm = new THREE.Group();
                 arm.position.set(side * .255, .93, 0);
                 g.add(arm);
+                add(sphere, outfit, 0, -.01, 0, .078, .07, .078, arm);
                 add(box, outfit, 0, -.15, 0, .115, .30, .13, arm);
                 add(sphere, skin, 0, -.32, 0, .062, .066, .06, arm);
                 limbs.push(arm);
@@ -501,8 +654,9 @@ export class Headquarters {
                 add(sphere, hair, 0, .31, -.11, .115, .10, .115, head);
             // Face: oversized eyes with a highlight, a small smile and blush.
             for (const side of [-1, 1]) {
-                add(sphere, ink, side * .105, -.01, .275, .034, .040, .018, head);
-                add(sphere, this.mat('eyeHi', 0xffffff, 0, 2.2), side * .115, .006, .291, .010, .013, .008, head);
+                // Slightly larger eyes keep faces legible from the elevated overview camera.
+                add(sphere, ink, side * .105, -.01, .272, .041, .049, .02, head);
+                add(sphere, this.mat('eyeHi', 0xffffff, 0, 2.2), side * .117, .012, .29, .013, .016, .008, head);
             }
             add(box, ink, 0, -.105, .286, .062, .014, .014, head);
             add(sphere, this.mat('blush', 0xff9fa6, .05, .35), -.185, -.065, .235, .036, .018, .012, head);
@@ -544,9 +698,9 @@ export class Headquarters {
         pick.userData.actorId = id;
         g.add(pick);
         this.pickables.push(pick);
-        const halo = this.ring(x, y + .04, z, .48, .018, this.mat('activity', 0x48e8d0, .1, 2));
-        halo.visible = false;
-        const actor = { id, data, group: g, parts, limbs, head, halo, home: new THREE.Vector3(x, y, z), target: new THREE.Vector3(x, y, z), phase: (hash(id) % 100) / 10, visitor, busy: false, status: 'idle' };
+        // Status halo, badge and contact shadow are drawn by the shared instanced status layer.
+        // `status` starts unknown so the first poll does not replay a completion pulse.
+        const actor = { id, data, group: g, parts, limbs, head, home: new THREE.Vector3(x, y, z), target: new THREE.Vector3(x, y, z), phase: (hash(id) % 100) / 10, visitor, busy: false, status: null, burst: 0, nod: 0 };
         this.actors.set(id, actor);
         this.actorBatchesDirty = true;
         return actor;
@@ -578,6 +732,208 @@ export class Headquarters {
             this.actorBatches.push({ mesh, parts });
         }
         this.actorBatchesDirty = false;
+        this.buildStatusLayer();
+    }
+    // Shared generated textures/materials for every status cue: one draw call per layer, not per agent.
+    statusAssets() {
+        if (this.statusKit)
+            return this.statusKit;
+        const flat = this.geo('flat', () => new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2));
+        const ring = this.canvasTexture(128, 128, c => {
+            const g = c.createRadialGradient(64, 64, 0, 64, 64, 64);
+            g.addColorStop(0, 'rgba(255,255,255,0)');
+            g.addColorStop(.42, 'rgba(255,255,255,.08)');
+            g.addColorStop(.68, 'rgba(255,255,255,.95)');
+            g.addColorStop(.76, 'rgba(255,255,255,.5)');
+            g.addColorStop(1, 'rgba(255,255,255,0)');
+            c.fillStyle = g;
+            c.fillRect(0, 0, 128, 128);
+        });
+        const atlas = this.canvasTexture(128 * BADGE_CELLS, 128, c => this.paintBadges(c));
+        const halo = new THREE.MeshBasicMaterial({ map: ring, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, toneMapped: false });
+        const strip = new THREE.MeshBasicMaterial({ toneMapped: false });
+        // Camera-facing quads that pick an atlas cell per instance; the working cell gets a rotating arc.
+        const badge = new THREE.ShaderMaterial({
+            uniforms: { map: { value: atlas }, time: { value: 0 } },
+            vertexShader: `
+                attribute vec4 badge;
+                varying vec2 vUv;
+                varying vec4 vBadge;
+                void main() {
+                    vUv = uv;
+                    vBadge = badge;
+                    vec4 mv = modelViewMatrix * instanceMatrix * vec4(0.0, 0.0, 0.0, 1.0);
+                    // Grow gently with distance: readable at overview zoom, modest in close-ups.
+                    mv.xy += position.xy * badge.w * clamp(-mv.z / 24.0, 1.0, 2.2);
+                    gl_Position = projectionMatrix * mv;
+                }`,
+            fragmentShader: `
+                uniform sampler2D map;
+                uniform float time;
+                varying vec2 vUv;
+                varying vec4 vBadge;
+                vec4 cell(float index, vec2 uv) { return texture2D(map, vec2((index + clamp(uv.x, .004, .996)) / ${BADGE_CELLS}.0, clamp(uv.y, .004, .996))); }
+                void main() {
+                    vec4 c = cell(vBadge.x, vUv);
+                    if (vBadge.z > .5) {
+                        float a = -time * 4.0;
+                        vec2 p = vUv - .5;
+                        p = vec2(cos(a) * p.x - sin(a) * p.y, sin(a) * p.x + cos(a) * p.y) + .5;
+                        vec4 arc = cell(${BADGE_CELLS - 1}.0, p);
+                        c = vec4(mix(c.rgb, arc.rgb, arc.a), max(c.a, arc.a));
+                    }
+                    c.a *= vBadge.y;
+                    if (c.a < .01) discard;
+                    gl_FragColor = c;
+                    #include <colorspace_fragment>
+                }`,
+            transparent: true,
+            depthWrite: false,
+            toneMapped: false
+        });
+        this.materials.set('statusHalo', halo);
+        this.materials.set('statusStrip', strip);
+        this.materials.set('statusBadge', badge);
+        return this.statusKit = { flat, halo, strip, badge, contact: this.contactMaterial() };
+    }
+    // Badge atlas: working, completed, pending, failed, idle, spinner arc. Shape differs per status, not only colour.
+    paintBadges(c) {
+        const cell = (i, status, glyph) => {
+            const color = STATUS_META[status].color;
+            c.save();
+            c.translate(i * 128 + 64, 64);
+            c.beginPath();
+            if (status === 'failed') {
+                c.moveTo(0, -50);
+                c.lineTo(52, 42);
+                c.lineTo(-52, 42);
+                c.closePath();
+            }
+            else
+                c.arc(0, 0, 45, 0, Math.PI * 2);
+            c.fillStyle = 'rgba(4,14,26,.94)';
+            c.fill();
+            c.lineWidth = 7;
+            c.lineJoin = 'round';
+            c.strokeStyle = color;
+            c.globalAlpha = status === 'working' ? .3 : 1;
+            c.stroke();
+            c.globalAlpha = 1;
+            c.fillStyle = color;
+            c.lineWidth = 11;
+            c.lineCap = 'round';
+            glyph();
+            c.restore();
+        };
+        cell(0, 'working', () => { c.beginPath(); c.moveTo(-11, -18); c.lineTo(20, 0); c.lineTo(-11, 18); c.closePath(); c.fill(); });
+        cell(1, 'completed', () => { c.beginPath(); c.moveTo(-21, 2); c.lineTo(-6, 17); c.lineTo(22, -15); c.stroke(); });
+        cell(2, 'pending', () => {
+            // Hourglass: two glass bulbs meeting at a waist, sand settled in the lower bulb.
+            c.lineWidth = 6;
+            c.lineJoin = 'round';
+            c.beginPath();
+            c.moveTo(-15, -22); c.lineTo(15, -22); c.lineTo(2, -1); c.lineTo(15, 22); c.lineTo(-15, 22); c.lineTo(-2, -1);
+            c.closePath();
+            c.stroke();
+            c.beginPath(); c.moveTo(-21, -25); c.lineTo(21, -25); c.moveTo(-21, 25); c.lineTo(21, 25); c.stroke();
+            c.beginPath(); c.moveTo(0, 7); c.lineTo(10, 19); c.lineTo(-10, 19); c.closePath(); c.fill();
+        });
+        cell(3, 'failed', () => { c.beginPath(); c.moveTo(0, -18); c.lineTo(0, 8); c.stroke(); c.beginPath(); c.arc(0, 25, 6, 0, Math.PI * 2); c.fill(); });
+        cell(4, 'idle', () => { c.beginPath(); c.arc(0, 0, 10, 0, Math.PI * 2); c.fill(); });
+        c.save();
+        c.translate((BADGE_CELLS - 1) * 128 + 64, 64);
+        c.strokeStyle = STATUS_META.working.color;
+        c.lineWidth = 8;
+        c.lineCap = 'round';
+        c.beginPath();
+        c.arc(0, 0, 45, -Math.PI / 2, Math.PI / 4);
+        c.stroke();
+        c.restore();
+    }
+    buildStatusLayer() {
+        for (const mesh of this.statusMeshes || []) {
+            this.scene.remove(mesh);
+            mesh.dispose();
+        }
+        this.badgeGeometry?.dispose();
+        const kit = this.statusAssets(), list = [...this.actors.values()], n = Math.max(1, list.length), black = new THREE.Color(0);
+        const make = (geo, mat, count, order) => {
+            const mesh = new THREE.InstancedMesh(geo, mat, count);
+            mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+            mesh.frustumCulled = false;
+            mesh.renderOrder = order;
+            for (let i = 0; i < count; i++)
+                mesh.setMatrixAt(i, _matrix.makeScale(0, 0, 0));
+            this.scene.add(mesh);
+            return mesh;
+        };
+        this.badgeGeometry = new THREE.PlaneGeometry(1, 1);
+        const badgeAttr = new THREE.InstancedBufferAttribute(new Float32Array(n * 4), 4).setUsage(THREE.DynamicDrawUsage);
+        this.badgeGeometry.setAttribute('badge', badgeAttr);
+        const desks = list.filter(a => a.desk);
+        const layer = { list, desks, badgeAttr, shadows: make(kit.flat, kit.contact, n, 1), halos: make(kit.flat, kit.halo, n, 2), bursts: make(kit.flat, kit.halo, n, 3), badges: make(this.badgeGeometry, kit.badge, n, 20), strips: desks.length ? make(this.geometries.get('box'), kit.strip, desks.length, 0) : null };
+        for (let i = 0; i < n; i++) {
+            layer.halos.setColorAt(i, black);
+            layer.bursts.setColorAt(i, black);
+        }
+        // Desk-front status strips are static geometry; only their instance colours change.
+        desks.forEach((a, i) => {
+            layer.strips.setMatrixAt(i, _matrix.compose(_position.set(a.desk.x, a.desk.y + .8, a.desk.z + .418), _quat, _scale.set(1.3, .035, .016)));
+            layer.strips.setColorAt(i, black);
+        });
+        this.statusLayer = layer;
+        this.statusMeshes = [layer.shadows, layer.halos, layer.bursts, layer.badges, layer.strips].filter(Boolean);
+        this.stripsDirty = true;
+    }
+    updateStatusLayer(dt) {
+        const layer = this.statusLayer;
+        if (!layer)
+            return;
+        const t = this.clock || 0, calm = this.reduced;
+        layer.list.forEach((a, i) => {
+            const p = a.group.position, status = a.status || 'idle', lit = !!this.highlighted?.has(a.id), wave = Math.sin(t * 3.2 + a.phase);
+            layer.shadows.setMatrixAt(i, _matrix.compose(_position.set(p.x, p.y + .052, p.z), _quat, _scale.set(.95, 1, .8)));
+            // Halo brightness carries the status rhythm. Reduced motion keeps colour plus a slow opacity breath, no scaling.
+            let glow = 0, size = 1.3;
+            if (status === 'working') {
+                glow = calm ? .95 + Math.sin(t * 1.9 + a.phase) * .15 : 1 + wave * .35;
+                size = calm ? 1.3 : 1.3 + wave * .06;
+            }
+            else if (status === 'completed')
+                glow = .9;
+            else if (status === 'pending')
+                glow = .55 + Math.sin(t * (calm ? 1.2 : 1.7) + a.phase) * (calm ? .12 : .3);
+            else if (status === 'failed')
+                glow = calm ? .75 : .42 + .42 * THREE.MathUtils.smoothstep(Math.sin(t * 2.4), -.25, .25);
+            if (a.burst > 0) {
+                a.burst = Math.max(0, a.burst - dt / 1.5);
+                if (calm)
+                    glow += a.burst * .8;
+            }
+            if (lit)
+                glow = Math.max(glow * 1.35, .8);
+            layer.halos.setColorAt(i, _color.copy(lit && status === 'idle' ? _ice : STATUS_COLORS[status]).multiplyScalar(glow));
+            layer.halos.setMatrixAt(i, _matrix.compose(_position.set(p.x, p.y + .062, p.z), _quat, _scale.setScalar(glow ? size : 0)));
+            // A brief expanding ring marks the observed transition to completed.
+            const burst = calm ? 0 : a.burst;
+            layer.bursts.setColorAt(i, _color.copy(STATUS_COLORS.completed).multiplyScalar(burst * 1.4));
+            layer.bursts.setMatrixAt(i, _matrix.compose(_position.set(p.x, p.y + .07, p.z), _quat, _scale.setScalar(burst ? 1.3 + (1 - burst) * 2.6 : 0)));
+            const bob = calm || status !== 'working' ? 0 : Math.sin(t * 2.2 + a.phase) * .03;
+            layer.badges.setMatrixAt(i, _matrix.compose(_position.set(p.x, p.y + (a.visitor ? 1.98 : 2.02) + bob, p.z), _quat, _scale.setScalar(1)));
+            layer.badgeAttr.setXYZW(i, BADGE_INDEX[status] ?? 4, status === 'pending' && !calm ? .8 + wave * .2 : 1, status === 'working' ? 1 : 0, status === 'idle' ? 0 : .34);
+        });
+        for (const mesh of [layer.shadows, layer.halos, layer.bursts, layer.badges])
+            mesh.instanceMatrix.needsUpdate = true;
+        layer.halos.instanceColor.needsUpdate = true;
+        layer.bursts.instanceColor.needsUpdate = true;
+        layer.badgeAttr.needsUpdate = true;
+        layer.badges.material.uniforms.time.value = calm ? 0 : t;
+        if (this.stripsDirty && layer.strips) {
+            const gain = { working: 1.7, completed: 1.05, pending: 1, failed: 1.1, idle: .2 };
+            layer.desks.forEach((a, i) => layer.strips.setColorAt(i, _color.copy(STATUS_COLORS[a.status || 'idle']).multiplyScalar(gain[a.status || 'idle'])));
+            layer.strips.instanceColor.needsUpdate = true;
+            this.stripsDirty = false;
+        }
     }
     updateActorInstances() {
         if (this.actorBatchesDirty)
@@ -588,10 +944,23 @@ export class Headquarters {
             parts.forEach((part, i) => mesh.setMatrixAt(i, part.matrixWorld));
             mesh.instanceMatrix.needsUpdate = true;
         }
+        this.updateStatusLayer(this.frameDt || 0);
     }
-    update(state, active, board) {
+    setStatus(a, status) {
+        if (a.status === status)
+            return;
+        // Only an observed transition plays the completion burst and nod; the first poll does not.
+        if (status === 'completed' && a.status) {
+            a.burst = 1;
+            a.nod = 1;
+        }
+        a.status = status;
+        a.busy = status === 'working';
+        this.stripsDirty = true;
+    }
+    update(state, statuses = new Map(), board) {
         this.state = state;
-        this.active = active;
+        this.statuses = statuses;
         this.drawTasks(board);
         const visitors = new Set();
         for (const w of state.workers || []) {
@@ -606,8 +975,7 @@ export class Headquarters {
                 a = this.createActor(id, w, x, 0.08, z, robotColors[h % robotColors.length], true);
             }
             a.data = w;
-            a.busy = isWorking(w);
-            a.status = w.workerState || w.dispatchStatus || 'unknown';
+            this.setStatus(a, (statuses.get(id) || workerStatus(w)).status);
             // A status change moves the visitor smoothly between its arrival and dispatch station.
             a.target.copy(a.home);
             if (a.busy)
@@ -615,36 +983,73 @@ export class Headquarters {
         }
         for (const [id, a] of this.actors) {
             if (a.visitor && !visitors.has(id)) {
-                this.scene.remove(a.group, a.halo);
+                this.scene.remove(a.group);
                 this.pickables = this.pickables.filter(p => p.userData.actorId !== id);
                 this.actors.delete(id);
                 this.actorBatchesDirty = true;
                 continue;
             }
-            if (!a.visitor) {
-                a.busy = active.has(id);
-                const associated = (state.workers || []).find(w => matchesRole(w, a.data));
-                a.status = associated?.workerState || (a.busy ? 'working' : 'idle');
-            }
-            a.halo.visible = a.busy;
+            if (!a.visitor)
+                this.setStatus(a, statuses.get(id)?.status || 'idle');
         }
-        for (const [room, sign] of this.roomSigns) {
-            const busy = this.roster?.agents.some(a => a.room === room && active.has(a.name));
-            sign.material.color.set(busy ? 0xffffff : 0x99b3c9);
-        }
+        this.updateRoomSigns();
         this.updateStreams();
         const event = state.audit?.events?.at(-1), eventKey = event ? `${event.ts}:${event.agent}:${event.kind}` : null;
         if (this.lastEvent && eventKey !== this.lastEvent)
             this.pulse = 1;
         this.lastEvent = eventKey;
     }
-    drawTasks(board) { const c = this.taskCanvas.getContext('2d'); c.fillStyle = '#04182a'; c.fillRect(0, 0, 768, 512); c.fillStyle = '#71ddff'; c.font = '32px monospace'; c.fillText('LIVE DISPATCH', 42, 65); c.fillStyle = '#5b869c'; c.fillRect(42, 92, 684, 2); c.font = '28px monospace'; if (!board) {
-        c.fillText('Awaiting state', 42, 158);
+    // Room signs carry live per-department counts; canvases are repainted only when the counts change.
+    updateRoomSigns() {
+        for (const [room, sign] of this.roomSigns) {
+            const members = this.roster?.agents.filter(a => a.room === room) || [];
+            const count = s => members.filter(m => this.actors.get(m.name)?.status === s).length;
+            const chips = ['working', 'completed', 'pending', 'failed'].map(s => [count(s), s]).filter(([n]) => n).map(([n, s]) => ({ text: `${n} ${STATUS_META[s].label.toLowerCase()}`, color: STATUS_META[s].color }));
+            const key = chips.map(c => c.text).join('|') || 'idle';
+            if (sign.userData.key === key)
+                continue;
+            sign.userData.key = key;
+            this.paintLabel(sign.userData.canvas.getContext('2d'), sign.userData.text, sign.userData.color, `${members.length} agent${members.length === 1 ? '' : 's'} · idle`, chips.length ? chips : null);
+            sign.material.map.needsUpdate = true;
+            sign.material.color.set(count('working') ? 0xffffff : 0xb9cad8);
+        }
     }
-    else {
-        c.fillText(`${board.source.toUpperCase()} / ${board.total} TASKS`, 42, 150);
-        ['running', 'pending', 'blocked'].forEach((lane, i) => { c.fillStyle = i === 2 ? '#f3b984' : '#a7d9ef'; c.fillText(lane.toUpperCase(), 42, 228 + i * 85); c.fillText(String(board.counts[lane] || 0), 630, 228 + i * 85); });
-    } this.taskTexture.needsUpdate = true; }
+    drawTasks(board) {
+        const c = this.taskCanvas.getContext('2d'), bg = c.createLinearGradient(0, 0, 0, 512);
+        bg.addColorStop(0, '#072339');
+        bg.addColorStop(1, '#03111f');
+        c.fillStyle = bg;
+        c.fillRect(0, 0, 768, 512);
+        c.fillStyle = '#71ddff';
+        c.font = '600 30px "Avenir Next", sans-serif';
+        c.fillText('LIVE DISPATCH', 42, 64);
+        c.fillStyle = 'rgba(120,200,235,.3)';
+        c.fillRect(42, 88, 684, 2);
+        c.font = '26px "Avenir Next", sans-serif';
+        if (!board) {
+            c.fillStyle = '#7d9db3';
+            c.fillText('Awaiting state', 42, 150);
+        }
+        else {
+            c.fillStyle = '#9fc0d4';
+            c.fillText(`${board.source.toUpperCase()} · ${board.total} TASKS`, 42, 140);
+            const done = board.source === 'Orca' ? 'completed' : 'done';
+            [['running', 'working'], ['pending', 'pending'], ['blocked', 'failed'], [done, 'completed']].forEach(([lane, status], i) => {
+                const y = 210 + i * 76, color = STATUS_META[status].color;
+                c.fillStyle = color;
+                c.beginPath();
+                c.arc(54, y - 9, 8, 0, Math.PI * 2);
+                c.fill();
+                c.fillStyle = '#d3eaff';
+                c.font = '26px "Avenir Next", sans-serif';
+                c.fillText(lane.toUpperCase(), 80, y);
+                c.fillStyle = color;
+                c.font = '600 30px ui-monospace, monospace';
+                c.fillText(String(board.counts[lane] || 0).padStart(4, ' '), 620, y);
+            });
+        }
+        this.taskTexture.needsUpdate = true;
+    }
     makeParticles() {
         const count = 850, positions = new Float32Array(count * 3);
         for (let i = 0; i < count; i++) {
@@ -665,7 +1070,7 @@ export class Headquarters {
         this.scene.add(this.energy);
     }
     updateStreams() { this.streams = []; for (const room of this.roster?.rooms || [])
-        if (this.roster.agents.some(a => a.room === room && this.active.has(a.name))) {
+        if (this.roster.agents.some(a => a.room === room && this.actors.get(a.name)?.status === 'working')) {
             const [x, z] = roomLayout[room] || [0, 0], y = (floorForRoom(room) - 1) * 6;
             this.streams.push(new THREE.CatmullRomCurve3([new THREE.Vector3(0, 1.2, 2), new THREE.Vector3(2, y * .5 + 2, 7), new THREE.Vector3(x * .7, y + .4, 7), new THREE.Vector3(x, y + 1, z)]));
         } this.energy.geometry.setDrawRange(0, this.streams.length * (this.low ? 12 : 48)); }
@@ -674,18 +1079,65 @@ export class Headquarters {
         this.onSelect(hit.object.userData.actorId);
     } }
     select(id, focus = true) { const a = this.actors.get(id); this.selected = id; this.focusRing.visible = !!a; this.focusLight.visible = !!a; if (a && focus) {
+        this.showLabels(false);
         const target = a.group.position.clone().add(new THREE.Vector3(0, 1, 0));
         this.fly(target, target.clone().add(new THREE.Vector3(13, a.home.y < 11 ? 4 : 10, 18)));
     } }
-    highlight(ids) { this.highlighted = ids ? new Set(ids) : null; for (const [id, a] of this.actors) {
-        a.halo.visible = a.busy || !!this.highlighted?.has(id);
-        a.halo.material = this.highlighted?.has(id) ? this.materials.get('selection') : this.materials.get('activity');
-    } }
-    focusFloor(f) { this.floor = f; this.onFloor(f); for (const l of this.floorLabels) l.visible = f === 0; if (this.roofSign) this.roofSign.visible = f === 0; if (!f) {
+    // Lane filters brighten matching halos; idle matches get a neutral ice halo so status colours stay truthful.
+    highlight(ids) { this.highlighted = ids ? new Set(ids) : null; }
+    pose(a, t, moving, dt) {
+        const [leftArm, leftLeg, rightArm, rightLeg] = a.limbs, s = a.status, phase = a.phase;
+        // Heads bias toward the default camera (+x, above) so faces read at the overview angle.
+        let la = .05, ra = .03, laz = 0, raz = 0, ll = 0, rl = 0, yaw = .16 + Math.sin(t * .8 + phase) * .13, pitch = -.05;
+        if (moving) {
+            const step = Math.sin(t * 6 + phase);
+            la = step * .5;
+            ra = -step * .5;
+            ll = -step * .4;
+            rl = step * .4;
+        }
+        else if (s === 'working') {
+            const key = Math.sin(t * 7 + phase) * .12;
+            la = -.8 + key;
+            ra = -.8 - key;
+            yaw = .1 + Math.sin(t * .6 + phase) * .05;
+            pitch = .1 + Math.sin(t * 1.7 + phase) * .02;
+        }
+        else if (s === 'completed') {
+            la = ra = -.18;
+            laz = -.08;
+            raz = .08;
+            yaw = .18;
+        }
+        else if (s === 'pending') {
+            la = ra = -.55;
+            laz = .45;
+            raz = -.45;
+            yaw = .16 + Math.sin(t * .5 + phase) * .4;
+            rl = Math.max(0, Math.sin(t * 3.2 + phase)) * .16;
+        }
+        else if (s === 'failed') {
+            la = ra = .02;
+            laz = -.1;
+            raz = .1;
+            yaw = 0;
+            pitch = .34;
+        }
+        if (a.nod > 0) {
+            a.nod = this.reduced ? 0 : Math.max(0, a.nod - dt / 1.6);
+            pitch = Math.sin((1 - a.nod) * Math.PI * 4) * .22 * a.nod;
+        }
+        leftArm.rotation.set(la, 0, laz);
+        rightArm.rotation.set(ra, 0, raz);
+        leftLeg.rotation.x = ll;
+        rightLeg.rotation.x = rl;
+        a.head.rotation.set(pitch, yaw, 0);
+    }
+    focusFloor(f) { this.floor = f; this.onFloor(f); this.showLabels(f === 0); if (!f) {
         this.reset();
         return;
     } const y = (f - 1) * 6 + 1.8, lobby = f === 1; this.fly(new THREE.Vector3(0, y + (lobby ? .8 : 0), 0), new THREE.Vector3(22, y + (lobby ? 8 : f < 3 ? 3 : 12), lobby ? 35 : 31)); }
-    reset(immediate = false) { this.floor = 0; this.onFloor(0); for (const l of this.floorLabels) l.visible = true; if (this.roofSign) this.roofSign.visible = true; const target = new THREE.Vector3(0, 7, 0), position = new THREE.Vector3(26, 24, 40); if (immediate) {
+    reset(immediate = false) { this.floor = 0; this.onFloor(0); this.showLabels(true); const target = new THREE.Vector3(0, 7, 0), position = new THREE.Vector3(26, 24, 40); if (immediate) {
         this.controls.target.copy(target);
         this.camera.position.copy(position);
         this.controls.update();
@@ -705,9 +1157,12 @@ export class Headquarters {
         if (this.disposed || document.hidden)
             return;
         this.frame = requestAnimationFrame(t => this.animate(t));
-        const dt = Math.min((now - this.lastFrame) / 1000, .05);
+        // rAF timestamps can precede the performance.now() taken at construction; never step backwards.
+        const dt = Math.max(0, Math.min((now - this.lastFrame) / 1000, .05));
         this.lastFrame = now;
         this.time += this.reduced ? 0 : dt;
+        this.clock += dt;
+        this.frameDt = dt;
         const t = this.time;
         if (this.flight) {
             const k = 1 - Math.exp(-dt * 4);
@@ -725,22 +1180,7 @@ export class Headquarters {
             for (const a of this.actors.values()) {
                 const moving = a.group.position.distanceTo(a.target) > .02;
                 a.group.position.lerp(a.target, 1 - Math.exp(-dt * 2));
-                a.head.rotation.y = Math.sin(t * .8 + a.phase) * .13;
-                const work = a.busy ? Math.sin(t * 7 + a.phase) * .12 : 0;
-                a.limbs[0].rotation.x = moving ? Math.sin(t * 6 + a.phase) * .5 : a.busy ? -.8 + work : .05;
-                a.limbs[2].rotation.x = moving ? -Math.sin(t * 6 + a.phase) * .5 : a.status === 'blocked' ? -.4 : a.busy ? -.8 - work : .03;
-                a.limbs[1].rotation.x = moving ? -Math.sin(t * 6 + a.phase) * .4 : 0;
-                a.limbs[3].rotation.x = moving ? Math.sin(t * 6 + a.phase) * .4 : 0;
-                if (/review/.test(a.status))
-                    a.limbs[2].rotation.x = -1.9;
-                if (/communicat|awaiting|waiting/.test(a.status)) {
-                    a.limbs[0].rotation.x = -1.2;
-                    a.head.rotation.y = Math.sin(t * .9 + a.phase) * .35;
-                }
-                if (/succeeded|completed/.test(a.status))
-                    a.limbs[2].rotation.z = -.35;
-                a.halo.position.copy(a.group.position);
-                a.halo.position.y += .025;
+                this.pose(a, t, moving, dt);
             }
             if (this.particles) {
                 const attr = this.energy.geometry.attributes.position, per = this.low ? 12 : 48;
@@ -752,6 +1192,12 @@ export class Headquarters {
                 this.energy.material.size = .07 + this.pulse * .06;
             }
         }
+        else
+            // Reduced motion: no walking or gestures, but every agent still holds its status pose.
+            for (const a of this.actors.values()) {
+                a.group.position.copy(a.target);
+                this.pose(a, 0, false, dt);
+            }
         const selected = this.actors.get(this.selected);
         if (selected) {
             this.focusRing.position.copy(selected.group.position);

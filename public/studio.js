@@ -1,4 +1,4 @@
-import { activeRoles, isWorking, matchesRole, taskBoard, getJSON, outputBlocks, floorForRoom, ROOM_COLORS, hash } from './studio-data.js';
+import { agentStatuses, workerStatus, countStatuses, STATUS_META, STATUS_ORDER, COMPLETED_WINDOW_MS, isWorking, matchesRole, taskBoard, getJSON, outputBlocks, floorForRoom, ROOM_COLORS, hash } from './studio-data.js';
 const $ = id => document.getElementById(id);
 const el = (tag, cls, text) => { const n = document.createElement(tag); if (cls)
     n.className = cls; if (text != null)
@@ -8,6 +8,26 @@ const time = value => { if (!value)
     return '—'; const d = new Date(value); return Number.isNaN(d.getTime()) ? String(value) : d.toLocaleTimeString([], { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' }); };
 const date = value => { if (!value)
     return '—'; const d = new Date(value); return Number.isNaN(d.getTime()) ? String(value) : d.toLocaleString(); };
+const clock = value => { const d = new Date(value); return Number.isNaN(d.getTime()) ? String(value) : d.toLocaleTimeString([], { hour12: false, hour: '2-digit', minute: '2-digit' }); };
+// Every status is shape + label + colour, never colour alone.
+const ICONS = {
+    working: '<svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="5.6" fill="none" stroke="currentColor" stroke-opacity=".28" stroke-width="2"/><path d="M8 2.4a5.6 5.6 0 0 1 5.6 5.6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>',
+    completed: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.4 8.6l3 3 6.2-7" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+    pending: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4.5 2.5h7M4.5 13.5h7M5.4 2.5c0 3.2 5.2 3 5.2 5.5s-5.2 2.3-5.2 5.5M10.6 2.5c0 3.2-5.2 3-5.2 5.5s5.2 2.3 5.2 5.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>',
+    failed: '<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 2.2l6.3 11.3H1.7z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><path d="M8 6.4v3.3" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><circle cx="8" cy="11.7" r="1" fill="currentColor"/></svg>',
+    idle: '<svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="4.4" fill="none" stroke="currentColor" stroke-width="1.6"/></svg>'
+};
+const meta = status => STATUS_META[status] || STATUS_META.idle;
+const icon = status => `<i class="ico" data-status="${status}">${ICONS[status] || ICONS.idle}</i>`;
+function chip(status, text = meta(status).label, cls = 'chip') {
+    const c = el('span', cls);
+    c.dataset.status = status;
+    c.style.setProperty('--s', meta(status).color);
+    c.innerHTML = icon(status);
+    c.append(text);
+    return c;
+}
+const LANE_STATUS = { running: 'working', dispatched: 'working', review: 'working', pending: 'pending', ready: 'pending', scheduled: 'pending', blocked: 'failed', failed: 'failed', completed: 'completed', done: 'completed' };
 function portrait(id, room = 'lobby', visitor = false) {
     const h = hash(id + room);
     const hex = (ROOM_COLORS[room] || 0x54d9fa).toString(16).padStart(6, '0');
@@ -53,35 +73,40 @@ function portrait(id, room = 'lobby', visitor = false) {
     </svg>`;
 }
 const isFloor = document.body.dataset.view === 'floor';
+const metric = (status, key, label) => `<div class="metric" data-status="${status}" style="--s:${meta(status).color}"><span class="metric-label">${icon(status)}${label}</span><b id="metric-${key}">—</b><small id="metric-${key}-sub">&nbsp;</small></div>`;
 $('hud').innerHTML = `
 <header class="topbar">
- <a class="brand" href="/" aria-label="Agent Studio overview"><div class="brand-mark">⬡</div><div><h1>AGENT STUDIO</h1><p>AI AGENT COMMAND CENTER</p></div></a>
+ <a class="brand" href="/" aria-label="Agent Studio overview"><div class="brand-mark">⬡</div><div><h1>Agent Studio</h1><p>AI agent command center</p></div></a>
  <button class="connection" id="connection" data-state="loading" title="Retry connection"><strong id="connection-label">Connecting</strong><small id="clock">Awaiting state</small></button>
- <div class="metrics"><div class="metric"><span>Working workers</span><b id="metric-working">—</b></div><div class="metric"><span>Active roles</span><b id="metric-roles">—</b></div><div class="metric"><span>Pending / blocked</span><b id="metric-pending">—</b></div><div class="metric"><span id="metric-board-label">Task board</span><b id="metric-tasks">—</b></div></div>
- <nav class="floor-switch" aria-label="Focus a floor"><button data-floor="0" aria-pressed="true">ALL</button><button data-floor="1" aria-pressed="false">1F</button><button data-floor="2" aria-pressed="false">2F</button><button data-floor="3" aria-pressed="false">3F</button></nav>
+ <div class="metrics">${metric('working', 'working', 'Working agents')}${metric('completed', 'completed', 'Completed')}${metric('pending', 'pending', 'Pending / blocked')}<div class="metric" data-status="tasks"><span class="metric-label"><i class="ico">☷</i><span id="metric-board-label">Tasks</span></span><b id="metric-tasks">—</b><small id="metric-tasks-sub">&nbsp;</small></div></div>
+ <ul class="legend" aria-label="Status legend">${STATUS_ORDER.map(s => `<li style="--s:${meta(s).color}" title="${meta(s).description}">${icon(s)}${meta(s).label}</li>`).join('')}</ul>
+ <nav class="floor-switch" aria-label="Focus a floor"><button data-floor="0" aria-pressed="true">All</button><button data-floor="1" aria-pressed="false">1F</button><button data-floor="2" aria-pressed="false">2F</button><button data-floor="3" aria-pressed="false">3F</button></nav>
  <button class="settings-button" id="settings" aria-label="Rendering settings" title="Rendering settings">⚙</button>
 </header>
-<div class="world-heading"><div class="eyebrow">HEADQUARTERS / LIVE SPATIAL VIEW</div><h2 id="world-title">ONE STUDIO. EVERY AGENT.</h2><p id="world-subtitle">Three floors. One connected operation.</p></div>
-<nav class="view-links" aria-label="Studio view"><a href="/" ${!isFloor ? 'aria-current="page"' : ''}>COMMAND OVERVIEW</a><a href="/floor" ${isFloor ? 'aria-current="page"' : ''}>FLOOR VIEW ↗</a></nav>
-<aside class="left-column" aria-label="Task board and operations">
- <section class="panel task-board"><div class="panel-head"><h2>Task board</h2><small id="board-total">—</small></div><p class="board-source" id="board-source">Awaiting state</p><div class="lanes" id="lanes"></div></section>
- <nav class="panel operations" aria-label="Operations"><button data-panel="history"><span>◷</span>Run history</button><button data-panel="roster"><span>◈</span>Roster</button><button data-panel="audit"><span>⌁</span>Audit</button><button data-panel="quotas"><span>◴</span>Quotas</button><button data-panel="paseo"><span>◇</span>Paseo</button><button data-panel="tasks"><span>☷</span>All tasks</button></nav>
- <section class="panel role-summary"><div class="panel-head"><h2>Active roles</h2><small id="active-count">—</small></div><div id="active-list" class="mini-list"><p class="empty">Awaiting state.</p></div></section>
+<div class="world-heading"><div class="eyebrow">Headquarters · live spatial view</div><h2 id="world-title">ONE STUDIO. EVERY AGENT.</h2><p id="world-subtitle">Three floors. One connected operation.</p></div>
+<nav class="view-links" aria-label="Studio view"><a href="/" ${!isFloor ? 'aria-current="page"' : ''}>Command overview</a><a href="/floor" ${isFloor ? 'aria-current="page"' : ''}>Floor view ↗</a></nav>
+<aside class="left-column" aria-label="Agent status, task board and operations">
+ <section class="panel agent-status" aria-labelledby="agent-status-title"><div class="panel-head"><h2 id="agent-status-title">Agent status</h2><small id="status-total">—</small></div>
+  <div class="status-strip">${['working', 'completed', 'idle'].map(s => `<div style="--s:${meta(s).color}" data-status="${s}"><b>${icon(s)}<span id="count-${s}">—</span></b><span>${meta(s).label}</span></div>`).join('')}</div>
+  <div class="status-groups" id="status-groups"><p class="empty">Awaiting state.</p></div>
+ </section>
+ <section class="panel task-board"><div class="panel-head"><h2>Task board</h2><small id="board-total">—</small></div><p class="board-source" id="board-source">Awaiting state</p><div class="board-progress" id="board-progress" hidden><i></i></div><div class="lanes" id="lanes"></div></section>
+ <nav class="panel operations" aria-label="Operations">${[['history', '◷', 'Run history'], ['roster', '◈', 'Roster'], ['audit', '⌁', 'Audit'], ['quotas', '◴', 'Quotas'], ['paseo', '◇', 'Paseo'], ['tasks', '☷', 'All tasks']].map(([k, i, t]) => `<button data-panel="${k}" title="${t}" aria-label="${t}"><span>${i}</span><em>${t}</em></button>`).join('')}</nav>
 </aside>
 <aside class="right-column" aria-label="Agent inspection">
- <section class="panel detail"><div class="panel-head"><h2>Agent detail</h2><button id="clear-selection" aria-label="Clear agent selection" style="border:0;background:none;padding:0;color:var(--muted)">×</button></div><div id="detail-body" class="detail-body"></div></section>
+ <section class="panel detail"><div class="panel-head"><h2>Agent detail</h2><button id="clear-selection" class="icon-button" aria-label="Clear agent selection">×</button></div><div id="detail-body" class="detail-body"></div></section>
  <section class="panel live-work"><div class="panel-head"><h2>Live work</h2><small id="run-tag">—</small></div><p id="run-objective" class="run-objective">Awaiting orchestration state.</p><div id="worker-list" class="worker-list"></div><pre id="live-tail" class="live-tail" hidden></pre></section>
 </aside>
-<div class="scene-hint">DRAG TO ORBIT <span style="color:#315269"> / </span> SCROLL TO ZOOM <span style="color:#315269"> / </span> SELECT AN AGENT</div>
-<nav class="panel navigator" aria-label="Building navigator"><div class="mini-tower"><button data-floor="3" aria-label="Engineering and design floor">3F</button><button data-floor="2" aria-label="Production and quality floor">2F</button><button data-floor="1" aria-label="Lobby and dispatch floor">1F</button></div><div class="nav-floors"><button data-floor="0" aria-pressed="true"><small>◈</small>Overview</button><button data-floor="1"><small>1F</small>Lobby</button><button data-floor="2"><small>2F</small>Production</button><button data-floor="3"><small>3F</small>Engineering</button></div></nav>
-<section class="panel events"><div class="panel-head"><h2>Live events</h2><button data-panel="audit">AUDIT TRAIL ↗</button></div><div class="event-list" id="events"><p class="empty">Awaiting audit events.</p></div></section>
+<div class="scene-hint">Drag to orbit <span>·</span> scroll to zoom <span>·</span> select an agent</div>
+<nav class="panel navigator" aria-label="Building navigator"><div class="mini-tower"><button data-floor="3" aria-label="Engineering and design floor">3F</button><button data-floor="2" aria-label="Production and quality floor">2F</button><button data-floor="1" aria-label="Lobby and dispatch floor">1F</button></div><div class="nav-floors"><button data-floor="0" aria-pressed="true"><small>◈</small><span class="nav-name">Overview</span><span class="floor-badges" data-floor-badges="0"></span></button><button data-floor="1"><small>1F</small><span class="nav-name">Lobby</span><span class="floor-badges" data-floor-badges="1"></span></button><button data-floor="2"><small>2F</small><span class="nav-name">Production</span><span class="floor-badges" data-floor-badges="2"></span></button><button data-floor="3"><small>3F</small><span class="nav-name">Engineering</span><span class="floor-badges" data-floor-badges="3"></span></button></div></nav>
+<section class="panel events"><div class="panel-head"><h2>Live events</h2><button data-panel="audit" class="link-button">Audit trail ↗</button></div><div class="event-list" id="events"><p class="empty">Awaiting audit events.</p></div></section>
 <section class="panel preferences" id="preferences" aria-label="Rendering preferences"><label class="toggle-row" for="particles">Particle effects<input type="checkbox" id="particles" checked></label><label class="toggle-row" for="low-performance">Low performance mode<input type="checkbox" id="low-performance"></label><div class="performance"><button id="reset-camera">↺ Reset camera</button><output id="fps">— FPS</output></div></section>
-<footer class="ticker"><strong>ACTIVITY</strong><span id="ticker-text">Awaiting observed state changes.</span><span class="scope" id="scope">READ-ONLY TELEMETRY</span></footer>`;
+<footer class="ticker"><strong>Activity</strong><span id="ticker-text">Awaiting observed state changes.</span><span class="scope" id="scope">Read-only telemetry</span></footer>`;
 const dialog = el('dialog');
 dialog.setAttribute('aria-labelledby', 'dialog-title');
 dialog.innerHTML = '<div class="dialog-header"><h2 id="dialog-title"></h2><div class="dialog-actions"><button id="dialog-refresh" aria-label="Refresh panel">↻ Refresh</button><button id="dialog-close" aria-label="Close panel">×</button></div></div><div id="dialog-content" class="dialog-content"></div>';
 document.body.append(dialog);
-let world = null, state = null, roster = { rooms: [], agents: [] }, rosterLoaded = false, selected = null, active = new Set(), board = null, pickedWorker = null, follow = true, currentPanel = null, selectedLane = null;
+let world = null, state = null, roster = { rooms: [], agents: [] }, rosterLoaded = false, selected = null, statuses = new Map(), board = null, pickedWorker = null, follow = true, currentPanel = null, selectedLane = null;
 let pollTimer = null, outputTimer = null, clockTimer = null, loading = false, closed = false, logId = null, logGeneration = 0, outputBusy = false, outputCache = null, previous = null, transitions = [];
 let stateError = null, rosterError = null, lastSuccess = null;
 const floorNames = ['ONE STUDIO. EVERY AGENT.', 'AGENT LOBBY & DISPATCH', 'PRODUCTION & QUALITY', 'ENGINEERING & DESIGN'];
@@ -120,6 +145,19 @@ dialog.addEventListener('click', e => { if (e.target === dialog) {
 dialog.addEventListener('close', () => { currentPanel = null; logId = null; logGeneration++; });
 $('connection').onclick = () => poll();
 function connection() { const err = stateError || rosterError; const stale = state && Date.now() - Number(state.ts) > 10000; $('connection').dataset.state = err ? 'error' : stale ? 'loading' : state ? 'ok' : 'loading'; $('connection-label').textContent = err ? 'Link error · retry' : stale ? 'State is stale · retry' : state ? 'State connected' : 'Connecting'; $('connection').title = err ? `${err}. Click to retry.${lastSuccess ? ' Last success: ' + date(lastSuccess) : ''}` : state ? `State snapshot: ${date(state.ts)}. Click to refresh.` : 'Connecting to /state and /roster.json'; $('clock').textContent = new Date().toLocaleDateString('en-CA') + ' ' + time(Date.now()); }
+// Display name for a status-map key: a roster role, or an Orca dispatch on the floor.
+function agentName(id, entry) {
+    if (!id.startsWith('worker:'))
+        return id;
+    const w = entry?.worker || findWorker(id.slice(7));
+    return w?.label || w?.taskTitle || `${w?.agent || 'Orca worker'} · ${id.slice(7, 17)}${id.length > 17 ? '…' : ''}`;
+}
+function statusOf(id) {
+    if (statuses.has(id))
+        return statuses.get(id);
+    const w = id.startsWith('worker:') ? findWorker(id.slice(7)) : null;
+    return w ? { ...workerStatus(w), worker: w, task: w.taskTitle || w.label || null, since: null, lastEvent: null } : null;
+}
 function renderDetail() {
     const box = $('detail-body');
     box.replaceChildren();
@@ -127,28 +165,46 @@ function renderDetail() {
     if (!selected) {
         const empty = el('div', 'detail-empty');
         const cast = [['ai-programmer', 'engineering'], ['systems-designer', 'design'], ['sound-designer', 'audio']].map(([n, r]) => portrait(n, r)).join('');
-        empty.innerHTML = `<div class="empty-cast">${cast}</div><h3>Select an agent</h3><p>Choose a character in the headquarters<br>to inspect its role, task, and activity.</p>`;
+        empty.innerHTML = `<div class="empty-cast">${cast}</div><h3>Select an agent</h3><p>Choose a character in the headquarters, or a row in Agent status, to inspect its work.</p>`;
         empty.append(button('Explore studio roster ↗', () => openPanel('roster'), 'wide'));
         box.append(empty);
         return;
     }
-    const role = roster.agents.find(a => a.name === selected);
-    const worker = selected.startsWith('worker:') ? findWorker(selected.slice(7)) : ((state?.workers || []).find(w => isWorking(w) && role && matchesRole(w, role)) || (state?.workers || []).find(w => role && matchesRole(w, role)));
+    const role = roster.agents.find(a => a.name === selected), entry = state ? statusOf(selected) : null;
+    const worker = selected.startsWith('worker:') ? findWorker(selected.slice(7)) : entry?.worker || ((state?.workers || []).find(w => isWorking(w) && role && matchesRole(w, role)) || (state?.workers || []).find(w => role && matchesRole(w, role)));
     if (!role && !worker) {
         box.append(el('p', 'empty', 'This dispatch is no longer available in the current state. It may still be in run history.'));
         return;
     }
-    const name = role?.name || worker.label || worker.taskTitle || worker.dispatchId, room = role?.room || 'lobby';
+    const status = entry?.status || 'idle', name = role?.name || agentName(selected, entry), room = role?.room || 'lobby';
+    // The status pill leads the panel: icon + label + colour, then the evidence behind it.
+    const pill = chip(status, state ? meta(status).label : 'Awaiting state', 'status-pill');
+    if (entry?.since)
+        pill.append(el('time', null, status === 'completed' ? `at ${clock(entry.since)}` : `since ${clock(entry.since)}`));
+    pill.title = meta(status).description;
+    box.append(pill);
+    const head = el('div', 'detail-head');
     const avatar = el('div', 'detail-avatar');
     avatar.innerHTML = portrait(name, room, selected.startsWith('worker:'));
-    avatar.style.setProperty('--avatar', `#${(ROOM_COLORS[room] || 0x54d9fa).toString(16)}`);
-    box.append(avatar, el('h3', 'agent-name', name));
-    const status = role ? (state ? (active.has(role.name) ? 'Working' : 'Idle') : 'Unknown') : (isWorking(worker) ? 'Working' : worker.workerState || worker.dispatchStatus || 'Unknown');
-    box.append(el('div', 'status', `◉ ${status}`), el('div', 'department', `${room.toUpperCase()} · ${floorForRoom(room)}F`));
+    avatar.style.setProperty('--avatar', `#${(ROOM_COLORS[room] || 0x54d9fa).toString(16).padStart(6, '0')}`);
+    avatar.style.setProperty('--s', meta(status).color);
+    avatar.dataset.status = status;
+    const who = el('div');
+    who.append(el('h3', 'agent-name', name), el('div', 'department', `${room[0].toUpperCase()}${room.slice(1)} · ${floorForRoom(room)}F${worker?.agent ? ' · ' + worker.agent : ''}`));
+    head.append(avatar, who);
+    box.append(head);
     if (role?.desc)
         box.append(el('p', 'description', role.desc));
+    const evidence = el('section', 'detail-section');
+    const proof = el('dl', 'fields');
+    const facts = [['Evidence', entry?.evidence || (state ? 'No current work reported' : null)], ['Since', entry?.since ? date(entry.since) : null], ['Last audit', entry?.lastEvent ? `${entry.lastEvent.kind} · ${clock(entry.lastEvent.ts)}` : null]];
+    for (const [key, value] of facts)
+        if (value)
+            proof.append(el('dt', null, key), el('dd', null, value));
+    evidence.append(el('h3', null, 'Status evidence'), proof);
+    box.append(evidence);
     const section = el('section', 'detail-section');
-    section.append(el('h3', null, 'CURRENT TASK'), el('p', null, worker?.taskTitle || worker?.label || (role && active.has(role.name) ? 'Active in audit; task is not provided.' : 'No associated task reported.')));
+    section.append(el('h3', null, 'Current task'), el('p', null, entry?.task || worker?.taskTitle || worker?.label || (status === 'working' ? 'Active in audit; task is not provided.' : 'No associated task reported.')));
     box.append(section);
     const details = el('section', 'detail-section'), dl = el('dl', 'fields');
     const events = (state?.audit?.events || []).filter(e => role ? e.agent === role.name : e.agent === worker?.agent);
@@ -159,17 +215,17 @@ function renderDetail() {
             dl.append(el('dt', null, key), el('dd', null, value === 'inherit' ? 'Inherited (roster)' : value));
         }
     if (dl.children.length) {
-        details.append(dl);
+        details.append(el('h3', null, 'Reported fields'), dl);
         box.append(details);
     }
     const recent = el('section', 'detail-section');
-    recent.append(el('h3', null, 'RECENT AUDIT EVENTS'));
+    recent.append(el('h3', null, 'Recent audit events'));
     const list = el('div', 'detail-events');
     if (!events.length)
         list.append(el('p', null, 'No matching audit events.'));
-    for (const e of events.slice(-4)) {
+    for (const e of events.slice(-4).reverse()) {
         const row = el('div');
-        row.append(el('time', null, time(e.ts)), document.createTextNode(e.kind));
+        row.append(el('time', null, time(e.ts)), chip(e.kind === 'completed' ? 'completed' : 'working', e.kind));
         list.append(row);
     }
     recent.append(list);
@@ -189,25 +245,33 @@ function selectAgent(id, focus = true) { selected = id; world?.select(id, focus)
 function renderBoard() {
     if (!board)
         return;
+    const doneLane = board.source === 'Orca' ? 'completed' : 'done', done = board.counts[doneLane] || 0;
     $('board-source').textContent = `${board.source} · ${board.total} tasks`;
-    $('board-total').textContent = String(board.total);
-    const colors = { running: '#46cefa', blocked: '#ef8495', failed: '#ef8495', completed: '#5edaba', done: '#5edaba', review: '#e5b67b', pending: '#e5b67b', todo: '#ad9de2' };
+    $('board-total').textContent = board.total ? `${done} / ${board.total} done` : '0 tasks';
+    $('board-progress').hidden = !board.total;
+    $('board-progress').firstChild.style.width = `${board.total ? done / board.total * 100 : 0}%`;
+    $('board-progress').title = `${done} of ${board.total} tasks completed`;
     const box = $('lanes');
     const existing = new Map([...box.children].map(b => [b.dataset.lane, b]));
     const max = Math.max(1, ...Object.values(board.counts));
     for (const lane of board.lanes) {
         let b = existing.get(lane);
+        const status = LANE_STATUS[lane];
         if (!b) {
             b = button('', () => { selectedLane = selectedLane === lane ? null : lane; highlightLane(); renderBoard(); openPanel('tasks'); }, 'lane');
             b.dataset.lane = lane;
-            b.append(el('span', 'lane-icon', '◈'), el('span', 'lane-name', lane), el('b'));
+            const glyph = el('span', 'lane-icon');
+            glyph.innerHTML = status ? icon(status) : '<i class="ico">◈</i>';
+            b.append(glyph, el('span', 'lane-name', lane), el('b'));
             const meter = el('span', 'lane-meter');
             meter.append(el('i'));
             b.append(meter);
         }
-        b.style.setProperty('--lane', colors[lane] || '#779cb9');
+        b.style.setProperty('--lane', status ? meta(status).color : '#8aa6bd');
+        b.classList.toggle('done-lane', status === 'completed');
+        b.classList.toggle('empty-lane', !board.counts[lane]);
         b.querySelector('b').textContent = String(board.counts[lane]);
-        b.querySelector('i').style.width = `${board.counts[lane] / max * 100}%`;
+        b.querySelector('.lane-meter i').style.width = `${board.counts[lane] / max * 100}%`;
         b.setAttribute('aria-pressed', String(selectedLane === lane));
         b.setAttribute('aria-label', `${lane}: ${board.counts[lane]} tasks. Filter tasks.`);
         box.append(b);
@@ -243,8 +307,8 @@ function renderEvents() {
         return;
     }
     for (const e of events.slice(-12)) {
-        const row = el('div', 'event-row');
-        row.append(el('time', null, time(e.ts)), el('i'), el('span', null, e.agent), el('b', null, e.kind));
+        const row = el('div', 'event-row'), status = e.kind === 'completed' ? 'completed' : 'working';
+        row.append(el('time', null, time(e.ts)), el('span', null, e.agent), chip(status, e.kind));
         row.title = `${date(e.ts)} · ${e.session}`;
         box.append(row);
     }
@@ -255,7 +319,8 @@ function renderWorkers() {
     if (!state)
         return;
     const source = workerSource(), scope = state.workerScope || {}, run = state.runs?.[0];
-    $('run-tag').textContent = scope.live ? 'LIVE' : scope.runId || run ? 'RECORDED' : 'NO RUN';
+    $('run-tag').textContent = scope.live ? 'Live' : scope.runId || run ? 'Recorded' : 'No run';
+    $('run-tag').dataset.live = String(!!scope.live);
     $('run-objective').textContent = scope.objective || run?.objective || 'No orchestration run recorded.';
     if (follow) {
         const next = source.find(isWorking) || source[0];
@@ -270,10 +335,15 @@ function renderWorkers() {
     if (!source.length)
         box.append(el('p', 'empty', 'No workers reported.'));
     for (const w of source) {
+        const s = statuses.get(`worker:${w.dispatchId}`) || workerStatus(w);
         const b = button('', () => selectAgent(`worker:${w.dispatchId}`), 'worker-row');
+        b.dataset.status = s.status;
+        b.style.setProperty('--s', meta(s.status).color);
         b.classList.toggle('selected', pickedWorker === w.dispatchId);
-        b.title = [w.dispatchId, w.agent, w.workerState, w.liveness].filter(Boolean).join(' · ');
-        b.append(el('i'), el('span', null, w.taskTitle || w.label || w.dispatchId || 'Unnamed worker'), el('small', null, w.agent || w.workerState || 'unknown'));
+        b.title = [s.evidence, w.agent, w.liveness].filter(Boolean).join(' · ');
+        const text = el('span', 'worker-text');
+        text.append(el('span', 'worker-name', w.taskTitle || w.label || w.dispatchId || 'Unnamed worker'), el('small', null, [w.agent || 'agent unknown', w.workerState || w.dispatchStatus || 'no state'].join(' · ')));
+        b.append(text, chip(s.status));
         box.append(b);
     }
     $('live-tail').hidden = !isFloor || !pickedWorker;
@@ -297,28 +367,92 @@ function diffActivity(next) {
     previous = next;
     $('ticker-text').textContent = transitions.at(-1) || 'No state transitions observed in this session.';
 }
+// Combined map: roster roles from agentStatuses, plus every Orca dispatch on the floor.
+function computeStatuses() {
+    const map = new Map(agentStatuses(state, roster));
+    for (const w of workerSource())
+        if (w.dispatchId)
+            map.set(`worker:${w.dispatchId}`, { ...workerStatus(w), worker: w, task: w.taskTitle || w.label || null, since: null, lastEvent: null });
+    return map;
+}
+const floorOf = id => id.startsWith('worker:') ? 1 : floorForRoom(roster.agents.find(a => a.name === id)?.room);
+function badgesFor(entries) {
+    const counts = countStatuses(entries);
+    return ['working', 'completed'].map(s => `<span class="floor-badge" data-status="${s}" data-zero="${!counts[s]}" style="--s:${meta(s).color}" title="${counts[s]} ${meta(s).label.toLowerCase()}">${icon(s)}${counts[s]}</span>`).join('');
+}
+function statusRow(id, entry) {
+    const b = button('', () => selectAgent(id), 'status-row');
+    b.dataset.status = entry.status;
+    b.style.setProperty('--s', meta(entry.status).color);
+    b.classList.toggle('selected', selected === id);
+    b.title = [entry.evidence, entry.task].filter(Boolean).join(' · ');
+    const text = el('span', 'status-text');
+    // Dispatch rows say so, so a role and the Orca dispatch that lit it read as two distinct agents.
+    const detail = id.startsWith('worker:') ? `Orca dispatch · ${entry.evidence}` : entry.status === 'completed' ? entry.evidence : entry.task || entry.evidence;
+    text.append(el('span', 'status-name', agentName(id, entry)), el('small', null, detail || meta(entry.status).label));
+    b.innerHTML = icon(entry.status);
+    b.append(text, el('time', null, entry.since ? clock(entry.since) : ''));
+    return b;
+}
+function renderStatusPanel(counts) {
+    for (const s of ['working', 'completed', 'idle'])
+        $(`count-${s}`).textContent = String(counts[s]);
+    $('status-total').textContent = `${counts.total} roles`;
+    const box = $('status-groups');
+    box.replaceChildren();
+    const recent = (a, b) => String(b[1].since || '').localeCompare(String(a[1].since || '')) || a[0].localeCompare(b[0]);
+    const groups = [
+        ['working', 'Working now', 'No agent is working right now.'],
+        ['pending', 'Waiting to start', null],
+        ['failed', 'Failed', null],
+        ['completed', 'Recently completed', `No settled worker on the floor and no audit completion in the last ${COMPLETED_WINDOW_MS / 60000} minutes.`]
+    ];
+    for (const [status, title, empty] of groups) {
+        const rows = [...statuses].filter(([id, e]) => !id.startsWith('worker:') && e.status === status).sort(recent);
+        if (!rows.length && !empty)
+            continue;
+        const group = el('section', 'status-group');
+        group.style.setProperty('--s', meta(status).color);
+        const h = el('h3');
+        h.innerHTML = icon(status);
+        h.append(title, el('span', 'count', String(rows.length)));
+        group.append(h);
+        if (!rows.length)
+            group.append(el('p', 'group-empty', empty));
+        for (const [id, entry] of rows)
+            group.append(statusRow(id, entry));
+        box.append(group);
+    }
+}
 function render() {
     board = taskBoard(state);
-    active = activeRoles(state, roster);
-    const realRoles = roster.agents.filter(r => active.has(r.name));
-    $('metric-working').textContent = String(state.workers.filter(isWorking).length);
-    $('metric-roles').textContent = rosterLoaded ? String(realRoles.length) : '—';
-    $('metric-pending').textContent = `${board.counts.pending || 0} / ${board.counts.blocked || 0}`;
+    statuses = computeStatuses();
+    const counts = countStatuses(statuses), entries = [...statuses];
+    const dispatches = entries.filter(([id]) => id.startsWith('worker:')), roles = entries.filter(([id]) => !id.startsWith('worker:'));
+    const roleCounts = countStatuses(roles.map(([, e]) => e));
+    const working = list => list.filter(([, e]) => e.status === 'working').length;
+    const completed = list => list.filter(([, e]) => e.status === 'completed').length;
+    const doneLane = board.source === 'Orca' ? 'completed' : 'done';
+    $('metric-working').textContent = String(roleCounts.working);
+    $('metric-working-sub').textContent = `${roleCounts.working} role${roleCounts.working === 1 ? '' : 's'} · ${working(dispatches)} dispatch${working(dispatches) === 1 ? '' : 'es'}`;
+    $('metric-completed').textContent = String(roleCounts.completed);
+    $('metric-completed-sub').textContent = `${roleCounts.completed} role${roleCounts.completed === 1 ? '' : 's'} · ${completed(dispatches)} dispatch${completed(dispatches) === 1 ? '' : 'es'}`;
+    $('metric-pending').textContent = `${roleCounts.pending} / ${board.counts.blocked || 0}`;
+    $('metric-pending-sub').textContent = roleCounts.failed ? `roles / tasks · ${roleCounts.failed} failed` : 'roles / tasks';
+    $('metric-pending-sub').dataset.alert = String(roleCounts.failed > 0);
     $('metric-tasks').textContent = String(board.total);
+    $('metric-tasks-sub').textContent = board.total ? `${board.counts[doneLane] || 0}/${board.total} done` : 'none reported';
     $('metric-board-label').textContent = `${board.source} tasks`;
-    for (const f of [1, 2, 3]) {
-        const rooms = roster.rooms.filter(room => floorForRoom(room) === f);
-        const count = f === 1 ? state.workers.filter(isWorking).length : realRoles.filter(role => floorForRoom(role.room) === f).length;
-        document.querySelectorAll(`[data-floor="${f}"]`).forEach(b => { b.dataset.active = String(count > 0); b.title = `${count} working · ${rooms.map(room => `${room}: ${realRoles.filter(r => r.room === room).length}`).join(' · ') || 'Orca visitor bay'}`; });
+    for (const f of [0, 1, 2, 3]) {
+        const onFloor = f ? entries.filter(([id]) => floorOf(id) === f) : entries;
+        const values = onFloor.map(([, e]) => e), c = countStatuses(values);
+        document.querySelectorAll(`[data-floor-badges="${f}"]`).forEach(n => { n.innerHTML = badgesFor(values); });
+        if (f)
+            document.querySelectorAll(`[data-floor="${f}"]`).forEach(b => { b.dataset.active = String(c.working > 0); b.title = `${c.working} working · ${c.completed} completed · ${c.pending} pending · ${c.failed} failed`; });
     }
-    $('active-count').textContent = String(realRoles.length);
-    $('active-list').replaceChildren();
-    if (!realRoles.length)
-        $('active-list').append(el('p', 'empty', rosterLoaded ? 'No active roster roles.' : 'Roster unavailable.'));
-    for (const r of realRoles)
-        $('active-list').append(button(r.name, () => selectAgent(r.name)));
-    $('scope').textContent = `${state.terminals?.length || 0} TERMINALS · ${state.worktrees?.length || 0} WORKTREES · ${state.workerScope?.hidden || 0} HISTORICAL DISPATCHES`;
-    world?.update(state, active, board);
+    renderStatusPanel(roleCounts);
+    $('scope').textContent = `${state.terminals?.length || 0} terminals · ${state.worktrees?.length || 0} worktrees · ${state.workerScope?.hidden || 0} historical dispatches`;
+    world?.update(state, statuses, board);
     highlightLane();
     renderBoard();
     renderDetail();
@@ -405,7 +539,11 @@ function renderPanel() {
             const card = el('article', 'data-card');
             const pic = el('div', 'card-avatar');
             pic.innerHTML = portrait(role.name, role.room);
-            card.append(pic, el('h3', null, role.name), el('p', null, `${floorForRoom(role.room)}F · ${role.room} · ${state ? (active.has(role.name) ? 'Working' : 'Idle') : 'Unknown'}`), el('p', null, role.desc), button('Locate agent ↗', () => { dialog.close(); selectAgent(role.name); }, 'wide'));
+            const entry = statuses.get(role.name), title = el('div', 'card-title');
+            title.append(el('h3', null, role.name), state ? chip(entry?.status || 'idle') : chip('idle', 'Unknown'));
+            card.dataset.status = entry?.status || 'idle';
+            card.style.setProperty('--s', meta(entry?.status || 'idle').color);
+            card.append(pic, title, el('p', null, `${floorForRoom(role.room)}F · ${role.room}${entry?.evidence ? ' · ' + entry.evidence : ''}`), el('p', null, role.desc), button('Locate agent ↗', () => { dialog.close(); selectAgent(role.name); }, 'wide'));
             grid.append(card);
         } if (!grid.children.length)
             grid.append(el('p', 'empty', 'No matching roles.')); };
@@ -428,8 +566,11 @@ function renderPanel() {
             const card = el('article', 'data-card');
             card.style.marginBottom = '12px';
             card.append(el('h3', null, run.objective || run.id), el('p', null, `${date(run.createdAt)} · ${run.total} dispatches · ${run.live} live · ${run.failed} failed${run.legacy ? ' · legacy' : ''}`), el('p', null, `Run: ${run.id}${run.coordinatorHandle ? ' · Coordinator: ' + run.coordinatorHandle : ''}`));
-            for (const w of run.workers || [])
-                card.append(button(`${w.agent || 'Unknown agent'} · ${w.label || w.taskTitle || w.dispatchId} · ${w.workerState || 'unknown'} ↗`, () => { selected = `worker:${w.dispatchId}`; pickedWorker = w.dispatchId; follow = false; renderDetail(); openLogs(w.dispatchId); }, 'wide'));
+            for (const w of run.workers || []) {
+                const row = button(`${w.agent || 'Unknown agent'} · ${w.label || w.taskTitle || w.dispatchId} · ${w.workerState || 'unknown'} ↗`, () => { selected = `worker:${w.dispatchId}`; pickedWorker = w.dispatchId; follow = false; renderDetail(); openLogs(w.dispatchId); }, 'wide history-row');
+                row.prepend(chip(workerStatus(w).status));
+                card.append(row);
+            }
             content.append(card);
         }
         return;
@@ -541,7 +682,7 @@ connection();
 poll();
 clockTimer = setInterval(connection, 1000);
 outputTimer = setInterval(refreshOutput, 2000);
-import('./hq3d.js?v=6').then(({ Headquarters }) => {
+import('./hq3d.js?v=10').then(({ Headquarters }) => {
     if (closed)
         return;
     world = new Headquarters($('world'), { onSelect: id => selectAgent(id, false), onFPS: fps => { $('fps').textContent = `${fps} FPS`; }, onFloor: floorChanged });
@@ -550,7 +691,7 @@ import('./hq3d.js?v=6').then(({ Headquarters }) => {
     if (rosterLoaded)
         world.setRoster(roster);
     if (state)
-        world.update(state, active, board);
+        world.update(state, statuses, board);
     if (isFloor)
         world.focusFloor(3);
 }).catch(e => { console.error(e); const error = el('div', 'scene-error', `3D renderer unavailable: ${e.message}. Live data and inspection panels remain available.`); $('hud').append(error); $('fps').textContent = '3D unavailable'; });

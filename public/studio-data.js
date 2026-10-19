@@ -26,6 +26,91 @@ export function activeRoles(state, roster) {
         }
     return hits;
 }
+// One status per agent, derived only from reported fields. Order is precedence:
+// any working evidence beats pending, pending beats failed, failed beats completed.
+export const STATUS_ORDER = ['working', 'pending', 'failed', 'completed', 'idle'];
+export const STATUS_META = {
+    working: { label: 'Working', color: '#38d9ff', icon: '▶', description: 'A live worker or an open subagent invocation is doing this work now.' },
+    completed: { label: 'Completed', color: '#4fe08f', icon: '✓', description: 'A worker on the floor has settled, or the role finished a subagent run in the last 30 minutes.' },
+    pending: { label: 'Pending', color: '#ffb547', icon: '⧗', description: 'A dispatch is queued and has not started work yet.' },
+    failed: { label: 'Failed', color: '#ff5d6c', icon: '!', description: 'The matching worker or dispatch reported a failure.' },
+    idle: { label: 'Idle', color: '#7f93a8', icon: '○', description: 'No current work is reported for this agent.' }
+};
+export const COMPLETED_WINDOW_MS = 30 * 60 * 1000;
+const COMPLETED_STATES = ['succeeded', 'stopped', 'cancelled'];
+const shortId = id => !id ? 'dispatch' : id.length > 12 ? `${id.slice(0, 10)}…` : id;
+const clock = ts => { const d = new Date(ts); return Number.isNaN(d.getTime()) ? String(ts) : d.toLocaleTimeString([], { hour12: false, hour: '2-digit', minute: '2-digit' }); };
+/** Status of one Orca dispatch, with the field that proves it. */
+export function workerStatus(w) {
+    const ws = w?.workerState || '', ds = w?.dispatchStatus || '';
+    const evidence = field => `worker ${shortId(w?.dispatchId)} · ${field}`;
+    if (COMPLETED_STATES.includes(ws))
+        return { status: 'completed', evidence: evidence(ws) };
+    if (ws === 'failed' || ds === 'failed')
+        return { status: 'failed', evidence: evidence('failed') };
+    // A queued dispatch counts as present for following, but it has not started work.
+    if (ws === 'pending' || ds === 'pending')
+        return { status: 'pending', evidence: evidence('pending') };
+    if (isWorking(w))
+        return { status: 'working', evidence: evidence(ws || w.liveness || 'live') };
+    if (ds === 'completed')
+        return { status: 'completed', evidence: evidence('dispatch completed') };
+    return { status: 'idle', evidence: evidence(ws || ds || w?.liveness || 'no state') };
+}
+/** Map<roleName, { status, worker, task, evidence, since, lastEvent }> from floor workers and the audit feed. */
+export function agentStatuses(state, roster, now = Date.now()) {
+    const out = new Map(), workers = state?.workers || [];
+    const audit = new Map((state?.audit?.agents || []).map(a => [a.agent, a]));
+    const lastOf = new Map(), lastInvoked = new Map(), lastCompleted = new Map();
+    for (const e of state?.audit?.events || []) {
+        lastOf.set(e.agent, e);
+        (e.kind === 'invoked' ? lastInvoked : lastCompleted).set(e.agent, e);
+    }
+    for (const role of roster?.agents || []) {
+        const name = role.name, lastEvent = lastOf.get(name) || null, activity = audit.get(name);
+        const matched = workers.filter(w => matchesRole(w, role)).map(w => ({ w, ...workerStatus(w) }));
+        const first = s => matched.find(m => m.status === s);
+        const task = m => m?.w.taskTitle || m?.w.label || null;
+        const entry = (status, m, evidence, since = null) => out.set(name, { status, worker: m?.w || null, task: task(m), evidence, since, lastEvent });
+        const working = first('working');
+        if (working) {
+            entry('working', working, working.evidence, lastInvoked.get(name)?.ts || null);
+            continue;
+        }
+        if (activity?.active > 0) {
+            const invoked = lastInvoked.get(name);
+            entry('working', null, invoked ? `audit invoked ${clock(invoked.ts)}` : `audit · ${activity.active} open invocation${activity.active > 1 ? 's' : ''}`, invoked?.ts || null);
+            continue;
+        }
+        const session = (state?.paseo || []).find(a => a.status === 'running' && (a.name || '').toLowerCase().includes(name.toLowerCase()));
+        if (session) {
+            out.set(name, { status: 'working', worker: null, task: null, evidence: `paseo ${session.name} · running`, since: null, lastEvent });
+            continue;
+        }
+        const settled = first('pending') || first('failed') || first('completed');
+        if (settled) {
+            entry(settled.status, settled, settled.evidence, settled.status === 'completed' ? lastCompleted.get(name)?.ts || null : null);
+            continue;
+        }
+        const age = lastEvent?.kind === 'completed' ? now - Date.parse(lastEvent.ts) : NaN;
+        // The window keeps every role that ever finished from reading as freshly completed.
+        if (age >= -60000 && age <= COMPLETED_WINDOW_MS && !(activity?.active > 0)) {
+            entry('completed', null, `audit completed ${clock(lastEvent.ts)}`, lastEvent.ts);
+            continue;
+        }
+        out.set(name, { status: 'idle', worker: null, task: null, evidence: null, since: null, lastEvent });
+    }
+    return out;
+}
+/** Counts per status for any iterable (or Map) of `{ status }` entries. */
+export function countStatuses(statuses) {
+    const counts = { working: 0, completed: 0, pending: 0, failed: 0, idle: 0, total: 0 };
+    for (const s of statuses instanceof Map ? statuses.values() : statuses || []) {
+        counts[s.status in counts ? s.status : 'idle']++;
+        counts.total++;
+    }
+    return counts;
+}
 export function taskBoard(state) {
     const orca = (state.orcaTasks || []).length > 0;
     const tasks = orca ? state.orcaTasks : state.kanban || [];
