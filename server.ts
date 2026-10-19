@@ -106,6 +106,7 @@ interface OrcaTaskRow {
   spec?: string;
   status?: string;
   assignee?: string;
+  run_id?: string | null;
 }
 interface OrcaRunRow {
   id?: string;
@@ -184,6 +185,14 @@ interface RunView {
   workers: WorkerView[];
 }
 
+interface OrcaTaskView {
+  id: string | null;
+  title: string | null;
+  spec: string | null;
+  status: string | null;
+  runId: string | null;
+}
+
 interface StudioState {
   ts: number;
   workers: WorkerView[];
@@ -195,6 +204,8 @@ interface StudioState {
   quotas: QuotaView[];
   kanban: Record<string, unknown>[];
   kanbanStats: Record<string, number>;
+  /** Orca tasks for the coordinator; when non-empty the task board shows these instead of `kanban`. */
+  orcaTasks: OrcaTaskView[];
   audit: { source: string | null; events: AuditEvent[]; agents: AgentActivity[] };
 }
 
@@ -415,6 +426,14 @@ async function collect(): Promise<StudioState> {
     };
   });
 
+  const orcaTasks: OrcaTaskView[] = taskRows.map((t) => ({
+    id: t.id ?? null,
+    title: t.task_title ?? t.title ?? t.display_name ?? null,
+    spec: t.spec ?? null,
+    status: t.status ?? null,
+    runId: t.run_id ?? null,
+  }));
+
   const kanbanStats: Record<string, number> = {};
   for (const t of kanban) {
     const status = typeof t.status === "string" ? t.status : "todo";
@@ -503,7 +522,7 @@ async function collect(): Promise<StudioState> {
     .sort((a, b) => (b.createdAt ?? "").localeCompare(a.createdAt ?? ""))
     .slice(0, RUN_HISTORY_LIMIT);
 
-  return { ts: Date.now(), workers: onFloor, workerScope, runs, terminals, worktrees, paseo, quotas, kanban, kanbanStats, audit };
+  return { ts: Date.now(), workers: onFloor, workerScope, runs, terminals, worktrees, paseo, quotas, kanban, kanbanStats, orcaTasks, audit };
 }
 
 // One collect (six CLI spawns plus local HTTP) per TTL, shared by every client; concurrent callers join the in-flight promise.
