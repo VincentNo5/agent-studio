@@ -197,6 +197,34 @@
       return `<${agent.dispatchId ? `button type="button" data-dispatch="${safe(agent.dispatchId)}"` : "div"} class="agent"><i class="dot ${tone}" aria-hidden="true"></i><span class="origin">${safe(agent.source)}</span><span class="agent-name" title="${safe(agent.name)}">${safe(agent.name)}</span></${agent.dispatchId ? "button" : "div"}>`;
     }).join("") : '<div class="empty">NO ACTIVE AGENTS</div>';
   }
+  function toolBrief(input) {
+    if (!input || typeof input !== "object") return "";
+    const pick = input.command || input.file_path || input.path || input.query || input.pattern || input.url;
+    if (pick) return String(pick).replace(/\s+/g, " ").slice(0, 90);
+    const keys = Object.keys(input);
+    return keys.length ? `{${keys.slice(0, 3).join(", ")}}` : "";
+  }
+
+  function outputBlocks(data, maxBlocks) {
+    const out = [];
+    const transcript = data.transcript;
+    if (transcript && Array.isArray(transcript.messages) && transcript.messages.length) {
+      for (const message of transcript.messages) {
+        const who = message.role === "user" ? "▸ user" : message.role === "assistant" ? `◂ ${data.provider || "agent"}` : "▸ tool";
+        for (const block of (message.blocks || [])) {
+          if (block.type === "text" && block.text) out.push(`${who}  ${String(block.text).replace(/\s+/g, " ").trim().slice(0, 260)}`);
+          else if (block.type === "tool-call") out.push(`${who}  ⚙ ${block.name || "tool"}  ${toolBrief(block.input)}`.trimEnd());
+          else if (block.type === "tool-result") out.push(`   ↳ ${String(block.output || "").replace(/\s+/g, " ").trim().slice(0, 150)}`);
+        }
+      }
+      return { lines: out.slice(-maxBlocks), kind: "transcript", clipped: (data.clipping || []).includes("transcript_payload") };
+    }
+    const term = data.terminal || {};
+    const tail = term.tail || [];
+    if (tail.length) return { lines: tail.slice(-maxBlocks), kind: "terminal", clipped: !!term.truncated };
+    return { lines: [], kind: data.source || "unknown", clipped: false };
+  }
+
   let outputRequest = null;
   let outputTimer = null;
   let outputDispatch = null;
@@ -209,16 +237,18 @@
       const data = await response.json();
       if (!response.ok) throw new Error(data?.error || `HTTP ${response.status}`);
       if (controller.signal.aborted) return;
-      const term = data.terminal || {};
       const status = data.status || {};
       $("output-state").textContent = [status.worker, status.terminal, status.liveness].filter(Boolean).join(" / ");
-      const lines = Array.isArray(term.tail) ? term.tail : [];
-      $("output-body").textContent = lines.length ? lines.join("\n") : [
-        "(no output buffered)", "",
-        `source: ${data.source || "—"}   terminal: ${term.status || "—"}   lines: ${term.returnedLineCount ?? 0}`,
-        data.fallbackReason ? `note: ${data.fallbackReason}` : null,
-        "Orca holds a terminal tail only while that terminal lives, so a finished dispatch reads empty.",
-      ].filter((line) => line !== null).join("\n");
+      const rendered = outputBlocks(data, 60);
+      const head = `${rendered.kind.toUpperCase()}${rendered.clipped ? " · clipped" : ""}`;
+      $("output-body").textContent = rendered.lines.length
+        ? `${head}\n\n${rendered.lines.join("\n")}`
+        : [
+            `(nothing to read yet — source: ${data.source || "—"})`,
+            "",
+            data.fallbackReason ? `note: ${data.fallbackReason}` : null,
+            "A live worker reports its transcript; once its terminal is gone Orca keeps no tail, so a finished dispatch reads empty.",
+          ].filter((line) => line !== null).join("\n");
     } catch (err) {
       if (!controller.signal.aborted) $("output-body").textContent = `worker-read failed: ${err.message || err}`;
     } finally {
