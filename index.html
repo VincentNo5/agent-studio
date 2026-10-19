@@ -146,7 +146,7 @@
   .hint{font:11px/1.5 var(--mono);color:var(--muted);opacity:.85;overflow-wrap:anywhere}
 
   /* ---------- 01 live floor: state dial ---------- */
-  .split{display:grid;grid-template-columns:180px minmax(0,1fr);grid-template-rows:180px auto;gap:10px 20px;align-items:center}
+  .split{display:grid;grid-template-columns:180px minmax(0,1fr);grid-template-rows:180px auto auto;gap:10px 20px;align-items:center}
   .dial,.gauge{position:relative;flex:none}
   .dial{width:180px;height:180px}
   .dial svg,.gauge svg{display:block;width:100%;height:100%}
@@ -177,6 +177,11 @@
   .wnote b{color:var(--fg);font-weight:600;letter-spacing:.1em;text-transform:uppercase}
   .wnote .hist{background:none;border:0;padding:0;font:inherit;color:var(--cyan);cursor:pointer;border-bottom:1px dotted var(--cyan)}
   .wnote .hist:hover{color:var(--fg);border-bottom-color:var(--fg)}
+  /* who is working right now, grouped by the AI each dispatch launched */
+  .agentstrip{grid-column:1/-1;display:flex;align-items:center;gap:7px;min-height:13px;white-space:nowrap;overflow:hidden;
+    font:600 9.5px/1 var(--mono);letter-spacing:.16em;color:var(--muted);text-transform:uppercase}
+  .agentstrip b{color:var(--cyan);font-weight:600;letter-spacing:.04em;text-transform:none}
+  .agentstrip i{flex:none;width:6px;height:6px;transform:rotate(45deg);background:var(--cyan);opacity:.75}
 
   /* ---------- 01b run history: the dispatches the floor left out ---------- */
   .runhist{display:flex;flex-direction:column;gap:5px;min-height:0;overflow:hidden}
@@ -372,6 +377,7 @@
           <li class="z" data-k="archived"><i></i><span>ARCHIVED</span><b>0</b><em>—</em></li>
           <li class="z" data-k="idle"><i></i><span>OFFLINE</span><b>0</b><em>—</em></li>
         </ul>
+        <div class="agentstrip" id="w-agents"></div>
         <p class="wnote" id="w-note">Awaiting first sync…</p>
       </div>
       <div class="pb runhist" id="runhist" hidden></div>
@@ -605,11 +611,12 @@ function renderRuns() {
       agents.length ? `agents: ${agents.join(", ")}` : null,
     ].filter(Boolean).join("\n");
     const dot = el("i");
-    dot.style.setProperty("--s", run.live ? FLOOR_TONE.live : run.failed ? FLOOR_TONE.failed : "var(--archived)");
+    // A finished run is history: red should mean "failing right now", not "failed once".
+    dot.style.setProperty("--s", run.live ? FLOOR_TONE.live : "var(--archived)");
     row.appendChild(dot);
     row.appendChild(el("b", null, short(run.objective || run.id, 32) + (run.legacy ? " · legacy" : "")));
     row.appendChild(el("span", "n", `${agents.length === 1 ? `${agents[0]} · ` : ""}${run.total} dispatch${run.total === 1 ? "" : "es"}`));
-    row.appendChild(el("span", run.failed ? "bad" : "n", run.failed ? `${run.failed} failed` : `${ageLabel(run.createdAt)} ago`));
+    row.appendChild(el("span", run.failed && run.live ? "bad" : "n", run.failed ? `${run.failed} failed` : `${ageLabel(run.createdAt)} ago`));
     row.addEventListener("click", () => { runsPick = runsPick === run.id ? null : run.id; renderRuns(); });
     list.appendChild(row);
   }
@@ -694,6 +701,22 @@ function render(state) {
     li.querySelector("em").textContent = total ? Math.round(n / total * 100) + "%" : "—";
   }
   document.getElementById("w-total").textContent = total;
+  // Who is working right now, grouped by the AI each dispatch launched.
+  const workingNow = state.workers.filter(isWorking);
+  const groups = new Map();
+  for (const w of (workingNow.length ? workingNow : state.workers)) {
+    const key = w.agent || "unknown";
+    groups.set(key, (groups.get(key) ?? 0) + 1);
+  }
+  const strip = document.getElementById("w-agents");
+  strip.textContent = "";
+  strip.appendChild(el("span", null, workingNow.length ? "working by agent" : "on floor by agent"));
+  if (!groups.size) strip.appendChild(el("b", null, "—"));
+  for (const [agent, count] of [...groups.entries()].sort((a, b) => b[1] - a[1]).slice(0, 6)) {
+    strip.appendChild(el("i"));
+    strip.appendChild(el("b", null, `${agent} ×${count}`));
+  }
+
   const wNote = document.getElementById("w-note");
   const scope = state.workerScope || {};
   wNote.textContent = "";
