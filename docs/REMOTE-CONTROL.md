@@ -244,6 +244,29 @@ Verified 2026-10-18 against a live TUI:
 omp already falls back automatically (`plan`/`review` → codex → opencode-go); **Orca and
 Paseo do not** — pick the provider deliberately when you launch.
 
+### Daily window warm-up (05:00)
+
+A 5-hour window starts on the **first request after the previous window expired**, so when it opens
+depends on when you first work. `~/Library/LaunchAgents/com.vincent.quota-warmup.plist` runs
+`~/.local/bin/quota-warmup.sh` every day at 05:00 to open all three windows on schedule, which puts
+the rolls at 05:00 / 10:00 / 15:00 / 20:00 / 01:00 instead of drifting with the first request.
+
+The script sends one tiny chat completion per provider through magpie (`/v1/chat/completions`):
+`claude/claude-haiku-5-5`, `codex/gpt-5.6-luna`, `opencode-go/deepseek-v4-flash`. It then logs the
+resulting 5-hour reset times to `~/Library/Logs/quota-warmup.log`. A window that is already open is
+left alone — the ping is just a normal request.
+
+```bash
+launchctl kickstart -k gui/$(id -u)/com.vincent.quota-warmup   # run it now
+launchctl print gui/$(id -u)/com.vincent.quota-warmup          # check the schedule
+launchctl bootout gui/$(id -u)/com.vincent.quota-warmup        # stop it
+```
+
+Verified 2026-10-19: all three providers answered; codex's window had expired, so the ping opened a
+fresh one (`resetsAt` moved to now + 5 h) while claude's already-active window was untouched. If the
+Mac is asleep at 05:00, launchd runs the missed interval when it wakes, so the windows still open
+before you do. Cursor is deliberately not included — its limits are monthly, not 5-hourly.
+
 ## Security notes
 
 - `paseo pair` prints a pairing secret. Treat the QR/link like a password; do not paste it
