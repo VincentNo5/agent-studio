@@ -675,6 +675,36 @@ function renderRuns() {
 let outOpen = null;   // dispatch id under watch
 let outTimer = null;
 
+// Orca answers a live worker with a transcript (messages + blocks) and an exited one with a
+// terminal tail; render whichever arrived, and say which it was.
+function toolBrief(input) {
+  if (!input || typeof input !== "object") return "";
+  const pick = input.command || input.file_path || input.path || input.query || input.pattern || input.url;
+  if (pick) return String(pick).replace(/\s+/g, " ").slice(0, 90);
+  const keys = Object.keys(input);
+  return keys.length ? `{${keys.slice(0, 3).join(", ")}}` : "";
+}
+
+function outputBlocks(data, maxBlocks) {
+  const out = [];
+  const transcript = data.transcript;
+  if (transcript && Array.isArray(transcript.messages) && transcript.messages.length) {
+    for (const message of transcript.messages) {
+      const who = message.role === "user" ? "▸ user" : message.role === "assistant" ? `◂ ${data.provider || "agent"}` : "▸ tool";
+      for (const block of (message.blocks || [])) {
+        if (block.type === "text" && block.text) out.push(`${who}  ${String(block.text).replace(/\s+/g, " ").trim().slice(0, 260)}`);
+        else if (block.type === "tool-call") out.push(`${who}  ⚙ ${block.name || "tool"}  ${toolBrief(block.input)}`.trimEnd());
+        else if (block.type === "tool-result") out.push(`   ↳ ${String(block.output || "").replace(/\s+/g, " ").trim().slice(0, 150)}`);
+      }
+    }
+    return { lines: out.slice(-maxBlocks), kind: "transcript", clipped: (data.clipping || []).includes("transcript_payload") };
+  }
+  const term = data.terminal || {};
+  const tail = term.tail || [];
+  if (tail.length) return { lines: tail.slice(-maxBlocks), kind: "terminal", clipped: !!term.truncated };
+  return { lines: [], kind: data.source || "unknown", clipped: false };
+}
+
 async function refreshOutput() {
   if (!outOpen) return;
   const body = document.getElementById("out-body");
@@ -682,18 +712,17 @@ async function refreshOutput() {
     const res = await fetch(`/worker/${encodeURIComponent(outOpen)}`, { cache: "no-store" });
     const data = await res.json();
     if (!res.ok) throw new Error(data && data.error ? data.error : `HTTP ${res.status}`);
-    const term = data.terminal || {};
     const status = data.status || {};
     document.getElementById("out-state").textContent = [status.worker, status.terminal, status.liveness].filter(Boolean).join(" / ");
-    const lines = term.tail || [];
-    body.textContent = lines.length
-      ? lines.join("\n")
+    const rendered = outputBlocks(data, 60);
+    const head = `${rendered.kind}${rendered.clipped ? " · clipped" : ""}`;
+    body.textContent = rendered.lines.length
+      ? `${head}\n\n${rendered.lines.join("\n")}`
       : [
-          "(no output buffered)",
+          `(nothing to read yet — source: ${data.source || "—"})`,
           "",
-          `source: ${data.source || "—"}   terminal: ${term.status || "—"}   lines: ${term.returnedLineCount ?? 0}`,
           data.fallbackReason ? `note: ${data.fallbackReason}` : null,
-          "Orca holds a terminal tail only while that terminal lives, so a finished dispatch reads empty.",
+          "A live worker reports its transcript; once its terminal is gone Orca keeps no tail, so a finished dispatch reads empty.",
         ].filter((line) => line !== null).join("\n");
   } catch (err) {
     body.textContent = `worker-read failed: ${(err && err.message) || err}`;
