@@ -77,6 +77,16 @@
   .metric span { color: var(--muted); font: 600 11px/1 var(--mono); letter-spacing: .05em; }
   #agents { display: grid; grid-template-columns: 1fr 1fr; column-gap: 10px; row-gap: 3px; }
   .agent { display: flex; min-width: 0; align-items: center; gap: 6px; min-height: 18px; }
+  button.agent { width: 100%; min-height: 44px; padding: 6px 2px; border: 0; background: transparent; text-align: left; cursor: pointer; }
+  button.agent:focus-visible, #output-close:focus-visible { outline: 2px solid var(--cyan); outline-offset: 2px; }
+  #output { width: calc(100% - 24px); max-width: 700px; height: 80dvh; max-height: calc(100dvh - 32px); padding: 12px; border: 1px solid var(--hair); background: #0b121d; color: var(--fg); overflow: hidden; }
+  #output[open] { display: flex; flex-direction: column; gap: 10px; }
+  #output::backdrop { background: rgba(0,0,0,.75); }
+  .output-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+  #output-title { min-width: 0; overflow-wrap: anywhere; margin: 0; font: 700 14px/1.4 var(--mono); }
+  #output-close { flex: none; min-width: 64px; min-height: 44px; border: 1px solid var(--hair); background: transparent; color: var(--cyan); font: 600 12px var(--mono); cursor: pointer; }
+  #output-state { color: var(--muted); overflow-wrap: anywhere; }
+  #output-body { flex: 1; min-height: 0; margin: 0; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font: 12px/1.5 var(--mono); }
   .dot { width: 6px; height: 6px; flex: none; border-radius: 50%; background: var(--muted); }
   .dot.working, .dot.running { background: var(--teal); box-shadow: 0 0 7px var(--teal); }
   .dot.pending, .dot.idle { background: var(--amber); box-shadow: 0 0 6px rgba(255,182,72,.5); }
@@ -125,6 +135,11 @@
   </section>
   <footer><span><strong>KANBAN</strong> <span id="kanban-count">0</span></span><span><span id="worktree-count">0</span> worktrees · <span id="terminal-count">0</span> terminals</span></footer>
 </main>
+<dialog id="output" aria-labelledby="output-title">
+  <div class="output-head"><h2 id="output-title">Live output</h2><button id="output-close" type="button">Close</button></div>
+  <div id="output-state"></div>
+  <pre id="output-body" tabindex="0" aria-label="Worker output">Loading…</pre>
+</dialog>
 <script>
   const $ = (id) => document.getElementById(id);
   let lastTs = 0;
@@ -166,6 +181,7 @@
     $("present-count").textContent = workerPresent.length;
     $("pending-count").textContent = pending.length;
     const list = workerPresent.map((worker) => ({
+      dispatchId: worker.dispatchId,
       source: worker.agent ? `ORCA · ${worker.agent}` : "ORCA",
       name: worker.label || worker.taskTitle || worker.dispatchId || "Unnamed worker",
       state: working(worker) ? "working" : worker.dispatchStatus === "pending" ? "pending" : "present"
@@ -178,9 +194,55 @@
     }
     $("agents").innerHTML = list.length ? list.slice(0, 5).map((agent) => {
       const tone = ["working", "running", "pending", "idle", "error", "failed"].includes(agent.state) ? agent.state : "";
-      return `<div class="agent"><i class="dot ${tone}" aria-hidden="true"></i><span class="origin">${agent.source}</span><span class="agent-name" title="${safe(agent.name)}">${safe(agent.name)}</span></div>`;
+      return `<${agent.dispatchId ? `button type="button" data-dispatch="${safe(agent.dispatchId)}"` : "div"} class="agent"><i class="dot ${tone}" aria-hidden="true"></i><span class="origin">${safe(agent.source)}</span><span class="agent-name" title="${safe(agent.name)}">${safe(agent.name)}</span></${agent.dispatchId ? "button" : "div"}>`;
     }).join("") : '<div class="empty">NO ACTIVE AGENTS</div>';
   }
+  let outputRequest = null;
+  let outputTimer = null;
+  let outputDispatch = null;
+  async function refreshOutput() {
+    if (!outputDispatch || outputRequest) return;
+    const controller = new AbortController();
+    outputRequest = controller;
+    try {
+      const response = await fetch(`/worker/${encodeURIComponent(outputDispatch)}`, { cache: "no-store", signal: controller.signal });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data?.error || `HTTP ${response.status}`);
+      if (controller.signal.aborted) return;
+      const term = data.terminal || {};
+      const status = data.status || {};
+      $("output-state").textContent = [status.worker, status.terminal, status.liveness].filter(Boolean).join(" / ");
+      const lines = Array.isArray(term.tail) ? term.tail : [];
+      $("output-body").textContent = lines.length ? lines.join("\n") : [
+        "(no output buffered)", "",
+        `source: ${data.source || "—"}   terminal: ${term.status || "—"}   lines: ${term.returnedLineCount ?? 0}`,
+        data.fallbackReason ? `note: ${data.fallbackReason}` : null,
+        "Orca holds a terminal tail only while that terminal lives, so a finished dispatch reads empty.",
+      ].filter((line) => line !== null).join("\n");
+    } catch (err) {
+      if (!controller.signal.aborted) $("output-body").textContent = `worker-read failed: ${err.message || err}`;
+    } finally {
+      if (outputRequest === controller) outputRequest = null;
+    }
+  }
+  $("agents").addEventListener("click", (event) => {
+    const row = event.target.closest("button[data-dispatch]");
+    if (!row) return;
+    outputDispatch = row.dataset.dispatch;
+    $("output-title").textContent = row.querySelector(".agent-name").textContent;
+    $("output-state").textContent = "";
+    $("output-body").textContent = "Loading…";
+    $("output").showModal();
+    refreshOutput();
+    outputTimer = setInterval(refreshOutput, 2000);
+  });
+  $("output-close").addEventListener("click", () => $("output").close());
+  $("output").addEventListener("close", () => {
+    clearInterval(outputTimer);
+    outputDispatch = null;
+    outputRequest?.abort();
+    outputRequest = null;
+  });
   function render(state) {
     lastTs = Number(state.ts) || Date.now();
     renderQuotas(state.quotas);
