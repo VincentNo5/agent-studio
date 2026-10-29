@@ -11,7 +11,7 @@ Extend the studio without making the live runtime depend on a modelling tool.
 ## When to use
 
 - Add or revise a prop, agent pod, room or camera composition in `public/hq3d.js`.
-- Generate or update `public/assets/studio-kit.glb`.
+- Generate or update `public/studio-kit.glb`.
 - Review the floor with a render/screenshot critique loop.
 - Change the `/anatomy` system map.
 

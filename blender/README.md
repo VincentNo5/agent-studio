@@ -10,7 +10,7 @@ scripts/build-blender-assets.sh
 blender -b -P blender/agent_studio_kit.py
 ```
 
-Output: `public/assets/studio-kit.glb`.
+Output: `public/studio-kit.glb`.
 
 Conventions: meters, origin at floor, `-Y` forward, collection `AGENT_STUDIO_KIT`, asset names
 `SM_*_A`. The kit contains a desk, monitor, chair, server rack, plant and agent pod.

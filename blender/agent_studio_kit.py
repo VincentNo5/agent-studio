@@ -3,7 +3,7 @@
 Run:
   blender -b -P blender/agent_studio_kit.py
 
-Produces public/assets/studio-kit.glb. The live studio keeps its procedural
+Produces public/studio-kit.glb. The live studio keeps its procedural
 fallback; this kit is an optional quality upgrade for the three.js floor.
 """
 import math
@@ -11,7 +11,7 @@ import os
 import bpy
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-OUT = os.path.join(ROOT, "public", "assets", "studio-kit.glb")
+OUT = os.path.join(ROOT, "public", "studio-kit.glb")
 KIT = "AGENT_STUDIO_KIT"
 
 def reset():
@@ -19,7 +19,8 @@ def reset():
     scene = bpy.context.scene
     scene.unit_settings.system = "METRIC"
     scene.unit_settings.scale_length = 1.0
-    scene.render.engine = "BLENDER_EEVEE_NEXT"
+    scene.render.engine = "BLENDER_EEVEE"
+    scene.world = bpy.data.worlds.new("StudioWorld")
     scene.world.color = (0.015, 0.035, 0.06)
 
 def material(name, color, metallic=0.0, roughness=0.5):

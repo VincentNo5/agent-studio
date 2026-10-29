@@ -11,7 +11,7 @@ beforeAll(async () => {
 });
 const request = (path: string) => handler(new Request(`http://127.0.0.1:8788${path}`), local);
 test('desktop entry points and every recursively imported module resolve locally', async () => {
-  for (const path of ['/', '/floor', '/mobile', '/anatomy', '/roster.json', '/assets/studio.css', '/assets/anatomy.css']) {
+  for (const path of ['/', '/floor', '/mobile', '/anatomy', '/roster.json', '/assets/studio.css', '/assets/anatomy.css', '/assets/studio-kit.glb']) {
     const res = await request(path); expect(res.status).toBe(200); expect((await res.text()).length).toBeGreaterThan(0);
   }
   const visited = new Set<string>();
@@ -19,9 +19,9 @@ test('desktop entry points and every recursively imported module resolve locally
   while (queue.length) {
     const path = queue.pop()!; if (visited.has(path)) continue; visited.add(path);
     const res = await request(path); expect(res.status).toBe(200); expect(res.headers.get('content-type')).toContain('javascript');
-    const source = await res.text();
+    const source = (await res.text()).replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
     // All modules used here have literal import specifiers.
-    const imports = [...source.matchAll(/(?:from\s*|import\s*\(\s*)['"]([^'"]+)['"]/g)].map(match => match[1]);
+    const imports = [...source.matchAll(/^\s*(?:import|export)[^;]*?from\s*['"]([^'"]+)['"]|import\s*\(\s*['"]([^'"]+)['"]/gm)].map(match => match[1] ?? match[2]);
     for (const specifier of imports) {
       if (specifier === 'three') queue.push('/vendor/three/build/three.module.js');
       else if (specifier.startsWith('three/addons/')) queue.push(specifier.replace('three/addons/', '/vendor/three/examples/jsm/'));

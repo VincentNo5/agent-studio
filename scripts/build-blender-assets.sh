@@ -7,4 +7,4 @@ if ! command -v "$BLENDER" >/dev/null 2>&1; then
   exit 1
 fi
 "$BLENDER" -b -P blender/agent_studio_kit.py
-echo "Asset kit written to public/assets/studio-kit.glb"
+echo "Asset kit written to public/studio-kit.glb"

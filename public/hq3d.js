@@ -5,6 +5,7 @@ import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { ROOM_COLORS, STATUS_META, floorForRoom, hash, workerStatus } from './studio-data.js';
 const CYAN = 0x36cfff, AMBER = 0xffbd72;
@@ -74,6 +75,7 @@ export class Headquarters {
         this.lights();
         this.architecture();
         this.city();
+        this.loadAssetKit();
         this.flushStatics();
         this.makeParticles();
         this.composer = new EffectComposer(this.renderer);
@@ -1215,6 +1217,49 @@ export class Headquarters {
             this.frames = 0;
             this.fpsStart = now;
         }
+    }
+    loadAssetKit() {
+        // Optional Blender-authored kit. The procedural scene stays complete if the
+        // file is absent or fails to parse; this is a quality upgrade, not a dependency.
+        new GLTFLoader().load('/assets/studio-kit.glb', gltf => {
+            if (this.disposed) return;
+            const kit = gltf.scene;
+            kit.name = 'BLENDER_STUDIO_KIT';
+            kit.scale.setScalar(.92);
+            kit.rotation.y = -.55;
+            kit.position.set(8.2, .12, 4.4);
+            kit.traverse(o => {
+                if (!o.isMesh) return;
+                o.castShadow = true;
+                o.receiveShadow = true;
+                o.frustumCulled = true;
+                for (const m of Array.isArray(o.material) ? o.material : [o.material]) {
+                    if (m?.isMeshStandardMaterial) {
+                        m.envMapIntensity = .9;
+                        if (/cyan/i.test(m.name)) {
+                            m.emissive.setHex(0x1b8cac);
+                            m.emissiveIntensity = .45;
+                        } else if (/green/i.test(m.name)) {
+                            m.emissive.setHex(0x1d7d4d);
+                            m.emissiveIntensity = .35;
+                        }
+                        m.needsUpdate = true;
+                    }
+                }
+            });
+            const base = this.cyl(8.2, .05, 4.4, 3.15, .1, this.mat('kitBase', 0x0b2336, .55, .1));
+            base.receiveShadow = true;
+            this.ring(8.2, .13, 4.4, 2.95, .018, this.mat('kitRim', CYAN, 0, 1.4));
+            const key = new THREE.PointLight(0xffcf9a, 7, 8);
+            key.position.set(8.2, 3.2, 5.6);
+            const fill = new THREE.PointLight(0x4ccfff, 4.5, 7);
+            fill.position.set(6.6, 1.2, 3.4);
+            this.scene.add(kit, key, fill);
+            this.assetKit = kit;
+            this.label('BLENDER KIT', 8.2, 2.2, 6.5, 4.1, '#ffcf8c', 'MCP → GLB · OPTIONAL');
+        }, undefined, () => {
+            // Keep the procedural floor untouched; no console noise for an optional asset.
+        });
     }
     dispose() { this.disposed = true; cancelAnimationFrame(this.frame); this.controls.dispose(); removeEventListener('resize', this.resizeHandler); document.removeEventListener('visibilitychange', this.visibilityHandler); this.renderer.domElement.removeEventListener('pointerdown', this.pointerDown); this.renderer.domElement.removeEventListener('pointerup', this.pointerUp); this.renderer.domElement.removeEventListener('keydown', this.keyHandler); const gs = new Set(this.geometries.values()), ms = new Set(this.materials.values()); this.scene.traverse(o => { o.shadow?.dispose(); if (o.isInstancedMesh)
         o.dispose(); if (o.geometry)
