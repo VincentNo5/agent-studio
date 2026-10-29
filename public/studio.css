@@ -1711,3 +1711,22 @@ dialog::backdrop {
     animation:breathe 3s ease-in-out infinite!important
   }
 }
+
+/* Floor view is spatial-first: the command dashboard is intentionally only on /. */
+body[data-view="floor"] .left-column,
+body[data-view="floor"] .events,
+body[data-view="floor"] .world-heading,
+body[data-view="floor"] .view-links,
+body[data-view="floor"] .floor-switch,
+body[data-view="floor"] .topbar .metrics,
+body[data-view="floor"] .topbar .legend,
+body[data-view="floor"] .navigator {
+  display:none!important
+}
+body[data-view="floor"] .topbar {
+  background:linear-gradient(180deg,rgba(3,13,23,.82),rgba(3,13,23,0));
+  border-bottom-color:transparent
+}
+body[data-view="floor"] .right-column {
+  top:78px
+}

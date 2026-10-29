@@ -6,16 +6,19 @@ HUD and two desktop views of the same read-only state.
 **Command Overview** (`/`) — the complete single-floor campus, task lanes, active roles,
 agent inspection, live events, and operational panels.
 
-**Studio Floor** (`/floor`) — the same world, with every team neighbourhood on one open
-floor around the central ORCA hub. Orbit, zoom, select characters, or use the campus
-navigator. All 26 coding roles have stable workstations; multimedia, design and leadership offices were removed. Orca dispatches occupy the hub.
+**Studio Floor** (`/floor`) — the spatial-first version of the same world. The command
+dashboards are hidden so the two enlarged coding offices, central ORCA hub and collaboration
+spaces fill the screen; the right-side Agent detail and Live work panels remain. All 26 coding
+roles have stable workstations; multimedia, design and leadership offices were removed.
 
 **Mobile** (`/mobile`) — phone-first single screen (390×844, no scrolling): quota bars, worker
 counts, active agents, rooms. This is the view to open from an iPhone; see
 [docs/REMOTE-CONTROL.md](docs/REMOTE-CONTROL.md).
 
-**System Anatomy** (`/anatomy`) — an isometric cutaway of the data plane, `/state` collector and
-the four experience views, with live counts and keyboard-accessible hotspots.
+**System Anatomy** (`/anatomy`) — not another office view. It is an isometric system map of
+where state comes from (Orca, CCGS audit, Paseo, quotas), how `/state` collects it, and how the
+experience views consume it. Use it to understand the data flow; use `/` for operations and
+`/floor` for the spatial campus.
 
 <img src="docs/anatomy.png" alt="Agent Studio system anatomy" width="720">
 
