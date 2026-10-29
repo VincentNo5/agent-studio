@@ -1405,7 +1405,7 @@ export class Headquarters {
         a.head.position.y = a.headBaseY + (moving ? 0 : Math.sin(t * 2.3 + phase) * .012);
     }
     focusFloor() { this.floor = 0; this.onFloor(0); this.showLabels(true); this.reset(); }
-    reset(immediate = false) { this.floor = 0; this.onFloor(0); this.showLabels(true); const target = new THREE.Vector3(0, 1, -1), position = new THREE.Vector3(29, 23, 37); if (immediate) {
+    reset(immediate = false) { this.floor = 0; this.onFloor(0); this.showLabels(true); const target = new THREE.Vector3(0, 1, -2), position = new THREE.Vector3(10, 20, 42); if (immediate) {
         this.controls.target.copy(target);
         this.camera.position.copy(position);
         this.controls.update();
