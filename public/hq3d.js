@@ -36,7 +36,7 @@ export class Headquarters {
         this.renderer.shadowMap.enabled = true;
         this.renderer.shadowMap.type = THREE.PCFShadowMap;
         this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-        this.renderer.toneMappingExposure = 1.42;
+        this.renderer.toneMappingExposure = 1.55;
         this.renderer.domElement.setAttribute('aria-label', 'Interactive three-dimensional studio headquarters. Drag to orbit, scroll to zoom. Select agents using the roster panel.');
         this.renderer.domElement.setAttribute('tabindex', '0');
         container.append(this.renderer.domElement);
@@ -66,6 +66,7 @@ export class Headquarters {
         this.kitTemplates = null;
         this.gameTemplates = null;
         this.gamePulse = [];
+        this.beacons = [];
         this.pickables = [];
         this.rings = [];
         this.roomSigns = new Map();
@@ -82,6 +83,7 @@ export class Headquarters {
         this.lights();
         this.architecture();
         this.city();
+        this.starfield();
         this.kitPromise = this.loadAssetKit();
         this.gameKitPromise = this.loadGameKit();
         this.flushStatics();
@@ -198,9 +200,25 @@ export class Headquarters {
             this.scene.add(m);
         }
     } this.staticBatches.clear(); }
+    starfield() {
+        const count = 900, positions = new Float32Array(count * 3);
+        for (let i = 0; i < count; i++) {
+            const r = 70 + Math.random() * 80, a = Math.random() * Math.PI * 2, y = (Math.random() - .2) * 90;
+            positions[i * 3] = Math.cos(a) * r;
+            positions[i * 3 + 1] = y;
+            positions[i * 3 + 2] = Math.sin(a) * r;
+        }
+        const geometry = new THREE.BufferGeometry();
+        geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+        const material = new THREE.PointsMaterial({ color: 0xbfe9ff, size: .38, transparent: true, opacity: .9, depthWrite: false, sizeAttenuation: true });
+        const stars = new THREE.Points(geometry, material);
+        stars.frustumCulled = false;
+        this.scene.add(stars);
+        this.stars = stars;
+    }
     lights() {
-        this.scene.add(new THREE.HemisphereLight(0x9bcfff, 0x162132, 2.8));
-        const key = new THREE.DirectionalLight(0xb1d7ff, 4.2);
+        this.scene.add(new THREE.HemisphereLight(0x9bcfff, 0x162132, 3.2));
+        const key = new THREE.DirectionalLight(0xb1d7ff, 4.8);
         key.position.set(-12, 32, 20);
         key.castShadow = true;
         key.shadow.mapSize.set(2048, 2048);
@@ -346,6 +364,7 @@ export class Headquarters {
             // Horizontal deck edge lights, interrupted by metal mullions.
             this.box(0, y - .27, 8.65, 24.9, .065, .09, cyan);
             this.box(0, y - .59, 8.57, 25, .04, .08, soft);
+            this.box(0, y + .012, 8.78, 26, .025, .06, this.mat(`deckGlow${f}`, [AMBER, CYAN, 0xff6b9d][f], .2, 2.2));
             for (const x of [-14.45, 14.45])
                 this.box(x, y - .3, 0, .05, .07, 12.6, soft);
             for (let x = -12; x <= 12; x += 2) {
@@ -483,6 +502,8 @@ export class Headquarters {
         if (this.roster)
             return;
         this.roster = roster;
+        this.beacons ??= [];
+        this.gamePulse ??= [];
         await Promise.all([this.kitPromise, this.gameKitPromise]);
         const glass = this.materials.get('glass'), edge = this.materials.get('edge');
         if (!this.materials.has('rug'))
@@ -494,6 +515,15 @@ export class Headquarters {
             const sign = this.label(room.toUpperCase(), cx, y + 3.55, cz - 1.3, room === 'engineering' ? 5 : 3.8, `#${color.toString(16).padStart(6, '0')}`);
             sign.userData.room = room;
             this.roomSigns.set(room, sign);
+            this.box(cx, y + 3.20, cz - 1.3, room === 'engineering' ? 5 : 3.8, .025, .025, this.mat(`roomNeon${color}`, color, .2, 2.4));
+            const neon = this.mat(`roomNeon${color}`, color, .2, 2.4);
+            for (const side of [-1, 1])
+                this.box(cx + side * (room === 'engineering' ? 4 : 3.3), y + 1.55, cz - 2.04, .035, 3.0, .035, neon);
+            const beaconMat = this.mat(`beacon${color}`, color, .1, 2.8);
+            const beacon = new THREE.Mesh(this.geo('beacon', () => new THREE.OctahedronGeometry(.22, 0)), beaconMat);
+            beacon.position.set(cx, y + 4.55, cz - 1.3);
+            this.scene.add(beacon);
+            this.beacons.push({ mesh: beacon, baseY: y + 4.55, phase: cx * .2 });
             // Room partitions and low frame imply glass offices without hiding occupants.
             this.box(cx, y + 1.6, cz - 2.1, f === 3 ? 8 : 6.6, 3.1, .025, glass);
             this.box(cx, y + 3.18, cz - 2.1, f === 3 ? 8 : 6.6, .06, .06, edge);
@@ -505,7 +535,7 @@ export class Headquarters {
             this.box(cx, y + .122, cz - 1 + (rows - 1) * .75 + .3, width + 2.3, .006, rows * 1.5 + 1.1, rug);
             // Coloured, softly glowing floor inlays turn each department into a distinct game zone.
             const zoneW = width + 2.05, zoneD = rows * 1.5 + .92, zoneZ = cz - 1 + (rows - 1) * .75 + .3;
-            const zone = new THREE.Mesh(new THREE.PlaneGeometry(zoneW, zoneD), new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: .18, roughness: .95, metalness: .04, transparent: true, opacity: .3, depthWrite: false }));
+            const zone = new THREE.Mesh(new THREE.PlaneGeometry(zoneW, zoneD), new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: .28, roughness: .95, metalness: .04, transparent: true, opacity: .42, depthWrite: false }));
             zone.rotation.x = -Math.PI / 2;
             zone.position.set(cx, y + .129, zoneZ);
             zone.renderOrder = 2;
@@ -523,6 +553,7 @@ export class Headquarters {
                 const x = cx + (i % cols - (Math.min(cols, members.length) - 1) / 2) * spacing;
                 const z = cz + Math.floor(i / cols) * 1.5 - 1;
                 this.desk(x, y, z, color, role.name);
+                this.box(x, y + .53, z + 1.02, .43, .07, .40, this.mat(`seat${color}`, color, .12, .25));
                 const actor = this.createActor(role.name, role, x, y + .08, z + .64, color);
                 actor.desk = new THREE.Vector3(x, y, z);
             });
@@ -580,7 +611,13 @@ export class Headquarters {
         this.box(x, y + 1.15, z - .17, 1.08, .61, .1, metal);
         this.box(x, y + .92, z - .17, .08, .23, .1, edge);
         // Shared inactive screens have real architectural light; status is carried by the desk strip and halo.
-        this.box(x, y + 1.16, z - .105, .97, .49, .015, this.mat(`screen${color}`, color, .1, .35));
+        this.box(x, y + 1.16, z - .105, .97, .49, .015, this.mat(`screen${color}`, color, .1, .95));
+        this.box(x, y + .846, z + .08, .92, .012, .46, this.mat(`deskMat${color}`, color, .18, .12));
+        this.box(x, y + .56, z + .40, 1.18, .34, .028, this.mat(`deskFront${color}`, color, .2, .22));
+        this.box(x, y + .74, z + 1.21, .42, .38, .05, this.mat(`chairBack${color}`, color, .16, .2));
+        for (const side of [-1, 1])
+            this.box(x + side * .505, y + 1.16, z - .105, .016, .48, .016, this.mat(`rgb${color}`, color, .1, 2.4));
+        this.cyl(x + .47, y + .90, z + .20, .045, .10, this.mat('mug', 0xfff0d8, .1));
         for (let i = 0; i < 3; i++)
             this.box(x - .3, y + 1.3 - i * .12, z - .09, .22 + (hash(key + i) % 5) * .09, .022, .01, this.mat('code', 0x8ebfd0, 0, .55));
         this.box(x, y + .88, z + .19, .65, .025, .23, metal);
@@ -621,7 +658,7 @@ export class Headquarters {
         const sphere = this.geo('head', () => new THREE.SphereGeometry(1, 12, 10)), box = this.geometries.get('box');
         const cyl = this.geo('cyl', () => new THREE.CylinderGeometry(1, 1, 1, 16));
         const dark = this.materials.get('dark'), edge = this.materials.get('edge');
-        const ink = this.mat('ink', 0x111a24, .08), white = this.mat('shirt', 0xe8f2f8, .06), pants = this.mat('pants', 0x1a2938, .25);
+        const ink = this.mat('ink', 0x111a24, .08), white = this.mat('shirt', 0xe8f2f8, .06), pants = this.mat('pants', 0x2c4a6b, .2);
         const h = hash(id), room = data?.room || 'lobby';
         const skinTones = [0xf4d0ae, 0xe3b18b, 0xc08563, 0x95633f];
         const hairTones = [0x1a1e27, 0x3a2822, 0x6d4a33, 0xb07b45, 0xd9b47e, 0x27354d, 0x5c3450];
@@ -655,6 +692,7 @@ export class Headquarters {
             add(sphere, robotTrim, 0, .80, .16, .07, .07, .03);
             head = new THREE.Group();
             head.position.set(0, 1.22, 0);
+            head.scale.setScalar(1.06);
             g.add(head);
             add(sphere, shell, 0, 0, 0, .30, .29, .27, head);
             add(box, ink, 0, .01, .235, .40, .15, .05, head);
@@ -681,11 +719,15 @@ export class Headquarters {
                 g.add(leg);
                 add(box, pants, 0, -.20, 0, .135, .34, .15, leg);
                 add(box, ink, 0, -.39, .045, .155, .09, .22, leg);
+                add(box, white, 0, -.405, .10, .145, .045, .10, leg);
+                add(sphere, trim, 0, -.27, 0, .068, .028, .068, arm);
                 limbs.push(leg);
             }
             // Rounded torso, shirt, belt and lanyard: the reference cast wears a uniform
             // with a tablet, so the silhouette reads at distance without textures.
             add(box, outfit, 0, .78, 0, .41, .40, .27);
+            if (h % 4 === 0)
+                add(box, trim, 0, .78, -.19, .30, .34, .12);
             add(box, white, 0, .86, .141, .17, .20, .02);
             add(box, trim, 0, .79, .147, .032, .30, .012);
             add(box, ink, 0, .585, 0, .42, .07, .28);
@@ -694,8 +736,11 @@ export class Headquarters {
             add(box, this.mat('slate', 0xbfeaff, .1, .9), 0, .64, .242, .24, .16, .008);
             head = new THREE.Group();
             head.position.set(0, 1.25, 0);
+            head.scale.setScalar(1.08);
             g.add(head);
             add(sphere, skin, 0, 0, 0, .30, .31, .28, head);
+            if (style === 0 || style === 3)
+                add(sphere, outfit, 0, .02, -.16, .25, .20, .18, head);
             add(sphere, hair, 0, .04, -.03, .31, .30, .29, head);
             add(box, hair, 0, .145, .205, .30, .11, .075, head);
             if (style === 1 || style === 4) {
@@ -726,7 +771,7 @@ export class Headquarters {
                 add(box, ink, -.19, -.01, .288, .012, .07, .012, head);
                 add(box, ink, .19, -.01, .288, .012, .07, .012, head);
             }
-            if (['audio', 'narrative', 'community'].includes(room)) {
+            if (['audio', 'narrative', 'community', 'engineering'].includes(room)) {
                 add(box, trim, 0, .285, 0, .54, .025, .04, head);
                 for (const side of [-1, 1]) {
                     const cup = add(cyl, trim, side * .295, .005, 0, .052, .075, .052, head);
@@ -757,7 +802,7 @@ export class Headquarters {
         this.pickables.push(pick);
         // Status halo, badge and contact shadow are drawn by the shared instanced status layer.
         // `status` starts unknown so the first poll does not replay a completion pulse.
-        const actor = { id, data, group: g, parts, limbs, head, home: new THREE.Vector3(x, y, z), target: new THREE.Vector3(x, y, z), phase: (hash(id) % 100) / 10, visitor, busy: false, status: null, burst: 0, nod: 0 };
+        const actor = { id, data, group: g, parts, limbs, head, headBaseY: head.position.y, home: new THREE.Vector3(x, y, z), target: new THREE.Vector3(x, y, z), phase: (hash(id) % 100) / 10, visitor, busy: false, status: null, burst: 0, nod: 0 };
         this.actors.set(id, actor);
         this.actorBatchesDirty = true;
         return actor;
@@ -1189,6 +1234,7 @@ export class Headquarters {
         leftLeg.rotation.x = ll;
         rightLeg.rotation.x = rl;
         a.head.rotation.set(pitch, yaw, 0);
+        a.head.position.y = a.headBaseY + (moving ? 0 : Math.sin(t * 2.3 + phase) * .012);
     }
     focusFloor(f) { this.floor = f; this.onFloor(f); this.showLabels(f === 0); if (!f) {
         this.reset();
@@ -1232,12 +1278,15 @@ export class Headquarters {
         if (!this.reduced) {
             this.rings.forEach((m, i) => { m.rotation.z = t * (i % 2 ? -.12 : .15); });
             for (const p of this.gamePulse) p.material.emissiveIntensity = p.base + Math.sin(t * 2.1 + p.phase) * .35;
+            for (const b of this.beacons) { b.mesh.position.y = b.baseY + Math.sin(t * 1.4 + b.phase) * .12; b.mesh.rotation.y = t * .7; b.mesh.rotation.z = Math.sin(t * .9 + b.phase) * .15; }
             this.elevator.position.y = 1.7 + (Math.sin(t * .12) * .5 + .5) * 12;
             this.dust.rotation.y = t * .008;
             this.pulse = Math.max(0, this.pulse - dt * .5);
             for (const a of this.actors.values()) {
                 const moving = a.group.position.distanceTo(a.target) > .02;
                 a.group.position.lerp(a.target, 1 - Math.exp(-dt * 2));
+                const bob = moving ? Math.abs(Math.sin(t * 8 + a.phase)) * .035 : Math.sin(t * 2.3 + a.phase) * .012;
+                a.group.position.y = a.target.y + bob;
                 this.pose(a, t, moving, dt);
             }
             if (this.particles) {
@@ -1350,11 +1399,15 @@ export class Headquarters {
         place('KIT_Neon', 0, 2.55, -7.55, 0, 1.1);
         // 2F · production workshop
         place('KIT_ToolCart', 0, 6, 5.7, .05, .95);
+        place('KIT_CoffeeBar', -6.2, 6, 4.95, .08, .9);
+        place('KIT_Sofa', 4.2, 6, 4.45, -.2, .95);
         place('KIT_Shelf', -12.7, 6, 5.5, .12, .95);
         place('KIT_PlantTall', 12.6, 6, 5.4, 0, 1);
         place('KIT_PlantTall', -12.6, 6, 3.0, 0, .9);
         // 3F · engineering & design lounge
         place('KIT_Conference', 0, 12, 5.35, .08, .82);
+        place('KIT_Sofa', -5.6, 12, 4.45, .25, .95);
+        place('KIT_Arcade', 7.2, 12, 4.55, -.2, .95);
         place('KIT_Whiteboard', 12.7, 12, 5.55, -.15, .9);
         place('KIT_Shelf', -12.7, 12, 5.5, .12, .95);
         place('KIT_FloorLamp', -8.7, 12, 3.2, 0, .9);

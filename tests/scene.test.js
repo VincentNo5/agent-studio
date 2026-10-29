@@ -11,7 +11,7 @@ async function buildWorld() {
     globalThis.document = { createElement: () => ({ width: 0, height: 0, getContext: () => context }) };
     try {
         const world = Object.create(Headquarters.prototype);
-        Object.assign(world, { scene: new THREE.Scene(), geometries: new Map(), materials: new Map(), textures: new Set(), staticBatches: new Map(), actors: new Map(), deskSlots: [], kitTemplates: null, kitPromise: Promise.resolve(false), pickables: [], rings: [], roomSigns: new Map(), floorLabels: [], streams: [], statuses: new Map(), clock: 0 });
+        Object.assign(world, { scene: new THREE.Scene(), geometries: new Map(), materials: new Map(), textures: new Set(), staticBatches: new Map(), actors: new Map(), deskSlots: [], kitTemplates: null, gameTemplates: null, gamePulse: [], beacons: [], kitPromise: Promise.resolve(false), gameKitPromise: Promise.resolve(false), pickables: [], rings: [], roomSigns: new Map(), floorLabels: [], streams: [], statuses: new Map(), clock: 0 });
         world.architecture();
         await world.setRoster(roster);
         world.makeParticles();
@@ -53,7 +53,7 @@ test('character parts are instanced and instance transforms are finite', async (
     world.updateActorInstances();
     // Chibi characters add face, hair and department accessories: ~1.5k parts still collapse
     // to a few dozen instanced draw calls (one per material/geometry pair), not one per part.
-    expect(world.actorBatches.length).toBeLessThan(70);
+    expect(world.actorBatches.length).toBeLessThan(80);
     expect(world.actorBatches.reduce((n, b) => n + b.parts.length, 0)).toBeGreaterThan(600);
     for (const batch of world.actorBatches)
         expect([...batch.mesh.instanceMatrix.array].every(Number.isFinite)).toBe(true);
