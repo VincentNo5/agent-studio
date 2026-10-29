@@ -28,6 +28,8 @@ and the production path for agent-authored assets live in
 `blender/agent_studio_kit.py`. Run `scripts/build-blender-assets.sh` when Blender is installed;
 otherwise the procedural fallback remains the source of truth.
 
+<img src="docs/floor-kit.png" alt="Blender kit on the Agent Studio lobby floor" width="720">
+
 <img src="docs/mobile.png" alt="Mobile view" width="330">
 
 Built on top of [Claude Code Game Studios](https://github.com/donchitos/claude-code-game-studios)
