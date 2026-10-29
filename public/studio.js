@@ -100,7 +100,7 @@ $('hud').innerHTML = `
 <div class="scene-hint">Drag to orbit <span>·</span> scroll to zoom <span>·</span> select an agent</div>
 <nav class="panel navigator" aria-label="Campus navigator"><div class="mini-tower"><button data-floor="0" aria-label="Campus overview">◎</button></div><div class="nav-floors"><button data-floor="0" aria-pressed="true"><small>◈</small><span class="nav-name">Campus</span><span class="floor-badges" data-floor-badges="0"></span></button></div></nav>
 <section class="panel events"><div class="panel-head"><h2>Live events</h2><button data-panel="audit" class="link-button">Audit trail ↗</button></div><div class="event-list" id="events"><p class="empty">Awaiting audit events.</p></div></section>
-<section class="panel preferences" id="preferences" aria-label="Rendering preferences"><label class="toggle-row" for="particles">Particle effects<input type="checkbox" id="particles" checked></label><label class="toggle-row" for="low-performance">Low performance mode<input type="checkbox" id="low-performance"></label><div class="performance"><button id="reset-camera">↺ Reset camera</button><output id="fps">— FPS</output></div></section>
+<section class="panel preferences" id="preferences" aria-label="Rendering preferences"><label class="toggle-row" for="particles">Particle effects<input type="checkbox" id="particles" checked></label><label class="toggle-row" for="role-labels">Role labels<input type="checkbox" id="role-labels" checked></label><label class="toggle-row" for="low-performance">Low performance mode<input type="checkbox" id="low-performance"></label><div class="performance"><button id="reset-camera">↺ Reset camera</button><output id="fps">— FPS</output></div></section>
 <footer class="ticker"><strong>Activity</strong><span id="ticker-text">Awaiting observed state changes.</span><span class="scope" id="scope">Read-only telemetry</span></footer>`;
 const dialog = el('dialog');
 dialog.setAttribute('aria-labelledby', 'dialog-title');
@@ -129,8 +129,10 @@ catch {
     return fallback;
 } }
 $('particles').checked = preference('particles', true);
+$('role-labels').checked = preference('role-labels', true);
 $('low-performance').checked = preference('low', false);
 $('particles').onchange = () => { world?.setParticles($('particles').checked); savePreference('particles', $('particles').checked); };
+$('role-labels').onchange = () => { world?.setRoleLabels($('role-labels').checked); savePreference('role-labels', $('role-labels').checked); };
 $('low-performance').onchange = () => { world?.setLow($('low-performance').checked); savePreference('low', $('low-performance').checked); };
 $('dialog-refresh').onclick = () => { if (currentPanel === 'logs')
     refreshOutput();
@@ -682,11 +684,12 @@ connection();
 poll();
 clockTimer = setInterval(connection, 1000);
 outputTimer = setInterval(refreshOutput, 2000);
-import('./hq3d.js?v=10').then(({ Headquarters }) => {
+import('./hq3d.js?v=11').then(({ Headquarters }) => {
     if (closed)
         return;
     world = new Headquarters($('world'), { onSelect: id => selectAgent(id, false), onFPS: fps => { $('fps').textContent = `${fps} FPS`; }, onStats: stats => { $('fps').title = `${stats.calls} draw calls · ${stats.triangles.toLocaleString()} triangles · DPR ${stats.dpr.toFixed(2)}`; }, onFloor: floorChanged });
     world.setParticles($('particles').checked);
+    world.setRoleLabels($('role-labels').checked);
     world.setLow($('low-performance').checked);
     if (rosterLoaded)
         world.setRoster(roster);

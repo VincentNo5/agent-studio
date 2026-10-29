@@ -33,8 +33,8 @@ def material(name, color, metallic=0.0, roughness=0.5):
     bsdf.inputs["Roughness"].default_value = roughness
     return mat
 
-def cube(name, loc, scale, mat, parent=None, bevel=0.02):
-    bpy.ops.mesh.primitive_cube_add(size=1, location=loc)
+def cube(name, loc, scale, mat, parent=None, bevel=0.02, rot=(0, 0, 0)):
+    bpy.ops.mesh.primitive_cube_add(size=1, location=loc, rotation=rot)
     obj = bpy.context.object
     obj.name = name
     obj.scale = scale
@@ -48,11 +48,13 @@ def cube(name, loc, scale, mat, parent=None, bevel=0.02):
         obj.parent = parent
     return obj
 
-def cylinder(name, loc, radius, depth, mat, vertices=32):
+def cylinder(name, loc, radius, depth, mat, vertices=32, parent=None):
     bpy.ops.mesh.primitive_cylinder_add(vertices=vertices, radius=radius, depth=depth, location=loc)
     obj = bpy.context.object
     obj.name = name
     obj.data.materials.append(mat)
+    if parent:
+        obj.parent = parent
     return obj
 
 def uv(obj):
@@ -65,13 +67,20 @@ def uv(obj):
     obj.select_set(False)
 
 def desk(parent, mats):
-    body = cube("SM_Desk_A", (0, 0, 0.76), (1.8, 0.78, 0.07), mats["dark"], parent)
-    for x in (-0.78, 0.78):
-        for y in (-0.3, 0.3):
-            cube("SM_DeskLeg_A", (x, y, 0.38), (0.07, 0.07, 0.7), mats["dark"], parent, 0.01)
-    cube("SM_DeskRail_A", (0, 0.28, 0.56), (1.6, 0.06, 0.08), mats["dark"], parent, 0.01)
-    uv(body)
-    return body
+    # Height-adjustable studio desk: warm top, dark frame, cable tray and drawer pedestal.
+    cube("SM_DeskTop_A", (0, 0, 0.78), (1.9, 0.86, 0.055), mats["warm"], parent, 0.045)
+    cube("SM_DeskApron_A", (0, 0.38, 0.70), (1.82, 0.045, 0.12), mats["dark"], parent, 0.02)
+    for x in (-0.84, 0.84):
+        for y in (-0.34, 0.34):
+            cube("SM_DeskLeg_A", (x, y, 0.38), (0.06, 0.06, 0.72), mats["dark"], parent, 0.012)
+    cube("SM_DeskCableTray_A", (0, 0.20, 0.60), (1.45, 0.18, 0.05), mats["dark"], parent, 0.01)
+    cube("SM_DeskModesty_A", (0, 0.35, 0.44), (1.30, 0.025, 0.34), mats["dark"], parent, 0.01)
+    for i, z in enumerate((0.18, 0.40, 0.62)):
+        cube("SM_DeskDrawer_A", (0.58, -0.42, z), (0.42, 0.04, 0.19), mats["dark"], parent, 0.012)
+        cube("SM_DeskDrawerFace_A", (0.58, -0.45, z), (0.38, 0.015, 0.15), mats["warm"], parent, 0.008)
+        cube("SM_DeskHandle_A", (0.58, -0.47, z), (0.16, 0.015, 0.018), mats["cyan"], parent, 0.004)
+    cylinder("SM_DeskGrommet_A", (0, 0.28, 0.81), 0.055, 0.012, mats["dark"], 24, parent)
+    return parent
 
 def monitor(parent, mats):
     cube("SM_Monitor_A", (0, -0.2, 1.18), (0.88, 0.06, 0.52), mats["dark"], parent, 0.03)
@@ -79,27 +88,48 @@ def monitor(parent, mats):
     cube("SM_MonitorStand_A", (0, -0.2, 0.9), (0.1, 0.1, 0.2), mats["dark"], parent, 0.01)
 
 def chair(parent, mats):
-    cube("SM_ChairSeat_A", (0, 0, 0.48), (0.58, 0.56, 0.09), mats["warm"], parent, 0.04)
-    cube("SM_ChairBack_A", (0, 0.28, 0.82), (0.56, 0.08, 0.6), mats["warm"], parent, 0.04)
-    for x in (-0.24, 0.24):
-        for y in (-0.2, 0.2):
-            cube("SM_ChairLeg_A", (x, y, 0.23), (0.05, 0.05, 0.46), mats["dark"], parent, 0.01)
+    # Ergonomic task chair: rounded seat/back, headrest, armrests, gas lift and five-star base.
+    cube("SM_ChairSeat_A", (0, 0, 0.47), (0.62, 0.58, 0.11), mats["warm"], parent, 0.06)
+    cube("SM_ChairBack_A", (0, 0.29, 0.86), (0.58, 0.10, 0.64), mats["warm"], parent, 0.06)
+    cube("SM_ChairHeadrest_A", (0, 0.29, 1.28), (0.34, 0.08, 0.18), mats["warm"], parent, 0.04)
+    for x in (-0.34, 0.34):
+        cube("SM_ChairArm_A", (x, 0.01, 0.65), (0.055, 0.48, 0.055), mats["dark"], parent, 0.02)
+        cube("SM_ChairArmPad_A", (x, -0.12, 0.70), (0.10, 0.24, 0.035), mats["dark"], parent, 0.012)
+    cylinder("SM_ChairGas_A", (0, 0, 0.26), 0.035, 0.32, mats["dark"], 20, parent)
+    for i in range(5):
+        a = i * math.tau / 5
+        cube("SM_ChairSpoke_A", (math.cos(a) * 0.18, math.sin(a) * 0.18, 0.08), (0.30, 0.045, 0.035), mats["dark"], parent, 0.01, (0, 0, a))
+        bpy.ops.mesh.primitive_uv_sphere_add(segments=12, ring_count=8, radius=0.055, location=(math.cos(a) * 0.34, math.sin(a) * 0.34, 0.045))
+        wheel = bpy.context.object
+        wheel.name = "SM_ChairWheel_A"
+        wheel.scale = (1, .55, 1)
+        wheel.data.materials.append(mats["dark"])
+        wheel.parent = parent
 
 def rack(parent, mats):
-    cube("SM_ServerRack_A", (0, 0, 0.95), (0.72, 0.72, 1.9), mats["dark"], parent, 0.03)
-    for i in range(6):
-        cube("SM_ServerSlot_A", (0, -0.37, 0.42 + i * 0.23), (0.54, 0.02, 0.05), mats["cyan"], parent, 0.01)
-    cube("SM_ServerGlow_A", (0, -0.38, 1.78), (0.1, 0.01, 0.04), mats["green"], parent, 0.01)
+    cube("SM_ServerRack_A", (0, 0, 0.95), (0.76, 0.76, 1.92), mats["dark"], parent, 0.04)
+    for i in range(8):
+        cube("SM_ServerSlot_A", (0, -0.385, 0.34 + i * 0.19), (0.58, 0.018, 0.055), mats["cyan"], parent, 0.008)
+        cube("SM_ServerVent_A", (0, -0.39, 0.31 + i * 0.19), (0.42, 0.008, 0.012), mats["dark"], parent, 0.002)
+    cube("SM_ServerGlow_A", (0, -0.40, 1.80), (0.12, 0.008, 0.035), mats["green"], parent, 0.004)
+    for x in (-0.30, 0.30):
+        cube("SM_ServerHandle_A", (x, -0.40, 1.35), (0.035, 0.012, 0.24), mats["cyan"], parent, 0.004)
+    for x in (-0.28, 0.28):
+        for y in (-0.26, 0.26):
+            cylinder("SM_ServerWheel_A", (x, y, 0.045), 0.045, 0.03, mats["dark"], 16, parent)
+    return parent
 
 def plant(parent, mats):
     cylinder("SM_PlantPot_A", (0, 0, 0.24), 0.22, 0.46, mats["warm"], 24)
     cylinder("SM_PlantStem_A", (0, 0, 0.68), 0.035, 0.5, mats["green"], 12)
-    for i in range(5):
-        a = i * math.tau / 5
-        bpy.ops.mesh.primitive_uv_sphere_add(segments=16, ring_count=8, radius=0.18, location=(math.cos(a) * 0.22, math.sin(a) * 0.22, 0.86 + (i % 2) * 0.12))
+    cylinder("SM_PlantRim_A", (0, 0, 0.47), 0.235, 0.04, mats["dark"], 24, parent)
+    for i in range(9):
+        a = i * math.tau / 9
+        bpy.ops.mesh.primitive_uv_sphere_add(segments=20, ring_count=10, radius=0.18, location=(math.cos(a) * (0.16 + (i % 3) * 0.05), math.sin(a) * (0.16 + (i % 3) * 0.05), 0.74 + (i % 4) * 0.11))
         leaf = bpy.context.object
         leaf.name = "SM_PlantLeaf_A"
-        leaf.scale = (1.0, 0.45, 0.55)
+        leaf.scale = (1.15, 0.38, 0.62)
+        leaf.rotation_euler = (0.25 * math.cos(a), 0.25 * math.sin(a), a)
         leaf.data.materials.append(mats["green"])
         leaf.parent = parent
 

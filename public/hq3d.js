@@ -1400,7 +1400,7 @@ export class Headquarters {
         a.head.position.y = a.headBaseY + (moving ? 0 : Math.sin(t * 2.3 + phase) * .012);
     }
     focusFloor() { this.floor = 0; this.onFloor(0); this.showLabels(true); this.reset(); }
-    reset(immediate = false) { this.floor = 0; this.onFloor(0); this.showLabels(true); const target = new THREE.Vector3(0, 1, 0), position = new THREE.Vector3(27, 22, 35); if (immediate) {
+    reset(immediate = false) { this.floor = 0; this.onFloor(0); this.showLabels(true); const target = new THREE.Vector3(0, 1, -1), position = new THREE.Vector3(24, 20, 31); if (immediate) {
         this.controls.target.copy(target);
         this.camera.position.copy(position);
         this.controls.update();
@@ -1412,6 +1412,7 @@ export class Headquarters {
         this.camera.position.copy(position);
         this.flight = null;
     } }
+    setRoleLabels(value) { for (const label of this.roleLabels.values()) label.visible = value; }
     setParticles(value) { this.particles = value; this.dust.visible = value; this.energy.visible = value; }
     setLow(value) { this.low = value; this.bloom.enabled = !value; this.dpr = value ? 1 : this.dprCap; this.renderer.setPixelRatio(this.dpr); this.composer.setPixelRatio(this.dpr); this.renderer.shadowMap.enabled = !value; this.key.castShadow = !value; this.dust.geometry.setDrawRange(0, value ? 200 : 850); this.updateStreams(); this.resize(); }
     resize() { const w = this.container.clientWidth, h = this.container.clientHeight; this.camera.aspect = w / h; this.camera.updateProjectionMatrix(); this.renderer.setSize(w, h); this.composer?.setSize(w, h); }
