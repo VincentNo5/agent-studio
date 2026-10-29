@@ -21,7 +21,7 @@ async function buildWorld() {
         globalThis.document = saved;
     }
 }
-test('all 49 roster characters and their stations fit inside the single campus floor', async () => {
+test('all roster characters and their stations fit inside the single campus floor', async () => {
     const world = await buildWorld();
     expect(world.actors.size).toBe(roster.agents.length);
     expect(world.roomFloorLabels.size).toBe(roster.rooms.length);
@@ -30,7 +30,7 @@ test('all 49 roster characters and their stations fit inside the single campus f
     structure.geometry.computeBoundingBox();
     expect(structure.geometry.boundingBox.max.y).toBeGreaterThan(4);
     for (const actor of world.actors.values()) {
-        expect(Math.abs(actor.home.x)).toBeLessThan(24);
+        expect(Math.abs(actor.home.x)).toBeLessThan(28);
         expect(Math.abs(actor.home.z)).toBeLessThan(17);
         expect(Math.abs(actor.home.y)).toBeLessThan(.2);
     }
@@ -89,11 +89,11 @@ test('lower-floor camera presets keep every roster agent visible through the ope
 test('status map drives actors, and only an observed transition plays the completion burst', async () => {
     const world = await buildWorld(), board = { source: 'Orca', total: 0, counts: {} };
     const state = { workers: [{ dispatchId: 'queued', dispatchStatus: 'pending' }], audit: { events: [] } };
-    world.update(state, new Map([['qa-tester', { status: 'completed' }], ['engine-programmer', { status: 'working' }], ['sound-designer', { status: 'failed' }]]), board);
+    world.update(state, new Map([['qa-tester', { status: 'completed' }], ['engine-programmer', { status: 'working' }], ['level-designer', { status: 'failed' }]]), board);
     expect(world.actors.get('qa-tester').status).toBe('completed');
     expect(world.actors.get('qa-tester').burst).toBe(0);
     expect(world.actors.get('engine-programmer').busy).toBe(true);
-    expect(world.actors.get('sound-designer').status).toBe('failed');
+    expect(world.actors.get('level-designer').status).toBe('failed');
     expect(world.actors.get('ai-programmer').status).toBe('idle');
     // A visitor without a map entry falls back to its own reported state.
     expect(world.actors.get('worker:queued').status).toBe('pending');

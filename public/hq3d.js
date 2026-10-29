@@ -14,8 +14,8 @@ const STATUS_COLORS = Object.fromEntries(Object.entries(STATUS_META).map(([key, 
 const BADGE_INDEX = { working: 0, completed: 1, pending: 2, failed: 3, idle: 4 }, BADGE_CELLS = 6;
 const _matrix = new THREE.Matrix4(), _position = new THREE.Vector3(), _scale = new THREE.Vector3(), _color = new THREE.Color(), _quat = new THREE.Quaternion(), _ice = new THREE.Color(0xdff6ff);
 const roomLayout = {
-    directors: [-21, -11], leads: [-10.5, -11], engineering: [0, -11], design: [10.5, -11], art: [21, -11],
-    audio: [-21, 11], narrative: [-10.5, 11], qa: [0, 11], engines: [10.5, 11], community: [21, 11]
+    directors: [-20, -11], leads: [0, -11], engineering: [20, -11],
+    design: [-20, 11], qa: [0, 11], engines: [20, 11]
 };
 export class Headquarters {
     constructor(container, { onSelect = () => { }, onFPS = () => { }, onFloor = () => { }, onStats = () => { } } = {}) {
@@ -512,11 +512,11 @@ export class Headquarters {
         const shaft = this.mesh(shaftGeo, this.mat('shaft', 0x2b9dcc, 0, .8, .035), 0, 2.4, 0, 1, 1, 1, this.scene, false);
         shaft.castShadow = false;
         // Reception and live task display at opposite ends of the open floor.
-        this.box(-19, .85, 14.6, 6, 1.5, 1.4, metal);
-        this.box(-19, 1.65, 14.6, 6.1, .15, 1.7, edge);
-        this.box(-19, .9, 15.34, 5, .065, .02, amber);
-        this.label('PASEO', -19, 3.3, 16.2, 4, '#ffcf8c', 'CONNECTED AGENT BAY');
-        this.label('WELCOME', -19, 2.4, 13.6, 4.3, '#90eaff', 'VISITOR ARRIVALS');
+        this.box(-8, .85, 15.2, 6, 1.5, 1.4, metal);
+        this.box(-8, 1.65, 15.2, 6.1, .15, 1.7, edge);
+        this.box(-8, .9, 15.94, 5, .065, .02, amber);
+        this.label('PASEO', -8, 3.3, 16.4, 4, '#ffcf8c', 'CONNECTED AGENT BAY');
+        this.label('WELCOME', -8, 2.4, 14.2, 4.3, '#90eaff', 'VISITOR ARRIVALS');
         this.taskCanvas = document.createElement('canvas');
         this.taskCanvas.width = 768;
         this.taskCanvas.height = 512;
@@ -604,10 +604,10 @@ export class Headquarters {
             const y = 0;
             this.cyl(cx, 4.75, cz, .018, .7, edge);
             this.cyl(cx, 4.38, cz, .16, .05, this.mat('pendant', 0xffd6a1, .1, 1.8));
-            const labelZ = cz + (cz < 0 ? 4.2 : -4.2);
-            this.roomFloorLabels.set(room, this.floorLabel(room.toUpperCase(), cx, labelZ, 6.0, `#${color.toString(16).padStart(6, '0')}`));
+            const labelZ = cz + 4.2;
+            this.roomFloorLabels.set(room, this.floorLabel(room.toUpperCase(), cx, labelZ, 7.0, `#${color.toString(16).padStart(6, '0')}`));
             // Open-plan neighbourhood: no enclosing office walls, only low side planters.
-            const cols = 4;
+            const cols = members.length > 12 ? 5 : Math.min(4, members.length);
             const spacing = 2.0;
             const rows = Math.ceil(members.length / cols), width = (Math.min(cols, members.length) - 1) * spacing, rowGap = 2.0;
             // Warm floor zone under each department: warm interiors against the cool deck and cyan accents.
@@ -1506,10 +1506,25 @@ export class Headquarters {
         this.beanbag(-2, 0, 11.4, 0xffb36b);
         this.beanbag(2, 0, 11.4, 0x7cc4ff);
         this.plant(0, 0, 13.2, .8);
+        // Library and reading lounge occupy the space freed by the multimedia teams.
+        for (const z of [-4.5, 0, 4.5])
+            place('KIT_Shelf', -25.5, 0, z, Math.PI / 2, .9);
+        place('KIT_Sofa', -22.5, 0, 0, Math.PI / 2, 1);
+        place('KIT_Rug', -22.5, .015, 0, Math.PI / 2, 1.1);
+        place('KIT_FloorLamp', -24.5, 0, 4.5, 0, .85);
+        this.plant(-24, 0, -7, .8);
+        this.plant(-24, 0, 7, .8);
+        place('KIT_Shelf', 25.5, 0, -4.5, -Math.PI / 2, .9);
+        place('KIT_Shelf', 25.5, 0, 0, -Math.PI / 2, .9);
+        place('KIT_Shelf', 25.5, 0, 4.5, -Math.PI / 2, .9);
+        place('KIT_Sofa', 22.5, 0, 0, -Math.PI / 2, 1);
+        place('KIT_Rug', 22.5, .015, 0, -Math.PI / 2, 1.1);
+        place('KIT_FloorLamp', 24.5, 0, -4.5, 0, .85);
+        this.plant(24, 0, -7, .8);
+        this.plant(24, 0, 7, .8);
         for (const x of [-21, -11, 11, 21])
             this.plant(x, 0, 13.4, .9);
         this.label('COFFEE + PLAY', -2, 2.6, 1.8, 4.8, '#ffcf8c', 'CENTRAL LOUNGE');
-        this.label('MAKE + TEST', 0, 2.7, 7.4, 4.4, '#8cecff', 'TEAM NEIGHBOURHOODS');
     }
     loadAssetKit() {
         // Optional Blender-authored kit. The procedural scene stays complete if the

@@ -8,7 +8,7 @@ agent inspection, live events, and operational panels.
 
 **Studio Floor** (`/floor`) — the same world, with every team neighbourhood on one open
 floor around the central ORCA hub. Orbit, zoom, select characters, or use the campus
-navigator. All 49 roster roles have stable workstations; Orca dispatches occupy the hub.
+navigator. All 43 coding, design and leadership roles have stable workstations; multimedia teams were removed. Orca dispatches occupy the hub.
 
 **Mobile** (`/mobile`) — phone-first single screen (390×844, no scrolling): quota bars, worker
 counts, active agents, rooms. This is the view to open from an iPhone; see
@@ -27,7 +27,7 @@ and the production path for agent-authored assets live in
 `blender/agent_studio_kit.py`. Run `scripts/build-blender-assets.sh` when Blender is installed;
 otherwise the procedural fallback remains the source of truth.
 
-The kit desk/chair/plant/rack parts are instanced across the 49 workstation slots; the
+The kit desk/chair/plant/rack parts are instanced across the 43 workstation slots; the
 procedural monitors and status strips stay because they carry live state. A second game-furniture
 kit (`blender/game_kit.py` → `public/game-kit.glb`) adds the coffee bar, arcade row, lounge sofa,
 conference table, tool cart, whiteboards, shelves, lamps and plants. Department neighbourhoods get a
@@ -40,7 +40,7 @@ beanbags, a coffee bar, and indoor/outdoor greenery.
 <img src="docs/mobile.png" alt="Mobile view" width="330">
 
 Built on top of [Claude Code Game Studios](https://github.com/donchitos/claude-code-game-studios)
-(CCGS) for its 49-role studio roster and its subagent audit hooks. No game development involved:
+(CCGS) for its studio roster and its subagent audit hooks. No game development involved:
 the roster is used as the *organizational* model.
 
 ## What it shows
@@ -50,7 +50,7 @@ the roster is used as the *organizational* model.
 | **Live Floor** | `orca orchestration worker-list` + `terminal list` | Every supervised Orca worker: label (the worker terminal's own title), state, liveness, terminal state, next action |
 | **Subagent Activity** | `$CCGS_ROOT/production/session-logs/agent-audit.log` | Real per-role activity from CCGS's `SubagentStart`/`SubagentStop` hooks (`invoked` / `completed` / `active`) |
 | **Task Board** | `orca orchestration task-list`, else `hermes kanban list` | Tasks by status lane — see *Task board sources* below |
-| **Studio Roster** / floor plan | `roster.json` (generated from CCGS `.claude/agents`) | 49 roles in 10 rooms; a seat lights when that role is active |
+| **Studio Roster** / floor plan | `roster.json` (generated from CCGS `.claude/agents`) | 43 roles in 6 rooms; a seat lights when that role is active |
 | **Corridor** (floor view) | same worker feed | Supervised workers as visitors, with their task label |
 | **Live Work** (`/floor` sidebar) | `/state` + `/worker/<id>` | The run on the floor, the agents behind it, the tasks in flight, and the picked worker's live tail |
 | **Activity** | poll diff | Worker/task state transitions as they happen |

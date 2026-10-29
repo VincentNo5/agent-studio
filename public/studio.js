@@ -164,7 +164,7 @@ function renderDetail() {
     document.querySelector('.detail').scrollTop = 0;
     if (!selected) {
         const empty = el('div', 'detail-empty');
-        const cast = [['ai-programmer', 'engineering'], ['systems-designer', 'design'], ['sound-designer', 'audio']].map(([n, r]) => portrait(n, r)).join('');
+        const cast = [['ai-programmer', 'engineering'], ['systems-designer', 'design'], ['gameplay-programmer', 'engineering']].map(([n, r]) => portrait(n, r)).join('');
         empty.innerHTML = `<div class="empty-cast">${cast}</div><h3>Select an agent</h3><p>Choose a character in the headquarters, or a row in Agent status, to inspect its work.</p>`;
         empty.append(button('Explore studio roster ↗', () => openPanel('roster'), 'wide'));
         box.append(empty);
