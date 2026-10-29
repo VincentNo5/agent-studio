@@ -23,3 +23,6 @@ secrets*.json
 # logs / runtime
 *.log
 logs/
+
+__pycache__/
+*.pyc
