@@ -11,7 +11,7 @@ beforeAll(async () => {
 });
 const request = (path: string) => handler(new Request(`http://127.0.0.1:8788${path}`), local);
 test('desktop entry points and every recursively imported module resolve locally', async () => {
-  for (const path of ['/', '/floor', '/mobile', '/anatomy', '/roster.json', '/assets/studio.css', '/assets/anatomy.css', '/assets/studio-kit.glb']) {
+  for (const path of ['/', '/floor', '/mobile', '/anatomy', '/roster.json', '/assets/studio.css', '/assets/anatomy.css', '/assets/studio-kit.glb', '/assets/game-kit.glb']) {
     const res = await request(path); expect(res.status).toBe(200); expect((await res.text()).length).toBeGreaterThan(0);
   }
   const visited = new Set<string>();

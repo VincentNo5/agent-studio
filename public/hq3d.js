@@ -36,7 +36,7 @@ export class Headquarters {
         this.renderer.shadowMap.enabled = true;
         this.renderer.shadowMap.type = THREE.PCFShadowMap;
         this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-        this.renderer.toneMappingExposure = 1.25;
+        this.renderer.toneMappingExposure = 1.42;
         this.renderer.domElement.setAttribute('aria-label', 'Interactive three-dimensional studio headquarters. Drag to orbit, scroll to zoom. Select agents using the roster panel.');
         this.renderer.domElement.setAttribute('tabindex', '0');
         container.append(this.renderer.domElement);
@@ -64,6 +64,8 @@ export class Headquarters {
         this.actors = new Map();
         this.deskSlots = [];
         this.kitTemplates = null;
+        this.gameTemplates = null;
+        this.gamePulse = [];
         this.pickables = [];
         this.rings = [];
         this.roomSigns = new Map();
@@ -81,12 +83,13 @@ export class Headquarters {
         this.architecture();
         this.city();
         this.kitPromise = this.loadAssetKit();
+        this.gameKitPromise = this.loadGameKit();
         this.flushStatics();
         this.makeParticles();
         this.composer = new EffectComposer(this.renderer);
         this.composer.addPass(new RenderPass(this.scene, this.camera));
         // Soft bloom: screens and status lights glow without washing out the building or HUD.
-        this.bloom = new UnrealBloomPass(new THREE.Vector2(1, 1), .42, .5, 1.05);
+        this.bloom = new UnrealBloomPass(new THREE.Vector2(1, 1), .52, .52, 1.02);
         this.composer.addPass(this.bloom);
         this.composer.addPass(new OutputPass());
         // The selection ring is neutral ice, outside the status halo, so it never hides the status colour.
@@ -196,8 +199,8 @@ export class Headquarters {
         }
     } this.staticBatches.clear(); }
     lights() {
-        this.scene.add(new THREE.HemisphereLight(0x9bcfff, 0x162132, 2));
-        const key = new THREE.DirectionalLight(0xb1d7ff, 3.2);
+        this.scene.add(new THREE.HemisphereLight(0x9bcfff, 0x162132, 2.8));
+        const key = new THREE.DirectionalLight(0xb1d7ff, 4.2);
         key.position.set(-12, 32, 20);
         key.castShadow = true;
         key.shadow.mapSize.set(2048, 2048);
@@ -480,7 +483,7 @@ export class Headquarters {
         if (this.roster)
             return;
         this.roster = roster;
-        await this.kitPromise;
+        await Promise.all([this.kitPromise, this.gameKitPromise]);
         const glass = this.materials.get('glass'), edge = this.materials.get('edge');
         if (!this.materials.has('rug'))
             this.materials.set('rug', new THREE.MeshStandardMaterial({ color: 0x3a2a20, roughness: .92, metalness: .05 }));
@@ -500,6 +503,14 @@ export class Headquarters {
             const rows = Math.ceil(members.length / cols), width = (Math.min(cols, members.length) - 1) * spacing;
             // Warm floor zone under each department: warm interiors against the cool deck and cyan accents.
             this.box(cx, y + .122, cz - 1 + (rows - 1) * .75 + .3, width + 2.3, .006, rows * 1.5 + 1.1, rug);
+            // Coloured, softly glowing floor inlays turn each department into a distinct game zone.
+            const zoneW = width + 2.05, zoneD = rows * 1.5 + .92, zoneZ = cz - 1 + (rows - 1) * .75 + .3;
+            const zone = new THREE.Mesh(new THREE.PlaneGeometry(zoneW, zoneD), new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: .18, roughness: .95, metalness: .04, transparent: true, opacity: .3, depthWrite: false }));
+            zone.rotation.x = -Math.PI / 2;
+            zone.position.set(cx, y + .129, zoneZ);
+            zone.renderOrder = 2;
+            this.scene.add(zone);
+            this.box(cx, y + .134, zoneZ + zoneD / 2, zoneW, .01, .045, this.mat(`zoneLine${color}`, color, .2, 1.6));
             // Low glass side partitions between neighbouring departments.
             for (const side of [-1, 1]) {
                 const px = cx + side * (width / 2 + 1.15);
@@ -519,6 +530,7 @@ export class Headquarters {
         this.flushStatics();
         this.statusAssets();
         this.buildKitInstances();
+        this.placeGameAssets();
     }
     buildKitInstances() {
         if (!this.kitTemplates || !this.deskSlots.length) return;
@@ -529,7 +541,7 @@ export class Headquarters {
             'KIT_Rack': this.deskSlots.filter((_, i) => i % 12 === 0)
         };
         const scales = { 'KIT_Desk': [.78, 1, .78], 'KIT_Chair': [.9, .9, .9], 'KIT_Plant': [.8, .8, .8], 'KIT_Rack': [.9, .9, .9] };
-        const offsets = { 'KIT_Chair': [0, 0, .64], 'KIT_Plant': [.66, 0, -.18], 'KIT_Rack': [0, 0, -1.05] };
+        const offsets = { 'KIT_Chair': [0, 0, 1.02], 'KIT_Plant': [.66, 0, -.18], 'KIT_Rack': [0, 0, -1.05] };
         const matrix = new THREE.Matrix4(), local = new THREE.Matrix4();
         for (const [asset, slots] of Object.entries(targets)) {
             const parts = this.kitTemplates.get(asset);
@@ -1219,6 +1231,7 @@ export class Headquarters {
         this.controls.update();
         if (!this.reduced) {
             this.rings.forEach((m, i) => { m.rotation.z = t * (i % 2 ? -.12 : .15); });
+            for (const p of this.gamePulse) p.material.emissiveIntensity = p.base + Math.sin(t * 2.1 + p.phase) * .35;
             this.elevator.position.y = 1.7 + (Math.sin(t * .12) * .5 + .5) * 12;
             this.dust.rotation.y = t * .008;
             this.pulse = Math.max(0, this.pulse - dt * .5);
@@ -1278,6 +1291,79 @@ export class Headquarters {
             this.fpsStart = now;
         }
     }
+    loadGameKit() {
+        return new Promise(resolve => {
+            new GLTFLoader().load('/assets/game-kit.glb', gltf => {
+                if (this.disposed) return resolve(false);
+                const templates = new Map();
+                for (const group of gltf.scene.children) {
+                    if (!group.name?.startsWith('KIT_')) continue;
+                    const clone = group.clone(true);
+                    clone.traverse(o => {
+                        if (!o.isMesh) return;
+                        o.castShadow = false;
+                        o.receiveShadow = true;
+                        const mats = Array.isArray(o.material) ? o.material : [o.material];
+                        for (const m of mats) {
+                            if (!m?.isMeshStandardMaterial) continue;
+                            m.envMapIntensity = 1.1;
+                            m.needsUpdate = true;
+                        }
+                    });
+                    templates.set(group.name, clone);
+                }
+                this.gameTemplates = templates;
+                resolve(true);
+            }, undefined, () => resolve(false));
+        });
+    }
+    placeGameAssets() {
+        if (!this.gameTemplates) return;
+        const place = (asset, x, y, z, rot = 0, scale = 1) => {
+            const template = this.gameTemplates.get(asset);
+            if (!template) return null;
+            const obj = template.clone(true);
+            obj.position.set(x, y, z);
+            obj.rotation.y = rot;
+            obj.scale.setScalar(scale);
+            this.scene.add(obj);
+            if (asset === 'KIT_Arcade' || asset === 'KIT_Neon') {
+                obj.traverse(o => {
+                    const mats = o.isMesh ? (Array.isArray(o.material) ? o.material : [o.material]) : [];
+                    for (const m of mats) if (m?.emissive && m.emissiveIntensity > .05)
+                        this.gamePulse.push({ material: m, base: m.emissiveIntensity, phase: this.gamePulse.length * 1.7 });
+                });
+            }
+            return obj;
+        };
+        // 1F · arrival, coffee, play, lounge
+        place('KIT_CoffeeBar', -6.2, 0, 4.95, .08, .95);
+        place('KIT_Arcade', 6.15, 0, 3.55, -.18, 1.02);
+        place('KIT_Arcade', 7.55, 0, 3.55, -.18, 1.02);
+        place('KIT_Arcade', 8.95, 0, 3.55, -.18, 1.02);
+        place('KIT_Sofa', 3.35, 0, 4.35, -.22, 1.02);
+        place('KIT_Shelf', -12.7, 0, 5.5, .15, .95);
+        place('KIT_Whiteboard', 12.7, 0, 5.55, -.15, .9);
+        place('KIT_Rug', 3.35, .015, 4.35, -.22, 1.15);
+        place('KIT_FloorLamp', 10.2, 0, 4.8, 0, .9);
+        place('KIT_PlantTall', 12.6, 0, 3.0, 0, 1);
+        place('KIT_Neon', 0, 2.55, -7.55, 0, 1.1);
+        // 2F · production workshop
+        place('KIT_ToolCart', 0, 6, 5.7, .05, .95);
+        place('KIT_Shelf', -12.7, 6, 5.5, .12, .95);
+        place('KIT_PlantTall', 12.6, 6, 5.4, 0, 1);
+        place('KIT_PlantTall', -12.6, 6, 3.0, 0, .9);
+        // 3F · engineering & design lounge
+        place('KIT_Conference', 0, 12, 5.35, .08, .82);
+        place('KIT_Whiteboard', 12.7, 12, 5.55, -.15, .9);
+        place('KIT_Shelf', -12.7, 12, 5.5, .12, .95);
+        place('KIT_FloorLamp', -8.7, 12, 3.2, 0, .9);
+        place('KIT_PlantTall', 12.6, 12, 3.0, 0, 1);
+        place('KIT_PlantTall', -12.6, 12, 5.4, 0, .9);
+        this.label('COFFEE + PLAY', -2.2, 2.5, 6.4, 4.8, '#ffcf8c', 'ARRIVAL LOUNGE');
+        this.label('MAKE + TEST', 0, 8.4, 6.3, 4.4, '#8cecff', 'PRODUCTION WORKSHOP');
+        this.label('THINK + BUILD', 0, 14.3, 6.3, 4.4, '#ff9fba', 'ENGINEERING STUDIO');
+    }
     loadAssetKit() {
         // Optional Blender-authored kit. The procedural scene stays complete if the
         // file is absent or fails to parse; this is a quality upgrade, not a dependency.
@@ -1288,7 +1374,7 @@ export class Headquarters {
                 const root = gltf.scene;
                 root.updateWorldMatrix(true, true);
                 for (const group of root.children) {
-                    if (!group.name?.startsWith('KIT_') || !group.isGroup) continue;
+                    if (!group.name?.startsWith('KIT_')) continue;
                     group.updateWorldMatrix(true, true);
                     const inverse = new THREE.Matrix4().copy(group.matrixWorld).invert();
                     const parts = [];

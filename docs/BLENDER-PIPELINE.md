@@ -43,25 +43,32 @@ review**, and **runtime rendering**.
 - Budget per prop: ≤ 2k triangles; kit ≤ 20k triangles; one 2K atlas or 1K per material.
 - UVs: smart project for iteration; final assets use explicit UVs and baked maps.
 - Export: GLB, apply transforms, no cameras/lights, no external textures.
-- Runtime: load via `GLTFLoader` only when `studio-kit.glb` exists; procedural meshes remain the
+- Runtime: load via `GLTFLoader` only when a kit GLB exists; procedural meshes remain the
   fallback, so a missing or failed asset never breaks the floor.
-- Current implementation: the kit desk/chair/plant/rack parts are `InstancedMesh` batches at the
-  49 workstation slots; procedural monitors, status strips and lamps remain live-data surfaces.
+- Current implementation: the workstation kit desk/chair/plant/rack parts are `InstancedMesh`
+  batches at the 49 workstation slots; procedural monitors, status strips and lamps remain
+  live-data surfaces.
+- Game furniture kit: `blender/game_kit.py` exports `KIT_*` groups (coffee bar, arcade, sofa,
+  conference, tool cart, whiteboard, shelf, floor lamp, tall plant, rug, neon) to
+  `public/game-kit.glb`. The runtime clones those groups into the lobby, production floor and
+  engineering lounge, then animates the arcade/neon emissives.
 
 ## Commands
 
 ```bash
 # Optional, requires Blender
 scripts/build-blender-assets.sh
+scripts/build-game-kit.sh
 
 # With an explicit Blender install
 BLENDER=/Applications/Blender.app/Contents/MacOS/Blender scripts/build-blender-assets.sh
+BLENDER=/Applications/Blender.app/Contents/MacOS/Blender scripts/build-game-kit.sh
 
 # MCP path (installs the Blender addon and writes a `blender` MCP entry)
 uvx mcp-for-blender setup
 ```
 
-The Blender script is `blender/agent_studio_kit.py`. It is deterministic and safe to re-run.
+The Blender scripts are `blender/agent_studio_kit.py` and `blender/game_kit.py`. Both are deterministic and safe to re-run.
 The live app does not import Blender, `bpy`, or any Python dependency.
 
 ## Visual review loop
