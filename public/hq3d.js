@@ -16,6 +16,32 @@ const _matrix = new THREE.Matrix4(), _position = new THREE.Vector3(), _scale = n
 const roomLayout = {
     engineering: [-11, -8], engines: [11, -8]
 };
+const ROLE_GROUPS = {
+    engineering: [
+        ['AI / GAMEPLAY', 0x42cafa, ['ai-programmer', 'gameplay-programmer']],
+        ['CORE / SECURITY', 0x56e6c1, ['engine-programmer', 'network-programmer', 'security-engineer']],
+        ['TOOLS / UI', 0xffbd72, ['tools-programmer', 'ui-programmer']],
+        ['DATA / OPS', 0xc7b6ff, ['analytics-engineer', 'devops-engineer', 'performance-analyst']],
+        ['QA', 0xff8fb8, ['qa-tester']]
+    ],
+    engines: [
+        ['GODOT', 0x6ee7b7, ['godot-csharp-specialist', 'godot-gdextension-specialist', 'godot-gdscript-specialist', 'godot-shader-specialist', 'godot-specialist']],
+        ['UNITY', 0x7cc4ff, ['unity-addressables-specialist', 'unity-dots-specialist', 'unity-shader-specialist', 'unity-specialist', 'unity-ui-specialist']],
+        ['UNREAL', 0xff9f5a, ['ue-blueprint-specialist', 'ue-gas-specialist', 'ue-replication-specialist', 'ue-umg-specialist', 'unreal-specialist']]
+    ]
+};
+const ROLE_SHORT = {
+    'ai-programmer': 'AI', 'gameplay-programmer': 'GAMEPLAY', 'engine-programmer': 'ENGINE',
+    'network-programmer': 'NETWORK', 'security-engineer': 'SECURITY', 'tools-programmer': 'TOOLS',
+    'ui-programmer': 'UI', 'analytics-engineer': 'ANALYTICS', 'devops-engineer': 'DEVOPS',
+    'performance-analyst': 'PERF', 'qa-tester': 'QA',
+    'godot-csharp-specialist': 'GODOT C#', 'godot-gdextension-specialist': 'GODOT EXT',
+    'godot-gdscript-specialist': 'GODOT SCRIPT', 'godot-shader-specialist': 'GODOT SHADER',
+    'godot-specialist': 'GODOT', 'unity-addressables-specialist': 'UNITY ADDR',
+    'unity-dots-specialist': 'UNITY DOTS', 'unity-shader-specialist': 'UNITY SHADER', 'unity-specialist': 'UNITY', 'unity-ui-specialist': 'UNITY UI', 'unreal-specialist': 'UNREAL',
+    'ue-blueprint-specialist': 'UE BLUEPRINT', 'ue-gas-specialist': 'UE GAS',
+    'ue-replication-specialist': 'UE REPL', 'ue-umg-specialist': 'UE UMG'
+};
 export class Headquarters {
     constructor(container, { onSelect = () => { }, onFPS = () => { }, onFloor = () => { }, onStats = () => { } } = {}) {
         this.container = container;
@@ -69,6 +95,7 @@ export class Headquarters {
         this.rings = [];
         this.roomSigns = new Map();
         this.roomFloorLabels = new Map();
+        this.roleLabels = new Map();
         this.floorLabels = [];
         this.streams = [];
         this.low = false;
@@ -390,6 +417,32 @@ export class Headquarters {
         if (this.roofSign)
             this.roofSign.visible = visible;
     }
+    roleLabel(text, color) {
+        const canvas = document.createElement('canvas');
+        canvas.width = 512;
+        canvas.height = 96;
+        const g = canvas.getContext('2d');
+        g.fillStyle = 'rgba(7,18,24,.92)';
+        g.beginPath();
+        g.roundRect(4, 4, 504, 88, 18);
+        g.fill();
+        g.lineWidth = 4;
+        g.strokeStyle = `#${color.toString(16).padStart(6, '0')}`;
+        g.stroke();
+        g.textAlign = 'center';
+        g.textBaseline = 'middle';
+        g.font = '700 30px "Avenir Next", "Trebuchet MS", sans-serif';
+        g.fillStyle = '#e8f7ff';
+        g.fillText(ROLE_SHORT[text] || text.replace(/-/g, ' '), 256, 50);
+        const texture = new THREE.CanvasTexture(canvas);
+        texture.colorSpace = THREE.SRGBColorSpace;
+        texture.anisotropy = 4;
+        this.textures.add(texture);
+        const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: texture, transparent: true, depthTest: false, toneMapped: false }));
+        sprite.scale.set(2.8, .52, 1);
+        sprite.renderOrder = 9;
+        return sprite;
+    }
     floorLabel(text, x, z, width, color) {
         const canvas = document.createElement('canvas');
         canvas.width = 1024;
@@ -602,6 +655,9 @@ export class Headquarters {
         for (const room of roster.rooms) {
             const [cx, cz] = roomLayout[room] || [0, 0], members = roster.agents.filter(a => a.room === room), color = ROOM_COLORS[room] || CYAN;
             const y = 0;
+            const groups = ROLE_GROUPS[room] || [], groupOrder = new Map();
+            groups.forEach(([name, , names], i) => names.forEach(n => groupOrder.set(n, i)));
+            members.sort((a, b) => (groupOrder.get(a.name) ?? 99) - (groupOrder.get(b.name) ?? 99) || a.name.localeCompare(b.name));
             this.cyl(cx, 4.75, cz, .018, .7, edge);
             this.cyl(cx, 4.38, cz, .16, .05, this.mat('pendant', 0xffd6a1, .1, 1.8));
             const labelZ = cz + 4.2;
@@ -639,9 +695,10 @@ export class Headquarters {
             members.forEach((role, i) => {
                 const x = cx + (i % cols - (Math.min(cols, members.length) - 1) / 2) * spacing;
                 const z = cz + Math.floor(i / cols) * rowGap - 1;
-                this.desk(x, y, z, color, role.name);
-                this.box(x, y + .53, z + 1.02, .43, .07, .40, this.mat(`seat${color}`, color, .12, .25));
-                const actor = this.createActor(role.name, role, x, y + .08, z + .64, color);
+                const accent = (groups.find(([, , names]) => names.includes(role.name)) || [])[1] || color;
+                this.desk(x, y, z, color, role.name, accent);
+                this.box(x, y + .53, z + 1.02, .43, .07, .40, this.mat(`seat${accent}`, accent, .12, .25));
+                const actor = this.createActor(role.name, role, x, y + .08, z + .64, color, false, accent);
                 actor.desk = new THREE.Vector3(x, y, z);
             });
         }
@@ -682,7 +739,7 @@ export class Headquarters {
             }
         }
     }
-    desk(x, y, z, color, key) {
+    desk(x, y, z, color, key, accent = color) {
         const metal = this.materials.get('metal'), edge = this.materials.get('edge'), box = this.geometries.get('box'), h = hash(key);
         const cyl = this.geo('cyl', () => new THREE.CylinderGeometry(1, 1, 1, 32));
         const fabric = this.mat('fabric', 0x24384c, .15), shade = this.mat('lampShade', 0x2a3644, .7), glow = this.mat('lampGlow', 0xffc887, .1, 2.6);
@@ -702,11 +759,11 @@ export class Headquarters {
         const screenMat = this.mat(`screen${color}`, color, .1, .95);
         if (!screenMat.map) { screenMat.map = this.screenTexture(color); screenMat.color.set(0xffffff); screenMat.needsUpdate = true; }
         this.box(x, y + 1.16, z - .105, .97, .49, .015, screenMat);
-        this.box(x, y + .846, z + .08, .92, .012, .46, this.mat(`deskMat${color}`, color, .18, .12));
-        this.box(x, y + .56, z + .40, 1.18, .34, .028, this.mat(`deskFront${color}`, color, .2, .22));
-        this.box(x, y + .74, z + 1.21, .42, .38, .05, this.mat(`chairBack${color}`, color, .16, .2));
+        this.box(x, y + .846, z + .08, .92, .012, .46, this.mat(`deskMat${accent}`, accent, .18, .12));
+        this.box(x, y + .56, z + .40, 1.18, .34, .028, this.mat(`deskFront${accent}`, accent, .2, .22));
+        this.box(x, y + .74, z + 1.21, .42, .38, .05, this.mat(`chairBack${accent}`, accent, .16, .2));
         for (const side of [-1, 1])
-            this.box(x + side * .505, y + 1.16, z - .105, .016, .48, .016, this.mat(`rgb${color}`, color, .1, 2.4));
+            this.box(x + side * .505, y + 1.16, z - .105, .016, .48, .016, this.mat(`rgb${accent}`, accent, .1, 2.4));
         this.cyl(x + .47, y + .90, z + .20, .045, .10, this.mat('mug', 0xfff0d8, .1));
         this.cyl(x - .58, y + .88, z + .18, .05, .08, this.mat('planter', 0xb9b0a0, .2));
         for (let i = 0; i < 3; i++)
@@ -754,7 +811,7 @@ export class Headquarters {
                 add(cyl, metal, wx, .04, wz, .055, .05, .055);
         });
     }
-    createActor(id, data, x, y, z, color, visitor = false) {
+    createActor(id, data, x, y, z, color, visitor = false, labelColor = color) {
         const g = new THREE.Group();
         g.position.set(x, y, z);
         g.rotation.y = 0;
@@ -918,6 +975,13 @@ export class Headquarters {
         // Status halo, badge and contact shadow are drawn by the shared instanced status layer.
         // `status` starts unknown so the first poll does not replay a completion pulse.
         const actor = { id, data, group: g, parts, limbs, head, headBaseY: head.position.y, home: new THREE.Vector3(x, y, z), target: new THREE.Vector3(x, y, z), phase: (hash(id) % 100) / 10, visitor, busy: false, status: null, burst: 0, nod: 0 };
+        if (!visitor) {
+            const tag = this.roleLabel(id, labelColor);
+            tag.position.y = 2.02 + (hash(id) % 2) * .34;
+            g.add(tag);
+            actor.roleLabel = tag;
+            this.roleLabels.set(id, tag);
+        }
         this.actors.set(id, actor);
         this.actorBatchesDirty = true;
         return actor;
