@@ -102,6 +102,36 @@ b,time,output,.metric b,.count {
   position:fixed;
   inset:0
 }
+
+.role-tag-layer {
+  position:absolute;
+  inset:0;
+  pointer-events:none;
+  overflow:hidden;
+  z-index:4;
+}
+.role-tag {
+  position:absolute;
+  left:0;
+  top:0;
+  color:#f4fbff;
+  font:700 11px/1.15 "Avenir Next", "Trebuchet MS", sans-serif;
+  letter-spacing:.045em;
+  white-space:nowrap;
+  text-shadow:0 0 3px #06121a, 0 0 7px #06121a, 0 1px 2px #06121a;
+  will-change:transform;
+  opacity:.96;
+}
+.role-tag::after {
+  content:"";
+  display:block;
+  height:2px;
+  margin-top:2px;
+  border-radius:2px;
+  background:var(--tag, #7fe5ff);
+  opacity:.9;
+}
+
 #world canvas {
   display:block;
   width:100%;

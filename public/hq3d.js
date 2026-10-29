@@ -64,6 +64,9 @@ export class Headquarters {
         this.renderer.domElement.setAttribute('aria-label', 'Interactive three-dimensional studio headquarters. Drag to orbit, scroll to zoom. Select agents using the roster panel.');
         this.renderer.domElement.setAttribute('tabindex', '0');
         container.append(this.renderer.domElement);
+        this.tagLayer = document.createElement('div');
+        this.tagLayer.className = 'role-tag-layer';
+        container.append(this.tagLayer);
         const environment = new RoomEnvironment(), pmrem = new THREE.PMREMGenerator(this.renderer);
         this.environmentTarget = pmrem.fromScene(environment, .04);
         this.scene.environment = this.environmentTarget.texture;
@@ -96,6 +99,7 @@ export class Headquarters {
         this.roomSigns = new Map();
         this.roomFloorLabels = new Map();
         this.roleLabels = new Map();
+        this.hovered = null;
         this.floorLabels = [];
         this.streams = [];
         this.low = false;
@@ -131,8 +135,22 @@ export class Headquarters {
         this.pointerDown = e => { this.down = [e.clientX, e.clientY]; };
         this.pointerUp = e => { if (!this.down || Math.hypot(e.clientX - this.down[0], e.clientY - this.down[1]) > 5)
             return; this.pick(e); };
+        this.hoverHandler = e => {
+            const rect = this.renderer.domElement.getBoundingClientRect();
+            this.pointer.set((e.clientX - rect.left) / rect.width * 2 - 1, -(e.clientY - rect.top) / rect.height * 2 + 1);
+            this.ray.setFromCamera(this.pointer, this.camera);
+            const hit = this.ray.intersectObjects(this.pickables)[0];
+            const id = hit?.object.userData.actorId || null;
+            if (id !== this.hovered) {
+                this.hovered = id;
+                this.updateRoleTags();
+            }
+        };
+        this.leaveHandler = () => { this.hovered = null; this.updateRoleTags(); };
         this.renderer.domElement.addEventListener('pointerdown', this.pointerDown);
         this.renderer.domElement.addEventListener('pointerup', this.pointerUp);
+        this.renderer.domElement.addEventListener('pointermove', this.hoverHandler);
+        this.renderer.domElement.addEventListener('pointerleave', this.leaveHandler);
         this.keyHandler = e => { if (e.key === 'Home') {
             e.preventDefault();
             this.reset();
@@ -416,32 +434,6 @@ export class Headquarters {
             l.visible = visible;
         if (this.roofSign)
             this.roofSign.visible = visible;
-    }
-    roleLabel(text, color) {
-        const canvas = document.createElement('canvas');
-        canvas.width = 512;
-        canvas.height = 96;
-        const g = canvas.getContext('2d');
-        g.fillStyle = 'rgba(7,18,24,.92)';
-        g.beginPath();
-        g.roundRect(4, 4, 504, 88, 18);
-        g.fill();
-        g.lineWidth = 4;
-        g.strokeStyle = `#${color.toString(16).padStart(6, '0')}`;
-        g.stroke();
-        g.textAlign = 'center';
-        g.textBaseline = 'middle';
-        g.font = '700 30px "Avenir Next", "Trebuchet MS", sans-serif';
-        g.fillStyle = '#e8f7ff';
-        g.fillText(ROLE_SHORT[text] || text.replace(/-/g, ' '), 256, 50);
-        const texture = new THREE.CanvasTexture(canvas);
-        texture.colorSpace = THREE.SRGBColorSpace;
-        texture.anisotropy = 4;
-        this.textures.add(texture);
-        const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: texture, transparent: true, depthTest: false, toneMapped: false }));
-        sprite.scale.set(2.8, .52, 1);
-        sprite.renderOrder = 9;
-        return sprite;
     }
     floorLabel(text, x, z, width, color) {
         const canvas = document.createElement('canvas');
@@ -989,11 +981,13 @@ export class Headquarters {
         // Status halo, badge and contact shadow are drawn by the shared instanced status layer.
         // `status` starts unknown so the first poll does not replay a completion pulse.
         const actor = { id, data, group: g, parts, limbs, head, headBaseY: head.position.y, home: new THREE.Vector3(x, y, z), target: new THREE.Vector3(x, y, z), phase: (hash(id) % 100) / 10, visitor, busy: false, status: null, burst: 0, nod: 0 };
-        if (!visitor) {
-            const tag = this.roleLabel(id, labelColor);
-            tag.position.y = 2.02 + (hash(id) % 2) * .34;
-            g.add(tag);
-            actor.roleLabel = tag;
+        if (!visitor && this.tagLayer) {
+            const tag = document.createElement('div');
+            tag.className = 'role-tag';
+            tag.textContent = ROLE_SHORT[id] || id.replace(/-/g, ' ');
+            tag.style.setProperty('--tag', `#${labelColor.toString(16).padStart(6, '0')}`);
+            this.tagLayer.append(tag);
+            actor.roleTag = tag;
             this.roleLabels.set(id, tag);
         }
         this.actors.set(id, actor);
@@ -1279,6 +1273,8 @@ export class Headquarters {
         for (const [id, a] of this.actors) {
             if (a.visitor && !visitors.has(id)) {
                 this.scene.remove(a.group);
+                this.roleLabels.get(id)?.remove();
+                this.roleLabels.delete(id);
                 this.pickables = this.pickables.filter(p => p.userData.actorId !== id);
                 this.actors.delete(id);
                 this.actorBatchesDirty = true;
@@ -1426,7 +1422,23 @@ export class Headquarters {
         this.camera.position.copy(position);
         this.flight = null;
     } }
-    setRoleLabels(value) { for (const label of this.roleLabels.values()) label.visible = value; }
+    setRoleLabels(value) { this.showRoleLabels = value; if (this.tagLayer) this.tagLayer.style.display = value ? 'block' : 'none'; }
+    updateRoleTags() {
+        if (!this.tagLayer) return;
+        const w = this.container.clientWidth, h = this.container.clientHeight, v = new THREE.Vector3();
+        for (const [id, tag] of this.roleLabels) {
+            const a = this.actors.get(id);
+            if (!a) { tag.remove(); this.roleLabels.delete(id); continue; }
+            a.group.getWorldPosition(v);
+            v.y += 2.12;
+            v.project(this.camera);
+            const x = (v.x * .5 + .5) * w, y = (-v.y * .5 + .5) * h;
+            const on = v.z < 1 && v.z > -1 && x > -40 && x < w + 40 && y > -30 && y < h + 30;
+            const focus = id === this.selected || id === this.hovered;
+            tag.style.display = on && focus ? 'block' : 'none';
+            tag.style.transform = `translate(-50%,-50%) translate(${x}px,${y}px)`;
+        }
+    }
     setParticles(value) { this.particles = value; this.dust.visible = value; this.energy.visible = value; }
     setLow(value) { this.low = value; this.bloom.enabled = !value; this.dpr = value ? 1 : this.dprCap; this.renderer.setPixelRatio(this.dpr); this.composer.setPixelRatio(this.dpr); this.renderer.shadowMap.enabled = !value; this.key.castShadow = !value; this.dust.geometry.setDrawRange(0, value ? 200 : 850); this.updateStreams(); this.resize(); }
     resize() { const w = this.container.clientWidth, h = this.container.clientHeight; this.camera.aspect = w / h; this.camera.updateProjectionMatrix(); this.renderer.setSize(w, h); this.composer?.setSize(w, h); }
@@ -1485,6 +1497,7 @@ export class Headquarters {
             this.focusLight.position.copy(selected.group.position).add(new THREE.Vector3(0, 2, 0));
         }
         this.updateActorInstances();
+        this.updateRoleTags();
         if (this.low)
             this.renderer.render(this.scene, this.camera);
         else
@@ -1640,7 +1653,7 @@ export class Headquarters {
             }, undefined, () => resolve(false));
         });
     }
-    dispose() { this.disposed = true; cancelAnimationFrame(this.frame); this.controls.dispose(); removeEventListener('resize', this.resizeHandler); document.removeEventListener('visibilitychange', this.visibilityHandler); this.renderer.domElement.removeEventListener('pointerdown', this.pointerDown); this.renderer.domElement.removeEventListener('pointerup', this.pointerUp); this.renderer.domElement.removeEventListener('keydown', this.keyHandler); const gs = new Set(this.geometries.values()), ms = new Set(this.materials.values()); this.scene.traverse(o => { o.shadow?.dispose(); if (o.isInstancedMesh)
+    dispose() { this.disposed = true; this.tagLayer?.remove(); cancelAnimationFrame(this.frame); this.controls.dispose(); removeEventListener('resize', this.resizeHandler); document.removeEventListener('visibilitychange', this.visibilityHandler); this.renderer.domElement.removeEventListener('pointerdown', this.pointerDown); this.renderer.domElement.removeEventListener('pointerup', this.pointerUp); this.renderer.domElement.removeEventListener('pointermove', this.hoverHandler); this.renderer.domElement.removeEventListener('pointerleave', this.leaveHandler); this.renderer.domElement.removeEventListener('keydown', this.keyHandler); const gs = new Set(this.geometries.values()), ms = new Set(this.materials.values()); this.scene.traverse(o => { o.shadow?.dispose(); if (o.isInstancedMesh)
         o.dispose(); if (o.geometry)
         gs.add(o.geometry); if (o.material)
         for (const m of Array.isArray(o.material) ? o.material : [o.material])
