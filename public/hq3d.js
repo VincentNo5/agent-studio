@@ -28,15 +28,15 @@ export class Headquarters {
         this.dprCap = Math.min(devicePixelRatio, 1.65);
         this.dpr = this.dprCap;
         this.scene = new THREE.Scene();
-        this.scene.background = new THREE.Color(0x030b16);
-        this.scene.fog = new THREE.FogExp2(0x071222, .014);
+        this.scene.background = new THREE.Color(0xcfe9f7);
+        this.scene.fog = new THREE.FogExp2(0xe8f4f8, .006);
         this.camera = new THREE.PerspectiveCamera(40, 1, .1, 240);
         this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false, powerPreference: 'high-performance' });
         this.renderer.setPixelRatio(this.dpr);
         this.renderer.shadowMap.enabled = true;
         this.renderer.shadowMap.type = THREE.PCFShadowMap;
         this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-        this.renderer.toneMappingExposure = 1.55;
+        this.renderer.toneMappingExposure = .9;
         this.renderer.domElement.setAttribute('aria-label', 'Interactive three-dimensional studio headquarters. Drag to orbit, scroll to zoom. Select agents using the roster panel.');
         this.renderer.domElement.setAttribute('tabindex', '0');
         container.append(this.renderer.domElement);
@@ -82,8 +82,8 @@ export class Headquarters {
         this.clock = 0;
         this.lights();
         this.architecture();
+        this.sky();
         this.city();
-        this.starfield();
         this.kitPromise = this.loadAssetKit();
         this.gameKitPromise = this.loadGameKit();
         this.flushStatics();
@@ -91,7 +91,7 @@ export class Headquarters {
         this.composer = new EffectComposer(this.renderer);
         this.composer.addPass(new RenderPass(this.scene, this.camera));
         // Soft bloom: screens and status lights glow without washing out the building or HUD.
-        this.bloom = new UnrealBloomPass(new THREE.Vector2(1, 1), .52, .52, 1.02);
+        this.bloom = new UnrealBloomPass(new THREE.Vector2(1, 1), .12, .25, 1.2);
         this.composer.addPass(this.bloom);
         this.composer.addPass(new OutputPass());
         // The selection ring is neutral ice, outside the status halo, so it never hides the status colour.
@@ -200,6 +200,45 @@ export class Headquarters {
             this.scene.add(m);
         }
     } this.staticBatches.clear(); }
+    sky() {
+        const c = document.createElement('canvas');
+        c.width = 2;
+        c.height = 512;
+        const g = c.getContext('2d'), grad = g.createLinearGradient(0, 0, 0, 512);
+        grad.addColorStop(0, '#2f8fd8');
+        grad.addColorStop(.45, '#9ed2f2');
+        grad.addColorStop(.72, '#e7f5fb');
+        grad.addColorStop(1, '#f4f0e4');
+        g.fillStyle = grad;
+        g.fillRect(0, 0, 2, 512);
+        const texture = new THREE.CanvasTexture(c);
+        texture.colorSpace = THREE.SRGBColorSpace;
+        this.textures.add(texture);
+        this.scene.background = texture;
+        this.clouds();
+    }
+    clouds() {
+        const map = this.canvasTexture(160, 80, (g) => {
+            g.clearRect(0, 0, 160, 80);
+            g.fillStyle = 'rgba(255,255,255,.9)';
+            for (const [x, y, r] of [[46, 48, 24], [74, 38, 30], [105, 50, 22], [84, 55, 26]])
+                { g.beginPath(); g.arc(x, y, r, 0, Math.PI * 2); g.fill(); }
+        });
+        const material = new THREE.SpriteMaterial({ map, transparent: true, opacity: .38, depthWrite: false });
+        for (let i = 0; i < 9; i++) {
+            const cloud = new THREE.Sprite(material);
+            cloud.position.set(-70 + i * 17, 20 + (i % 4) * 5, -60 - (i % 3) * 10);
+            cloud.scale.set(24, 10, 1);
+            this.scene.add(cloud);
+        }
+    }
+    tree(x, z, s = 1) {
+        const y = -15, trunk = this.mat('trunk', 0x6f5237, .05), leaf = this.mat('leafOutdoor', 0x4f8f5a, .02);
+        this.cyl(x, y + 1.1 * s, z, .13 * s, 2.2 * s, trunk);
+        const geo = this.geo('treeLeaf', () => new THREE.IcosahedronGeometry(1, 1));
+        for (const [dx, dy, dz, r] of [[0, 2.9, 0, 1.25], [-.75, 2.45, .15, .8], [.7, 2.4, -.15, .75], [.15, 2.35, .7, .7]])
+            this.mesh(geo, leaf, x + dx * s, y + dy * s, z + dz * s, r * s, r * .9 * s, r * s);
+    }
     starfield() {
         const count = 900, positions = new Float32Array(count * 3);
         for (let i = 0; i < count; i++) {
@@ -217,8 +256,8 @@ export class Headquarters {
         this.stars = stars;
     }
     lights() {
-        this.scene.add(new THREE.HemisphereLight(0x9bcfff, 0x162132, 3.2));
-        const key = new THREE.DirectionalLight(0xb1d7ff, 4.8);
+        this.scene.add(new THREE.HemisphereLight(0xffffff, 0xa99d82, 1.8));
+        const key = new THREE.DirectionalLight(0xfff1d6, 2.6);
         key.position.set(-12, 32, 20);
         key.castShadow = true;
         key.shadow.mapSize.set(2048, 2048);
@@ -227,7 +266,7 @@ export class Headquarters {
         key.shadow.normalBias = .035;
         this.scene.add(key);
         this.key = key;
-        const rim = new THREE.DirectionalLight(0x3189ff, 2.5);
+        const rim = new THREE.DirectionalLight(0xa8dcff, .8);
         rim.position.set(10, 18, -15);
         this.scene.add(rim);
         // Warm interiors on the working decks, cool rim from the dispatch side: cyan stays the energy accent.
@@ -327,9 +366,9 @@ export class Headquarters {
         return sprite;
     }
     architecture() {
-        const metal = this.mat('metal', 0x172839, .78), edge = this.mat('edge', 0x344857, .8), floor = this.mat('floor', 0x193444, .72), dark = this.mat('dark', 0x081523, .68);
-        const cyan = this.mat('cyan', CYAN, .25, 2.8), soft = this.mat('soft', 0x327b9a, .4, .6), amber = this.mat('amber', AMBER, .3, 3);
-        const glass = this.mat('glass', 0x548ba0, .1, .04, .13);
+        const metal = this.mat('metal', 0xaebbb7, .32), edge = this.mat('edge', 0x94a7a4, .38), floor = this.mat('floor', 0xd6c4aa, .2), dark = this.mat('dark', 0x344545, .45);
+        const cyan = this.mat('cyan', CYAN, .2, 2.4), soft = this.mat('soft', 0x8fb3ad, .3, .35), amber = this.mat('amber', AMBER, .2, 2.4);
+        const glass = this.mat('glass', 0xbfe6f2, .05, .02, .16);
         const shape = new THREE.Shape(), w = 14.5, d = 8.6, r = 2;
         shape.moveTo(-w + r, -d);
         shape.lineTo(w - r, -d);
@@ -467,36 +506,53 @@ export class Headquarters {
         this.drawTasks(null);
         this.label('DISPATCH / LIVE TASKS', 8, 4.7, -5.5, 5, '#a0dbff');
     }
-    plant(x, y, z) {
-        this.cyl(x, y + .28, z, .3, .56, this.mat('planter', 0x69757b, .6));
-        const green = this.mat('leaves', 0x38776e, .05);
-        for (let i = 0; i < 5; i++) {
+    plant(x, y, z, s = 1) {
+        const planter = this.mat('planter', 0xb9b0a0, .2), green = this.mat('leaves', 0x3f7d55, .03);
+        this.cyl(x, y + .28 * s, z, .3 * s, .56 * s, planter);
+        for (let i = 0; i < 7; i++) {
             const a = i * 2.4;
-            this.mesh(this.geo('leaf', () => new THREE.IcosahedronGeometry(1, 0)), green, x + Math.sin(a) * .21, y + .75 + i * .09, z + Math.cos(a) * .21, .2, .6, .16);
+            this.mesh(this.geo('leaf', () => new THREE.IcosahedronGeometry(1, 0)), green, x + Math.sin(a) * .21 * s, y + (.75 + i * .09) * s, z + Math.cos(a) * .21 * s, .2 * s, .6 * s, .16 * s);
         }
     }
-    city() {
-        const building = this.mat('city', 0x0c1a2a, .65), windows = this.mat('windows', 0x357ba5, .2, .7), warm = this.mat('warmWindows', 0xba8151, .2, .8);
-        // Deterministic architectural backdrop; these are environment lights, not agent metrics.
-        for (let i = 0; i < 85; i++) {
-            const h = hash(`city${i}`), a = i * 2.39996, r = 34 + (h % 55), x = Math.cos(a) * r, z = Math.sin(a) * r;
-            const height = 4 + (h % 29), w = 2 + (h % 6);
-            this.box(x, height / 2 - 15, z, w, height, 3 + (h % 5), building);
-            for (let y = -12; y < height - 16; y += 1.8)
-                for (let k = 0; k < 3; k++)
-                    if ((h + k + Math.floor(y)) % 3 !== 0)
-                        this.box(x - w * .33 + k * w * .32, y, z + 2.56, .25, .45, .03, (h + k) % 4 === 0 ? warm : windows);
-            if (i % 3 === 0)
-                this.box(x, height - 14.95, z, w, .05, 4, windows);
+    greenWall(x, y, z, w, h) {
+        const moss = this.mat('moss', 0x355c3f, .05), leaf = this.mat('mossLeaf', 0x5d9a68, .02);
+        this.box(x, y, z, .12, h, w, moss);
+        for (let r = 0; r < 4; r++)
+            for (let c = 0; c < 5; c++)
+                this.mesh(this.geo('wallLeaf', () => new THREE.IcosahedronGeometry(1, 0)), leaf, x + .09, y - h / 2 + .28 + r * (h - .4) / 3, z - w / 2 + .24 + c * (w - .35) / 4, .13, .1, .15);
+    }
+    hangingPlant(x, y, z) {
+        const pot = this.mat('planter', 0xb9b0a0, .2), green = this.mat('leaves', 0x3f7d55, .03);
+        this.cyl(x, y, z, .2, .3, pot);
+        for (let i = 0; i < 5; i++) {
+            const a = i * 1.7;
+            this.box(x + Math.sin(a) * .12, y - .28 - i * .09, z + Math.cos(a) * .12, .035, .5 + i * .1, .035, green);
+            this.mesh(this.geo('leaf', () => new THREE.IcosahedronGeometry(1, 0)), green, x + Math.sin(a) * .22, y - .55 - i * .1, z + Math.cos(a) * .22, .12, .16, .1);
         }
-        this.box(0, -4.2, 0, 33, .7, 21, this.mat('foundation', 0x0a1826, .8));
-        const ground = new THREE.Mesh(new THREE.PlaneGeometry(250, 250), this.mat('ground', 0x050e1a, .7));
+    }
+    beanbag(x, y, z, color) {
+        this.mesh(this.geo('beanbag', () => new THREE.SphereGeometry(1, 16, 10)), this.mat(`bean${color}`, color, .02, .15), x, y + .34, z, .68, .34, .68);
+        this.mesh(this.geo('beanTop', () => new THREE.SphereGeometry(1, 16, 10)), this.mat(`bean${color}`, color, .02, .15), x, y + .5, z, .55, .26, .55);
+    }
+    city() {
+        const lawn = this.mat('lawn', 0x94bd7b, .02), path = this.mat('path', 0xcfc4aa, .1);
+        const ground = new THREE.Mesh(new THREE.PlaneGeometry(260, 260), lawn);
         ground.rotation.x = -Math.PI / 2;
         ground.position.y = -15;
+        ground.receiveShadow = true;
         this.scene.add(ground);
-        const grid = new THREE.GridHelper(220, 60, 0x163b53, 0x0c2133);
-        grid.position.y = -14.9;
-        this.scene.add(grid);
+        this.box(0, -4.2, 0, 33, .7, 21, this.mat('foundation', 0xbfc8bd, .25));
+        for (const [x, z, w, d] of [[0, 16, 24, 3], [0, -16, 24, 3], [18, 0, 3, 24], [-18, 0, 3, 24]])
+            this.box(x, -14.96, z, w, .03, d, path);
+        for (let i = 0; i < 34; i++) {
+            const h = hash(`tree${i}`), a = i * 2.39996, r = 23 + (h % 22);
+            this.tree(Math.cos(a) * r, Math.sin(a) * r, .8 + (h % 5) * .09);
+        }
+        for (let i = 0; i < 12; i++) {
+            const a = i * 2.39996, r = 19;
+            this.cyl(Math.cos(a) * r, -14.72, Math.sin(a) * r, .9, .5, this.mat('planterOutdoor', 0xc8c0ad, .2));
+            this.mesh(this.geo('bush', () => new THREE.IcosahedronGeometry(1, 0)), this.mat('bush', 0x6ca46b, .02), Math.cos(a) * r, -14.2, Math.sin(a) * r, .9, .7, .9);
+        }
     }
     async setRoster(roster) {
         if (this.roster)
@@ -507,7 +563,7 @@ export class Headquarters {
         await Promise.all([this.kitPromise, this.gameKitPromise]);
         const glass = this.materials.get('glass'), edge = this.materials.get('edge');
         if (!this.materials.has('rug'))
-            this.materials.set('rug', new THREE.MeshStandardMaterial({ color: 0x3a2a20, roughness: .92, metalness: .05 }));
+            this.materials.set('rug', new THREE.MeshStandardMaterial({ color: 0xd8cfc2, roughness: .92, metalness: .02 }));
         const rug = this.materials.get('rug');
         for (const room of roster.rooms) {
             const f = floorForRoom(room), [cx, cz] = roomLayout[room] || [0, 0], members = roster.agents.filter(a => a.room === room), color = ROOM_COLORS[room] || CYAN;
@@ -535,12 +591,21 @@ export class Headquarters {
             this.box(cx, y + .122, cz - 1 + (rows - 1) * .75 + .3, width + 2.3, .006, rows * 1.5 + 1.1, rug);
             // Coloured, softly glowing floor inlays turn each department into a distinct game zone.
             const zoneW = width + 2.05, zoneD = rows * 1.5 + .92, zoneZ = cz - 1 + (rows - 1) * .75 + .3;
-            const zone = new THREE.Mesh(new THREE.PlaneGeometry(zoneW, zoneD), new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: .28, roughness: .95, metalness: .04, transparent: true, opacity: .42, depthWrite: false }));
+            const zone = new THREE.Mesh(new THREE.PlaneGeometry(zoneW, zoneD), new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: .14, roughness: .95, metalness: .02, transparent: true, opacity: .22, depthWrite: false }));
             zone.rotation.x = -Math.PI / 2;
             zone.position.set(cx, y + .129, zoneZ);
             zone.renderOrder = 2;
             this.scene.add(zone);
             this.box(cx, y + .134, zoneZ + zoneD / 2, zoneW, .01, .045, this.mat(`zoneLine${color}`, color, .2, 1.6));
+            // Google/Meta-style greenery and acoustic felt panels.
+            const felt = this.mat(`felt${color}`, color, .92, .04);
+            for (const side of [-1, 1])
+                this.box(cx + side * (width / 2 + 1.18), y + 1.7, cz - 2.04, .62, 2.15, .055, felt);
+            this.greenWall(cx - width / 2 - 1.22, y + 1.45, cz + .2, 2.2, 2.1);
+            for (const [dx, dz] of [[-width / 2 - 1.15, 2.55], [width / 2 + 1.15, 2.55], [-width / 2 - 1.15, -2.5], [width / 2 + 1.15, -2.5]])
+                this.plant(cx + dx, y, cz + dz, .78);
+            this.hangingPlant(cx - 2.4, y + 4.7, cz + 2.5);
+            this.hangingPlant(cx + 2.4, y + 4.7, cz + 2.5);
             // Low glass side partitions between neighbouring departments.
             for (const side of [-1, 1]) {
                 const px = cx + side * (width / 2 + 1.15);
@@ -618,6 +683,9 @@ export class Headquarters {
         for (const side of [-1, 1])
             this.box(x + side * .505, y + 1.16, z - .105, .016, .48, .016, this.mat(`rgb${color}`, color, .1, 2.4));
         this.cyl(x + .47, y + .90, z + .20, .045, .10, this.mat('mug', 0xfff0d8, .1));
+        this.cyl(x - .58, y + .88, z + .18, .05, .08, this.mat('planter', 0xb9b0a0, .2));
+        for (let i = 0; i < 3; i++)
+            this.mesh(this.geo('leaf', () => new THREE.IcosahedronGeometry(1, 0)), this.mat('leaves', 0x3f7d55, .03), x - .58 + Math.sin(i * 2.1) * .045, y + .97, z + .18 + Math.cos(i * 2.1) * .045, .04, .11, .03);
         for (let i = 0; i < 3; i++)
             this.box(x - .3, y + 1.3 - i * .12, z - .09, .22 + (hash(key + i) % 5) * .09, .022, .01, this.mat('code', 0x8ebfd0, 0, .55));
         this.box(x, y + .88, z + .19, .65, .025, .23, metal);
@@ -1397,6 +1465,8 @@ export class Headquarters {
         place('KIT_FloorLamp', 10.2, 0, 4.8, 0, .9);
         place('KIT_PlantTall', 12.6, 0, 3.0, 0, 1);
         place('KIT_Neon', 0, 2.55, -7.55, 0, 1.1);
+        this.beanbag(-2.6, 0, 4.2, 0xff9f5a);
+        this.beanbag(-1.2, 0, 4.8, 0x6ee7b7);
         // 2F · production workshop
         place('KIT_ToolCart', 0, 6, 5.7, .05, .95);
         place('KIT_CoffeeBar', -6.2, 6, 4.95, .08, .9);
@@ -1404,6 +1474,8 @@ export class Headquarters {
         place('KIT_Shelf', -12.7, 6, 5.5, .12, .95);
         place('KIT_PlantTall', 12.6, 6, 5.4, 0, 1);
         place('KIT_PlantTall', -12.6, 6, 3.0, 0, .9);
+        this.beanbag(-2.6, 6, 4.2, 0x7cc4ff);
+        this.beanbag(-1.2, 6, 4.8, 0xffd166);
         // 3F · engineering & design lounge
         place('KIT_Conference', 0, 12, 5.35, .08, .82);
         place('KIT_Sofa', -5.6, 12, 4.45, .25, .95);
@@ -1413,6 +1485,8 @@ export class Headquarters {
         place('KIT_FloorLamp', -8.7, 12, 3.2, 0, .9);
         place('KIT_PlantTall', 12.6, 12, 3.0, 0, 1);
         place('KIT_PlantTall', -12.6, 12, 5.4, 0, .9);
+        this.beanbag(2.8, 12, 4.2, 0xc7a6ff);
+        this.beanbag(4.2, 12, 4.8, 0xff8fb1);
         this.label('COFFEE + PLAY', -2.2, 2.5, 6.4, 4.8, '#ffcf8c', 'ARRIVAL LOUNGE');
         this.label('MAKE + TEST', 0, 8.4, 6.3, 4.4, '#8cecff', 'PRODUCTION WORKSHOP');
         this.label('THINK + BUILD', 0, 14.3, 6.3, 4.4, '#ff9fba', 'ENGINEERING STUDIO');

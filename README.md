@@ -32,7 +32,9 @@ The kit desk/chair/plant/rack parts are instanced across the 49 workstation slot
 procedural monitors and status strips stay because they carry live state. A second game-furniture
 kit (`blender/game_kit.py` → `public/game-kit.glb`) adds the coffee bar, arcade row, lounge sofa,
 conference table, tool cart, whiteboards, shelves, lamps and plants. Department floors get a
-coloured inlay and a neon edge, and arcade/neon emissives pulse at runtime.
+coloured inlay and a neon edge, and arcade/neon emissives pulse at runtime. The scene uses a
+daylight sky and a Google/Meta-style campus palette: warm floors, glass offices, felt panels,
+beanbags, a coffee bar, and indoor/outdoor greenery.
 
 <img src="docs/floor-kit.png" alt="Blender kit workstations on the Agent Studio engineering floor" width="720">
 
