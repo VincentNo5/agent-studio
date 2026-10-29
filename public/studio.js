@@ -1,4 +1,4 @@
-import { agentStatuses, workerStatus, countStatuses, STATUS_META, STATUS_ORDER, COMPLETED_WINDOW_MS, isWorking, matchesRole, taskBoard, getJSON, outputBlocks, floorForRoom, ROOM_COLORS, hash } from './studio-data.js';
+import { agentStatuses, workerStatus, countStatuses, STATUS_META, STATUS_ORDER, COMPLETED_WINDOW_MS, isWorking, matchesRole, taskBoard, getJSON, outputBlocks, ROOM_COLORS, hash } from './studio-data.js';
 const $ = id => document.getElementById(id);
 const el = (tag, cls, text) => { const n = document.createElement(tag); if (cls)
     n.className = cls; if (text != null)
@@ -80,10 +80,10 @@ $('hud').innerHTML = `
  <button class="connection" id="connection" data-state="loading" title="Retry connection"><strong id="connection-label">Connecting</strong><small id="clock">Awaiting state</small></button>
  <div class="metrics">${metric('working', 'working', 'Working agents')}${metric('completed', 'completed', 'Completed')}${metric('pending', 'pending', 'Pending / blocked')}<div class="metric" data-status="tasks"><span class="metric-label"><i class="ico">☷</i><span id="metric-board-label">Tasks</span></span><b id="metric-tasks">—</b><small id="metric-tasks-sub">&nbsp;</small></div></div>
  <ul class="legend" aria-label="Status legend">${STATUS_ORDER.map(s => `<li style="--s:${meta(s).color}" title="${meta(s).description}">${icon(s)}${meta(s).label}</li>`).join('')}</ul>
- <nav class="floor-switch" aria-label="Focus a floor"><button data-floor="0" aria-pressed="true">All</button><button data-floor="1" aria-pressed="false">1F</button><button data-floor="2" aria-pressed="false">2F</button><button data-floor="3" aria-pressed="false">3F</button></nav>
+ <nav class="floor-switch" aria-label="Campus view"><button data-floor="0" aria-pressed="true">Campus</button></nav>
  <button class="settings-button" id="settings" aria-label="Rendering settings" title="Rendering settings">⚙</button>
 </header>
-<div class="world-heading"><div class="eyebrow">Headquarters · live spatial view</div><h2 id="world-title">ONE STUDIO. EVERY AGENT.</h2><p id="world-subtitle">Three floors. One connected operation.</p></div>
+<div class="world-heading"><div class="eyebrow">Headquarters · live spatial view</div><h2 id="world-title">ONE STUDIO. EVERY AGENT.</h2><p id="world-subtitle">One open campus. Every team on the same floor.</p></div>
 <nav class="view-links" aria-label="Studio view"><a href="/" ${!isFloor ? 'aria-current="page"' : ''}>Command overview</a><a href="/floor" ${isFloor ? 'aria-current="page"' : ''}>Floor view ↗</a><a href="/anatomy">Anatomy ↗</a></nav>
 <aside class="left-column" aria-label="Agent status, task board and operations">
  <section class="panel agent-status" aria-labelledby="agent-status-title"><div class="panel-head"><h2 id="agent-status-title">Agent status</h2><small id="status-total">—</small></div>
@@ -98,7 +98,7 @@ $('hud').innerHTML = `
  <section class="panel live-work"><div class="panel-head"><h2>Live work</h2><small id="run-tag">—</small></div><p id="run-objective" class="run-objective">Awaiting orchestration state.</p><div id="worker-list" class="worker-list"></div><pre id="live-tail" class="live-tail" hidden></pre></section>
 </aside>
 <div class="scene-hint">Drag to orbit <span>·</span> scroll to zoom <span>·</span> select an agent</div>
-<nav class="panel navigator" aria-label="Building navigator"><div class="mini-tower"><button data-floor="3" aria-label="Engineering and design floor">3F</button><button data-floor="2" aria-label="Production and quality floor">2F</button><button data-floor="1" aria-label="Lobby and dispatch floor">1F</button></div><div class="nav-floors"><button data-floor="0" aria-pressed="true"><small>◈</small><span class="nav-name">Overview</span><span class="floor-badges" data-floor-badges="0"></span></button><button data-floor="1"><small>1F</small><span class="nav-name">Lobby</span><span class="floor-badges" data-floor-badges="1"></span></button><button data-floor="2"><small>2F</small><span class="nav-name">Production</span><span class="floor-badges" data-floor-badges="2"></span></button><button data-floor="3"><small>3F</small><span class="nav-name">Engineering</span><span class="floor-badges" data-floor-badges="3"></span></button></div></nav>
+<nav class="panel navigator" aria-label="Campus navigator"><div class="mini-tower"><button data-floor="0" aria-label="Campus overview">◎</button></div><div class="nav-floors"><button data-floor="0" aria-pressed="true"><small>◈</small><span class="nav-name">Campus</span><span class="floor-badges" data-floor-badges="0"></span></button></div></nav>
 <section class="panel events"><div class="panel-head"><h2>Live events</h2><button data-panel="audit" class="link-button">Audit trail ↗</button></div><div class="event-list" id="events"><p class="empty">Awaiting audit events.</p></div></section>
 <section class="panel preferences" id="preferences" aria-label="Rendering preferences"><label class="toggle-row" for="particles">Particle effects<input type="checkbox" id="particles" checked></label><label class="toggle-row" for="low-performance">Low performance mode<input type="checkbox" id="low-performance"></label><div class="performance"><button id="reset-camera">↺ Reset camera</button><output id="fps">— FPS</output></div></section>
 <footer class="ticker"><strong>Activity</strong><span id="ticker-text">Awaiting observed state changes.</span><span class="scope" id="scope">Read-only telemetry</span></footer>`;
@@ -109,9 +109,9 @@ document.body.append(dialog);
 let world = null, state = null, roster = { rooms: [], agents: [] }, rosterLoaded = false, selected = null, statuses = new Map(), board = null, pickedWorker = null, follow = true, currentPanel = null, selectedLane = null;
 let pollTimer = null, outputTimer = null, clockTimer = null, loading = false, closed = false, logId = null, logGeneration = 0, outputBusy = false, outputCache = null, previous = null, transitions = [];
 let stateError = null, rosterError = null, lastSuccess = null;
-const floorNames = ['ONE STUDIO. EVERY AGENT.', 'AGENT LOBBY & DISPATCH', 'PRODUCTION & QUALITY', 'ENGINEERING & DESIGN'];
-function floorChanged(f) { document.querySelectorAll('[data-floor]').forEach(b => b.setAttribute('aria-pressed', String(Number(b.dataset.floor) === f))); $('world-title').textContent = floorNames[f]; $('world-subtitle').textContent = f ? ['', 'Orca visitors · dispatch · Paseo agents', 'Art · audio · narrative · QA · engines · community', 'Directors · leads · engineering · design'][f] : 'Three floors. One connected operation.'; }
-function focusFloor(f) { world?.focusFloor(f); floorChanged(f); }
+const floorNames = ['ONE CAMPUS. EVERY TEAM.'];
+function floorChanged(f) { document.querySelectorAll('[data-floor]').forEach(b => b.setAttribute('aria-pressed', String(Number(b.dataset.floor) === 0))); $('world-title').textContent = floorNames[0]; $('world-subtitle').textContent = 'One open campus. Every team on the same floor.'; }
+function focusFloor(f) { world?.focusFloor(); floorChanged(0); }
 document.querySelectorAll('[data-floor]').forEach(b => b.onclick = () => focusFloor(Number(b.dataset.floor)));
 document.querySelectorAll('[data-panel]').forEach(b => b.onclick = () => openPanel(b.dataset.panel));
 $('clear-selection').onclick = () => { selected = null; world?.select(null, false); renderDetail(); };
@@ -190,7 +190,7 @@ function renderDetail() {
     avatar.style.setProperty('--s', meta(status).color);
     avatar.dataset.status = status;
     const who = el('div');
-    who.append(el('h3', 'agent-name', name), el('div', 'department', `${room[0].toUpperCase()}${room.slice(1)} · ${floorForRoom(room)}F${worker?.agent ? ' · ' + worker.agent : ''}`));
+    who.append(el('h3', 'agent-name', name), el('div', 'department', `${room[0].toUpperCase()}${room.slice(1)} · Campus${worker?.agent ? ' · ' + worker.agent : ''}`));
     head.append(avatar, who);
     box.append(head);
     if (role?.desc)
@@ -375,7 +375,7 @@ function computeStatuses() {
             map.set(`worker:${w.dispatchId}`, { ...workerStatus(w), worker: w, task: w.taskTitle || w.label || null, since: null, lastEvent: null });
     return map;
 }
-const floorOf = id => id.startsWith('worker:') ? 1 : floorForRoom(roster.agents.find(a => a.name === id)?.room);
+const floorOf = () => 0;
 function badgesFor(entries) {
     const counts = countStatuses(entries);
     return ['working', 'completed'].map(s => `<span class="floor-badge" data-status="${s}" data-zero="${!counts[s]}" style="--s:${meta(s).color}" title="${counts[s]} ${meta(s).label.toLowerCase()}">${icon(s)}${counts[s]}</span>`).join('');
@@ -522,7 +522,7 @@ function renderPanel() {
             row.append(input);
             content.append(row);
         }
-        content.append(el('p', 'dialog-intro', 'Drag to orbit. Scroll or pinch to zoom. Right-drag to pan. When the scene has keyboard focus: 1, 2, 3 focus a floor; Home resets the camera. Reduced-motion preferences are respected.'));
+        content.append(el('p', 'dialog-intro', 'Drag to orbit. Scroll or pinch to zoom. Right-drag to pan. When the scene has keyboard focus, Home resets the camera. Reduced-motion preferences are respected.'));
         content.append(button('Reset camera', () => world?.reset(), 'wide'));
         return;
     }
@@ -543,7 +543,7 @@ function renderPanel() {
             title.append(el('h3', null, role.name), state ? chip(entry?.status || 'idle') : chip('idle', 'Unknown'));
             card.dataset.status = entry?.status || 'idle';
             card.style.setProperty('--s', meta(entry?.status || 'idle').color);
-            card.append(pic, title, el('p', null, `${floorForRoom(role.room)}F · ${role.room}${entry?.evidence ? ' · ' + entry.evidence : ''}`), el('p', null, role.desc), button('Locate agent ↗', () => { dialog.close(); selectAgent(role.name); }, 'wide'));
+            card.append(pic, title, el('p', null, `Campus · ${role.room}${entry?.evidence ? ' · ' + entry.evidence : ''}`), el('p', null, role.desc), button('Locate agent ↗', () => { dialog.close(); selectAgent(role.name); }, 'wide'));
             grid.append(card);
         } if (!grid.children.length)
             grid.append(el('p', 'empty', 'No matching roles.')); };

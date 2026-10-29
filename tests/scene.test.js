@@ -21,17 +21,17 @@ async function buildWorld() {
         globalThis.document = saved;
     }
 }
-test('all 49 roster characters and their stations fit inside their assigned decks', async () => {
+test('all 49 roster characters and their stations fit inside the single campus floor', async () => {
     const world = await buildWorld();
     expect(world.actors.size).toBe(roster.agents.length);
     const structure = world.scene.children.find(m => m.material === world.materials.get('metal'));
     expect(structure).toBeDefined();
     structure.geometry.computeBoundingBox();
-    expect(structure.geometry.boundingBox.max.y).toBeGreaterThan(17);
+    expect(structure.geometry.boundingBox.max.y).toBeGreaterThan(4);
     for (const actor of world.actors.values()) {
-        expect(Math.abs(actor.home.x)).toBeLessThan(13);
-        expect(Math.abs(actor.home.z)).toBeLessThan(7.9);
-        expect([6.08, 12.08]).toContain(actor.home.y);
+        expect(Math.abs(actor.home.x)).toBeLessThan(24);
+        expect(Math.abs(actor.home.z)).toBeLessThan(15);
+        expect(Math.abs(actor.home.y)).toBeLessThan(.2);
     }
 });
 test('polling does not teleport agents and removes visitors no longer on the floor', async () => {

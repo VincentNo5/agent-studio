@@ -3,13 +3,12 @@
 A live **three-dimensional headquarters** for multi-agent work, with a cinematic command
 HUD and two desktop views of the same read-only state.
 
-**Command Overview** (`/`) — the complete three-level tower, task lanes, active roles,
+**Command Overview** (`/`) — the complete single-floor campus, task lanes, active roles,
 agent inspection, live events, and operational panels.
 
-**Studio Floor** (`/floor`) — the same world, initially focused on Engineering & Design,
-with live worker output in the inspection sidebar. Orbit, zoom, select characters, or use
-the floor navigator to inspect any level. All 49 roster roles have stable workstations;
-Orca dispatches occupy the lobby.
+**Studio Floor** (`/floor`) — the same world, with every team neighbourhood on one open
+floor around the central ORCA hub. Orbit, zoom, select characters, or use the campus
+navigator. All 49 roster roles have stable workstations; Orca dispatches occupy the hub.
 
 **Mobile** (`/mobile`) — phone-first single screen (390×844, no scrolling): quota bars, worker
 counts, active agents, rooms. This is the view to open from an iPhone; see
@@ -31,12 +30,12 @@ otherwise the procedural fallback remains the source of truth.
 The kit desk/chair/plant/rack parts are instanced across the 49 workstation slots; the
 procedural monitors and status strips stay because they carry live state. A second game-furniture
 kit (`blender/game_kit.py` → `public/game-kit.glb`) adds the coffee bar, arcade row, lounge sofa,
-conference table, tool cart, whiteboards, shelves, lamps and plants. Department floors get a
+conference table, tool cart, whiteboards, shelves, lamps and plants. Department neighbourhoods get a
 coloured inlay and a neon edge, and arcade/neon emissives pulse at runtime. The scene uses a
 daylight sky and a Google/Meta-style campus palette: warm floors, glass offices, felt panels,
 beanbags, a coffee bar, and indoor/outdoor greenery.
 
-<img src="docs/floor-kit.png" alt="Blender kit workstations on the Agent Studio engineering floor" width="720">
+<img src="docs/floor-kit.png" alt="Blender kit workstations in the Agent Studio team neighbourhood" width="720">
 
 <img src="docs/mobile.png" alt="Mobile view" width="330">
 
@@ -144,8 +143,8 @@ traversal and symlink escapes. The responsive HUD is designed for 1280×720 and 
 use `/mobile` for the phone interface.
 
 - Drag to orbit; scroll/pinch to zoom; right-drag to pan.
-- The top bar and building navigator focus a floor. Reset camera returns to the tower.
-- With the canvas focused, `1`, `2`, `3` focus floors and `Home` resets.
+- The campus navigator and Reset camera return to the full single-floor overview.
+- With the canvas focused, `Home` resets the camera.
 - Click a character, active role, or roster entry to inspect it. Associated dispatches
   offer **View full logs**. Clicking a worker stops automatic worker following.
 - Task lanes filter the task inspector and highlight matching characters.

@@ -7,17 +7,16 @@ import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import { ROOM_COLORS, STATUS_META, floorForRoom, hash, workerStatus } from './studio-data.js';
+import { ROOM_COLORS, STATUS_META, hash, workerStatus } from './studio-data.js';
 const CYAN = 0x36cfff, AMBER = 0xffbd72;
 // Status colours come from the same table as the HUD chips, converted to linear space.
 const STATUS_COLORS = Object.fromEntries(Object.entries(STATUS_META).map(([key, meta]) => [key, new THREE.Color(meta.color)]));
 const BADGE_INDEX = { working: 0, completed: 1, pending: 2, failed: 3, idle: 4 }, BADGE_CELLS = 6;
 const _matrix = new THREE.Matrix4(), _position = new THREE.Vector3(), _scale = new THREE.Vector3(), _color = new THREE.Color(), _quat = new THREE.Quaternion(), _ice = new THREE.Color(0xdff6ff);
 const roomLayout = {
-    directors: [-8.6, -4.4], leads: [-8.6, 3.3], engineering: [6.8, -4.4], design: [6.8, 3.3],
-    art: [-9, -4.6], audio: [0, -4.6], narrative: [9, -4.6], qa: [-9, 3.8], engines: [0, 3.8], community: [9, 3.8]
+    directors: [-18, -9], leads: [-9, -9], engineering: [0, -9], design: [9, -9], art: [18, -9],
+    audio: [-18, 9], narrative: [-9, 9], qa: [0, 9], engines: [9, 9], community: [18, 9]
 };
-const floorNames = ['AGENT LOBBY & DISPATCH', 'PRODUCTION & QUALITY', 'ENGINEERING & DESIGN'];
 export class Headquarters {
     constructor(container, { onSelect = () => { }, onFPS = () => { }, onFloor = () => { }, onStats = () => { } } = {}) {
         this.container = container;
@@ -29,14 +28,14 @@ export class Headquarters {
         this.dpr = this.dprCap;
         this.scene = new THREE.Scene();
         this.scene.background = new THREE.Color(0xcfe9f7);
-        this.scene.fog = new THREE.FogExp2(0xe8f4f8, .006);
+        this.scene.fog = new THREE.FogExp2(0xe8f4f8, .0015);
         this.camera = new THREE.PerspectiveCamera(40, 1, .1, 240);
         this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false, powerPreference: 'high-performance' });
         this.renderer.setPixelRatio(this.dpr);
         this.renderer.shadowMap.enabled = true;
         this.renderer.shadowMap.type = THREE.PCFShadowMap;
         this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-        this.renderer.toneMappingExposure = .9;
+        this.renderer.toneMappingExposure = .72;
         this.renderer.domElement.setAttribute('aria-label', 'Interactive three-dimensional studio headquarters. Drag to orbit, scroll to zoom. Select agents using the roster panel.');
         this.renderer.domElement.setAttribute('tabindex', '0');
         container.append(this.renderer.domElement);
@@ -109,9 +108,8 @@ export class Headquarters {
         this.renderer.domElement.addEventListener('pointerup', this.pointerUp);
         this.keyHandler = e => { if (e.key === 'Home') {
             e.preventDefault();
-            this.focusFloor(0);
-        } if (['1', '2', '3'].includes(e.key))
-            this.focusFloor(Number(e.key)); };
+            this.reset();
+        } };
         this.renderer.domElement.addEventListener('keydown', this.keyHandler);
         this.resizeHandler = () => this.resize();
         addEventListener('resize', this.resizeHandler);
@@ -239,25 +237,9 @@ export class Headquarters {
         for (const [dx, dy, dz, r] of [[0, 2.9, 0, 1.25], [-.75, 2.45, .15, .8], [.7, 2.4, -.15, .75], [.15, 2.35, .7, .7]])
             this.mesh(geo, leaf, x + dx * s, y + dy * s, z + dz * s, r * s, r * .9 * s, r * s);
     }
-    starfield() {
-        const count = 900, positions = new Float32Array(count * 3);
-        for (let i = 0; i < count; i++) {
-            const r = 70 + Math.random() * 80, a = Math.random() * Math.PI * 2, y = (Math.random() - .2) * 90;
-            positions[i * 3] = Math.cos(a) * r;
-            positions[i * 3 + 1] = y;
-            positions[i * 3 + 2] = Math.sin(a) * r;
-        }
-        const geometry = new THREE.BufferGeometry();
-        geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-        const material = new THREE.PointsMaterial({ color: 0xbfe9ff, size: .38, transparent: true, opacity: .9, depthWrite: false, sizeAttenuation: true });
-        const stars = new THREE.Points(geometry, material);
-        stars.frustumCulled = false;
-        this.scene.add(stars);
-        this.stars = stars;
-    }
     lights() {
-        this.scene.add(new THREE.HemisphereLight(0xffffff, 0xa99d82, 1.8));
-        const key = new THREE.DirectionalLight(0xfff1d6, 2.6);
+        this.scene.add(new THREE.HemisphereLight(0xffffff, 0xa99d82, 1.4));
+        const key = new THREE.DirectionalLight(0xfff1d6, 2.2);
         key.position.set(-12, 32, 20);
         key.castShadow = true;
         key.shadow.mapSize.set(2048, 2048);
@@ -269,17 +251,15 @@ export class Headquarters {
         const rim = new THREE.DirectionalLight(0xa8dcff, .8);
         rim.position.set(10, 18, -15);
         this.scene.add(rim);
-        // Warm interiors on the working decks, cool rim from the dispatch side: cyan stays the energy accent.
-        for (let f = 0; f < 3; f++) {
-            const light = new THREE.PointLight(f ? 0xffb066 : AMBER, f ? 125 : 90, 22, 2);
-            light.position.set(-7, f * 6 + 3.6, -2.5);
-            this.scene.add(light);
-            const cool = new THREE.PointLight(0x3f9dff, f ? 50 : 65, 20, 2);
-            cool.position.set(7, f * 6 + 3, 2);
-            this.scene.add(cool);
-        }
-        const hub = new THREE.PointLight(CYAN, 48, 13, 2);
-        hub.position.set(0, 2, 3);
+        // One open floor: warm collaboration pools, cool task light and a cyan hub.
+        const warm = new THREE.PointLight(AMBER, 130, 30, 2);
+        warm.position.set(-12, 4, 0);
+        this.scene.add(warm);
+        const cool = new THREE.PointLight(0x3f9dff, 70, 28, 2);
+        cool.position.set(12, 4, 0);
+        this.scene.add(cool);
+        const hub = new THREE.PointLight(CYAN, 55, 16, 2);
+        hub.position.set(0, 2, 0);
         this.scene.add(hub);
     }
     // Dark glass plate: vertical gradient, 1px hairline, inner top highlight and a department accent bar.
@@ -366,10 +346,10 @@ export class Headquarters {
         return sprite;
     }
     architecture() {
-        const metal = this.mat('metal', 0xaebbb7, .32), edge = this.mat('edge', 0x94a7a4, .38), floor = this.mat('floor', 0xd6c4aa, .2), dark = this.mat('dark', 0x344545, .45);
+        const metal = this.mat('metal', 0x9aa9a5, .32), edge = this.mat('edge', 0x859995, .38), floor = this.mat('floor', 0xc9b69d, .2), dark = this.mat('dark', 0x344545, .45);
         const cyan = this.mat('cyan', CYAN, .2, 2.4), soft = this.mat('soft', 0x8fb3ad, .3, .35), amber = this.mat('amber', AMBER, .2, 2.4);
-        const glass = this.mat('glass', 0xbfe6f2, .05, .02, .16);
-        const shape = new THREE.Shape(), w = 14.5, d = 8.6, r = 2;
+        const glass = this.mat('glass', 0xbfe6f2, .05, .02, .08);
+        const shape = new THREE.Shape(), w = 24, d = 15, r = 3;
         shape.moveTo(-w + r, -d);
         shape.lineTo(w - r, -d);
         shape.quadraticCurveTo(w, -d, w, -d + r);
@@ -380,131 +360,93 @@ export class Headquarters {
         shape.lineTo(-w, -d + r);
         shape.quadraticCurveTo(-w, -d, -w + r, -d);
         const slabGeo = this.geo('slab', () => { const g = new THREE.ExtrudeGeometry(shape, { depth: .34, bevelEnabled: true, bevelSegments: 2, steps: 1, bevelSize: .12, bevelThickness: .12, curveSegments: 12 }); g.rotateX(-Math.PI / 2); return g; });
-        // One tower, tied together by continuous structural columns and an elevator.
-        this.box(0, -2, 0, 28, 2, 16, dark);
-        for (const x of [-13.7, 13.7])
-            for (const z of [-6, 5]) {
-                this.box(x, 8, z, .52, 19, .6, metal);
-                this.box(x + .29, 8, z, .045, 19, .13, soft);
-                for (let y = 0; y < 18; y += 1.5)
-                    this.box(x, y, z + .32, .58, .06, .06, edge);
+        // One continuous campus floor: no stacked storeys, no elevator core.
+        this.box(0, -2, 0, 51, 2, 33, dark);
+        this.mesh(slabGeo, floor, 0, -.34, 0);
+        this.mesh(slabGeo, metal, 0, -.68, 0, 1, .45, 1);
+        for (const x of [-23.5, 23.5])
+            for (const z of [-14.5, 14.5]) {
+                this.box(x, 2.6, z, .45, 5.2, .45, metal);
+                this.box(x + (x < 0 ? .24 : -.24), 2.6, z, .045, 5.2, .13, soft);
             }
-        this.box(0, 8, -7.2, 3, 18, 2.2, dark);
-        this.box(0, 8, -5.99, 2.5, 18, .05, glass);
-        for (const x of [-1.3, 1.3])
-            this.box(x, 8, -5.9, .06, 18, .06, cyan);
-        for (let y = 0; y < 17; y += .65)
-            this.box(0, y, -6.05, 2.5, .035, .03, edge);
-        this.elevator = this.box(0, 1.5, -6.5, 2.3, 2.8, 1.8, glass, this.scene, false);
-        for (let f = 0; f < 3; f++) {
-            const y = f * 6;
-            this.mesh(slabGeo, floor, 0, y - .34, 0);
-            this.mesh(slabGeo, metal, 0, y - .68, 0, 1, .45, 1);
-            // Horizontal deck edge lights, interrupted by metal mullions.
-            this.box(0, y - .27, 8.65, 24.9, .065, .09, cyan);
-            this.box(0, y - .59, 8.57, 25, .04, .08, soft);
-            this.box(0, y + .012, 8.78, 26, .025, .06, this.mat(`deckGlow${f}`, [AMBER, CYAN, 0xff6b9d][f], .2, 2.2));
-            for (const x of [-14.45, 14.45])
-                this.box(x, y - .3, 0, .05, .07, 12.6, soft);
-            for (let x = -12; x <= 12; x += 2) {
-                this.box(x, y + 1.05, 8.1, .07, 1.6, .07, edge);
-                this.box(x + .96, y + .92, 8.1, 1.85, 1.3, .035, glass);
-                this.box(x + .96, y + 1.77, 8.1, 1.93, .055, .06, edge);
-            }
-            // Rear enclosure: transparent windows, solid piers and warm practicals.
-            this.box(0, y + 2.5, -8, 25, 5, .035, glass);
-            for (let x = -12; x <= 12; x += 3) {
-                this.box(x, y + 2.5, -8, .16, 5, .22, metal);
-                this.box(x + .18, y + 2.8, -7.84, .06, 3.8, .06, amber);
-            }
-            this.box(0, y + 4.85, -8, 26, .22, .4, metal);
-            // Warm ceiling light strips: under the deck above, or under the crown frame on 3F.
-            const warmStrip = this.mat('ceilingWarm', 0xffd09a, .1, 2.4);
-            if (f < 2)
-                for (const z of [-4.8, -.6, 3.6])
-                    for (const x of [-7, 7]) {
-                        this.box(x, y + 5.47, z, 9.6, .06, .26, metal);
-                        this.box(x, y + 5.42, z, 9.2, .035, .12, warmStrip);
-                    }
-            else {
-                this.box(0, y + 4.98, -7.55, 24, .035, .12, warmStrip);
-                for (const x of [-13.25, 13.25])
-                    this.box(x, y + 4.98, -1, .12, .035, 12.5, warmStrip);
-            }
-            for (const x of [-13.8, 13.8]) {
-                this.box(x, y + 2.5, -3.4, .035, 4.5, 8.7, glass);
-                this.box(x, y + 4.85, -3.3, .4, .24, 9, metal);
-                this.box(x, y + 4.68, -3.3, .08, .04, 8.6, amber);
-            }
-            // Inlaid floor grid, circulation routes and contact-shadow pads.
-            for (let x = -12; x <= 12; x += 3)
-                this.box(x, y + .025, 0, .015, .01, 15, edge);
-            for (let z = -6; z <= 6; z += 3)
-                this.box(0, y + .026, z, 26, .01, .015, edge);
-            for (const x of [-3.2, 3.2])
-                this.box(x, y + .037, 2, .035, .012, 10, soft);
-            for (const x of [-12.7, 12.7])
-                for (const z of [-6.7, 6.8])
-                    this.plant(x, y, z);
-            // Stair flights connect adjacent decks beside the elevator spine.
-            if (f < 2)
-                for (let i = 0; i < 19; i++)
-                    this.box(11.7, y + i * .316 + .16, -6.8 + i * .49, 2.3, .14, .5, edge);
-            this.floorLabels.push(this.plate(`${f + 1}F  ${floorNames[f]}`, -8, y + .5, 9.5, 7.4, '#a6eaff'));
-        }
-        // Crown roof frame keeps the upper storey open and legible.
-        this.box(0, 17.15, -7.9, 28, .26, .65, metal);
-        this.box(0, 17.34, -7.9, 26, .035, .3, cyan);
-        for (const x of [-13.6, 13.6])
-            this.box(x, 17.15, -1, .55, .26, 14, metal);
-        this.roofSign = this.label('AGENT STUDIO', 0, 18, -7.5, 7.8, '#bdedff', 'AUTONOMOUS OPERATIONS / HEADQUARTERS');
-        // Lobby core and upper holographic planning table.
-        for (const [f, radius] of [[0, 3], [2, 2.25]]) {
-            const y = f * 6, z = f ? 0 : 2;
-            this.cyl(0, y + .16, z, radius + .65, .3, dark);
-            this.cyl(0, y + .39, z, radius, .24, edge);
-            this.cyl(0, y + .6, z, radius - .3, .17, metal);
-            for (let i = 0; i < 3; i++)
-                this.rings.push(this.ring(0, y + .35 + i * .34, z, radius - i * .43, .035, cyan));
-            this.cyl(0, y + .69, z, radius - .6, .04, this.mat('hologramSurface', 0x087ba5, .65, .8, .65));
-            const orb = this.mesh(this.geo('orb', () => new THREE.IcosahedronGeometry(1, 2)), this.mat('orb', 0x4ccfff, .1, 1.3, .22), 0, y + 1.9, z, f ? .7 : 1, f ? .7 : 1, f ? .7 : 1, this.scene, false);
-            const wire = new THREE.LineSegments(new THREE.WireframeGeometry(orb.geometry), new THREE.LineBasicMaterial({ color: 0x8cecff, transparent: true, opacity: .7 }));
-            orb.add(wire);
-            this.rings.push(orb);
-            const halo = this.ring(0, y + 1.9, z, f ? 1 : 1.4, .018, cyan);
-            halo.rotation.x = .8;
-            this.rings.push(halo);
-            this.label(f ? 'PLANNING ARRAY' : 'ORCA HUB', 0, y + 1.05, z + radius, f ? 3.8 : 4.8, '#7fe5ff');
-            // Transparent tapered shafts suggest scattered light, without a screen overlay.
-            const shaftGeo = this.geo(`shaft${f}`, () => new THREE.CylinderGeometry(radius - .5, .45, 3.5, 32, 1, true));
-            const shaft = this.mesh(shaftGeo, this.mat('shaft', 0x2b9dcc, 0, .8, .035), 0, y + 2.4, z, 1, 1, 1, this.scene, false);
-            shaft.castShadow = false;
-        }
-        // Lobby reception, visitor benches, Paseo bay and real task display.
-        this.box(-8, .85, -3.6, 6, 1.5, 1.4, metal);
-        this.box(-8, 1.65, -3.6, 6.1, .15, 1.7, edge);
-        this.box(-8, .9, -2.86, 5, .065, .02, amber);
-        this.label('PASEO', -8, 3.3, -5.9, 4, '#ffcf8c', 'CONNECTED AGENT BAY');
-        this.label('VISITOR ARRIVALS', -8, 2.4, 4.7, 4.3, '#90eaff');
+        // Glass perimeter and open sky: the whole studio reads as one Google/Meta-style floor.
+        this.box(0, 1.7, 15, 47, 3.4, .03, glass);
+        this.box(0, 1.7, -15, 47, 3.4, .03, glass);
+        this.box(-24, 1.7, 0, .03, 3.4, 30, glass);
+        this.box(24, 1.7, 0, .03, 3.4, 30, glass);
+        this.box(0, .02, 15.16, 47, .03, .06, cyan);
+        this.box(0, .02, -15.16, 47, .03, .06, cyan);
+        this.box(-24.16, .02, 0, .06, .03, 30, cyan);
+        this.box(24.16, .02, 0, .06, .03, 30, cyan);
+        for (let x = -20; x <= 20; x += 4)
+            this.box(x, .025, 0, .015, .01, 29, edge);
+        for (let z = -12; z <= 12; z += 4)
+            this.box(0, .026, z, 47, .01, .015, edge);
+        for (let z = -13; z <= 13; z += 1.25)
+            this.box(0, .028, z, 47, .004, .006, this.mat('plankSeam', 0xb49d82, .05));
         for (const x of [-8, 8])
-            for (const z of [3.5, 5.8]) {
-                this.box(x, .48, z, 3.5, .4, .75, dark);
-                this.box(x, .86, z - .4, 3.5, .7, .18, metal);
-                for (const leg of [-1.3, 1.3])
-                    this.box(x + leg, .2, z, .1, .5, .6, edge);
-            }
+            this.box(x, .037, 0, .035, .012, 29, soft);
+        // Open pergola frames and pendant pools keep the single floor architectural without a roof.
+        for (const z of [-12, 0, 12])
+            this.box(0, 5.2, z, 48, .12, .18, metal);
+        for (const x of [-16, -8, 0, 8, 16])
+            this.box(x, 5.2, 0, .18, .12, 30, metal);
+        // Central collaboration hub and ORCA table.
+        const hubR = 3.4;
+        this.cyl(0, .16, 0, hubR + .65, .3, dark);
+        this.cyl(0, .39, 0, hubR, .24, edge);
+        this.cyl(0, .6, 0, hubR - .3, .17, metal);
+        for (let i = 0; i < 3; i++)
+            this.rings.push(this.ring(0, .35 + i * .34, 0, hubR - i * .43, .035, cyan));
+        this.cyl(0, .69, 0, hubR - .6, .04, this.mat('hologramSurface', 0x087ba5, .65, .8, .65));
+        const orb = this.mesh(this.geo('orb', () => new THREE.IcosahedronGeometry(1, 2)), this.mat('orb', 0x4ccfff, .1, 1.3, .22), 0, 1.9, 0, 1, 1, 1, this.scene, false);
+        const wire = new THREE.LineSegments(new THREE.WireframeGeometry(orb.geometry), new THREE.LineBasicMaterial({ color: 0x8cecff, transparent: true, opacity: .7 }));
+        orb.add(wire);
+        this.rings.push(orb);
+        const halo = this.ring(0, 1.9, 0, 1.4, .018, cyan);
+        halo.rotation.x = .8;
+        this.rings.push(halo);
+        this.label('ORCA HUB', 0, 1.05, hubR, 4.8, '#7fe5ff', 'ONE CAMPUS · EVERY TEAM');
+        const shaftGeo = this.geo('shaft', () => new THREE.CylinderGeometry(hubR - .5, .45, 3.5, 32, 1, true));
+        const shaft = this.mesh(shaftGeo, this.mat('shaft', 0x2b9dcc, 0, .8, .035), 0, 2.4, 0, 1, 1, 1, this.scene, false);
+        shaft.castShadow = false;
+        // Reception and live task display at opposite ends of the open floor.
+        this.box(-17, .85, 12.6, 6, 1.5, 1.4, metal);
+        this.box(-17, 1.65, 12.6, 6.1, .15, 1.7, edge);
+        this.box(-17, .9, 13.34, 5, .065, .02, amber);
+        this.label('PASEO', -17, 3.3, 14.2, 4, '#ffcf8c', 'CONNECTED AGENT BAY');
+        this.label('WELCOME', -17, 2.4, 11.6, 4.3, '#90eaff', 'VISITOR ARRIVALS');
         this.taskCanvas = document.createElement('canvas');
         this.taskCanvas.width = 768;
         this.taskCanvas.height = 512;
         this.taskTexture = new THREE.CanvasTexture(this.taskCanvas);
         this.taskTexture.colorSpace = THREE.SRGBColorSpace;
         this.textures.add(this.taskTexture);
-        this.box(8, 2.4, -5.8, 6.8, 3.8, .4, metal);
+        this.box(0, 2.4, -14.6, 6.8, 3.8, .4, metal);
         const screen = new THREE.Mesh(new THREE.PlaneGeometry(6.35, 3.4), new THREE.MeshBasicMaterial({ map: this.taskTexture }));
-        screen.position.set(8, 2.4, -5.56);
+        screen.position.set(0, 2.4, -14.36);
         this.scene.add(screen);
         this.drawTasks(null);
-        this.label('DISPATCH / LIVE TASKS', 8, 4.7, -5.5, 5, '#a0dbff');
+        this.label('DISPATCH / LIVE TASKS', 0, 4.7, -14.3, 5, '#a0dbff');
+        this.roofSign = this.label('AGENT STUDIO', 0, 7.2, -14.5, 7.8, '#bdedff', 'AUTONOMOUS OPERATIONS / ONE OPEN CAMPUS');
+        this.floorLabels.push(this.plate('AGENT CAMPUS  ·  ONE FLOOR', -14, .5, 15.6, 7.4, '#a6eaff'));
+        for (const x of [-22, 22])
+            for (const z of [-13, 13])
+                this.plant(x, 0, z, 1.15);
+    }
+    cafeTable(x, z) {
+        const wood = this.mat('tableWood', 0xa77b52, .08), edge = this.mat('edge', 0x859995, .38);
+        this.box(x, .74, z, 3.8, .12, 1.35, wood);
+        for (const sx of [-1.55, 1.55])
+            for (const sz of [-.45, .45])
+                this.box(x + sx, .36, z + sz, .08, .72, .08, edge);
+        for (const sz of [-1.05, 1.05]) {
+            this.box(x, .44, z + sz, 3.2, .09, .34, wood);
+            for (const sx of [-1.2, 1.2])
+                this.box(x + sx, .22, z + sz, .08, .44, .08, edge);
+        }
+        this.plant(x - 1.9, 0, z + .95, .55);
+        this.plant(x + 1.9, 0, z - .95, .55);
     }
     plant(x, y, z, s = 1) {
         const planter = this.mat('planter', 0xb9b0a0, .2), green = this.mat('leaves', 0x3f7d55, .03);
@@ -520,15 +462,6 @@ export class Headquarters {
         for (let r = 0; r < 4; r++)
             for (let c = 0; c < 5; c++)
                 this.mesh(this.geo('wallLeaf', () => new THREE.IcosahedronGeometry(1, 0)), leaf, x + .09, y - h / 2 + .28 + r * (h - .4) / 3, z - w / 2 + .24 + c * (w - .35) / 4, .13, .1, .15);
-    }
-    hangingPlant(x, y, z) {
-        const pot = this.mat('planter', 0xb9b0a0, .2), green = this.mat('leaves', 0x3f7d55, .03);
-        this.cyl(x, y, z, .2, .3, pot);
-        for (let i = 0; i < 5; i++) {
-            const a = i * 1.7;
-            this.box(x + Math.sin(a) * .12, y - .28 - i * .09, z + Math.cos(a) * .12, .035, .5 + i * .1, .035, green);
-            this.mesh(this.geo('leaf', () => new THREE.IcosahedronGeometry(1, 0)), green, x + Math.sin(a) * .22, y - .55 - i * .1, z + Math.cos(a) * .22, .12, .16, .1);
-        }
     }
     beanbag(x, y, z, color) {
         this.mesh(this.geo('beanbag', () => new THREE.SphereGeometry(1, 16, 10)), this.mat(`bean${color}`, color, .02, .15), x, y + .34, z, .68, .34, .68);
@@ -566,25 +499,24 @@ export class Headquarters {
             this.materials.set('rug', new THREE.MeshStandardMaterial({ color: 0xd8cfc2, roughness: .92, metalness: .02 }));
         const rug = this.materials.get('rug');
         for (const room of roster.rooms) {
-            const f = floorForRoom(room), [cx, cz] = roomLayout[room] || [0, 0], members = roster.agents.filter(a => a.room === room), color = ROOM_COLORS[room] || CYAN;
-            const y = (f - 1) * 6;
-            const sign = this.label(room.toUpperCase(), cx, y + 3.55, cz - 1.3, room === 'engineering' ? 5 : 3.8, `#${color.toString(16).padStart(6, '0')}`);
+            const [cx, cz] = roomLayout[room] || [0, 0], members = roster.agents.filter(a => a.room === room), color = ROOM_COLORS[room] || CYAN;
+            const y = 0;
+            const sign = this.label(room.toUpperCase(), cx, y + 3.45, cz, 4.2, `#${color.toString(16).padStart(6, '0')}`);
             sign.userData.room = room;
             this.roomSigns.set(room, sign);
-            this.box(cx, y + 3.20, cz - 1.3, room === 'engineering' ? 5 : 3.8, .025, .025, this.mat(`roomNeon${color}`, color, .2, 2.4));
+            this.cyl(cx, 4.75, cz, .018, .7, edge);
+            this.cyl(cx, 4.38, cz, .16, .05, this.mat('pendant', 0xffd6a1, .1, 1.8));
+            this.box(cx, y + 3.10, cz, 4.2, .025, .025, this.mat(`roomNeon${color}`, color, .2, 2.4));
             const neon = this.mat(`roomNeon${color}`, color, .2, 2.4);
             for (const side of [-1, 1])
-                this.box(cx + side * (room === 'engineering' ? 4 : 3.3), y + 1.55, cz - 2.04, .035, 3.0, .035, neon);
+                this.box(cx + side * 4.1, y + 1.55, cz, .035, 2.8, .035, neon);
             const beaconMat = this.mat(`beacon${color}`, color, .1, 2.8);
             const beacon = new THREE.Mesh(this.geo('beacon', () => new THREE.OctahedronGeometry(.22, 0)), beaconMat);
-            beacon.position.set(cx, y + 4.55, cz - 1.3);
+            beacon.position.set(cx, y + 4.35, cz);
             this.scene.add(beacon);
-            this.beacons.push({ mesh: beacon, baseY: y + 4.55, phase: cx * .2 });
-            // Room partitions and low frame imply glass offices without hiding occupants.
-            this.box(cx, y + 1.6, cz - 2.1, f === 3 ? 8 : 6.6, 3.1, .025, glass);
-            this.box(cx, y + 3.18, cz - 2.1, f === 3 ? 8 : 6.6, .06, .06, edge);
-            this.box(cx, y + .16, cz - 2.1, f === 3 ? 8 : 6.6, .05, .06, this.materials.get('soft'));
-            const cols = f === 3 ? 4 : members.length > 9 ? 5 : 3;
+            this.beacons.push({ mesh: beacon, baseY: y + 4.35, phase: cx * .2 });
+            // Open-plan neighbourhood: no enclosing office walls, only low side planters.
+            const cols = members.length > 9 ? 5 : 4;
             const spacing = cols === 5 ? 1.45 : 1.75;
             const rows = Math.ceil(members.length / cols), width = (Math.min(cols, members.length) - 1) * spacing;
             // Warm floor zone under each department: warm interiors against the cool deck and cyan accents.
@@ -599,17 +531,16 @@ export class Headquarters {
             this.box(cx, y + .134, zoneZ + zoneD / 2, zoneW, .01, .045, this.mat(`zoneLine${color}`, color, .2, 1.6));
             // Google/Meta-style greenery and acoustic felt panels.
             const felt = this.mat(`felt${color}`, color, .92, .04);
-            for (const side of [-1, 1])
-                this.box(cx + side * (width / 2 + 1.18), y + 1.7, cz - 2.04, .62, 2.15, .055, felt);
-            this.greenWall(cx - width / 2 - 1.22, y + 1.45, cz + .2, 2.2, 2.1);
-            for (const [dx, dz] of [[-width / 2 - 1.15, 2.55], [width / 2 + 1.15, 2.55], [-width / 2 - 1.15, -2.5], [width / 2 + 1.15, -2.5]])
-                this.plant(cx + dx, y, cz + dz, .78);
-            this.hangingPlant(cx - 2.4, y + 4.7, cz + 2.5);
-            this.hangingPlant(cx + 2.4, y + 4.7, cz + 2.5);
+            for (const side of [-1, 1]) {
+                this.box(cx + side * (width / 2 + 1.18), y + 1.25, cz, .62, 1.45, .055, felt);
+                this.plant(cx + side * (width / 2 + 1.18), y, cz + 2.5, .78);
+                this.plant(cx + side * (width / 2 + 1.18), y, cz - 2.5, .78);
+            }
+            this.greenWall(cx - width / 2 - 1.22, y + 1.15, cz + .2, 2.2, 1.6);
             // Low glass side partitions between neighbouring departments.
             for (const side of [-1, 1]) {
                 const px = cx + side * (width / 2 + 1.15);
-                if (Math.abs(px) > 13.2 || (f === 3 && Math.abs(px) < 3.2))
+                if (Math.abs(px) > 23.2)
                     continue;
                 this.box(px, y + .75, cz - .9 + (rows - 1) * .5, .02, 1.25, rows * 1.5 + .6, glass);
                 this.box(px, y + 1.39, cz - .9 + (rows - 1) * .5, .05, .04, rows * 1.5 + .6, edge);
@@ -1241,8 +1172,8 @@ export class Headquarters {
     }
     updateStreams() { this.streams = []; for (const room of this.roster?.rooms || [])
         if (this.roster.agents.some(a => a.room === room && this.actors.get(a.name)?.status === 'working')) {
-            const [x, z] = roomLayout[room] || [0, 0], y = (floorForRoom(room) - 1) * 6;
-            this.streams.push(new THREE.CatmullRomCurve3([new THREE.Vector3(0, 1.2, 2), new THREE.Vector3(2, y * .5 + 2, 7), new THREE.Vector3(x * .7, y + .4, 7), new THREE.Vector3(x, y + 1, z)]));
+            const [x, z] = roomLayout[room] || [0, 0];
+            this.streams.push(new THREE.CatmullRomCurve3([new THREE.Vector3(0, 1.2, 0), new THREE.Vector3(x * .35, 2.4, z * .35), new THREE.Vector3(x * .7, 1.2, z * .7), new THREE.Vector3(x, .9, z)]));
         } this.energy.geometry.setDrawRange(0, this.streams.length * (this.low ? 12 : 48)); }
     pick(event) { const rect = this.renderer.domElement.getBoundingClientRect(); this.pointer.set((event.clientX - rect.left) / rect.width * 2 - 1, -(event.clientY - rect.top) / rect.height * 2 + 1); this.ray.setFromCamera(this.pointer, this.camera); const hit = this.ray.intersectObjects(this.pickables)[0]; if (hit) {
         this.select(hit.object.userData.actorId);
@@ -1251,7 +1182,7 @@ export class Headquarters {
     select(id, focus = true) { const a = this.actors.get(id); this.selected = id; this.focusRing.visible = !!a; this.focusLight.visible = !!a; if (a && focus) {
         this.showLabels(false);
         const target = a.group.position.clone().add(new THREE.Vector3(0, 1, 0));
-        this.fly(target, target.clone().add(new THREE.Vector3(13, a.home.y < 11 ? 4 : 10, 18)));
+        this.fly(target, target.clone().add(new THREE.Vector3(12, 8, 16)));
     } }
     // Lane filters brighten matching halos; idle matches get a neutral ice halo so status colours stay truthful.
     highlight(ids) { this.highlighted = ids ? new Set(ids) : null; }
@@ -1304,11 +1235,8 @@ export class Headquarters {
         a.head.rotation.set(pitch, yaw, 0);
         a.head.position.y = a.headBaseY + (moving ? 0 : Math.sin(t * 2.3 + phase) * .012);
     }
-    focusFloor(f) { this.floor = f; this.onFloor(f); this.showLabels(f === 0); if (!f) {
-        this.reset();
-        return;
-    } const y = (f - 1) * 6 + 1.8, lobby = f === 1; this.fly(new THREE.Vector3(0, y + (lobby ? .8 : 0), 0), new THREE.Vector3(22, y + (lobby ? 8 : f < 3 ? 3 : 12), lobby ? 35 : 31)); }
-    reset(immediate = false) { this.floor = 0; this.onFloor(0); this.showLabels(true); const target = new THREE.Vector3(0, 7, 0), position = new THREE.Vector3(26, 24, 40); if (immediate) {
+    focusFloor() { this.floor = 0; this.onFloor(0); this.showLabels(true); this.reset(); }
+    reset(immediate = false) { this.floor = 0; this.onFloor(0); this.showLabels(true); const target = new THREE.Vector3(0, 1, 0), position = new THREE.Vector3(32, 26, 42); if (immediate) {
         this.controls.target.copy(target);
         this.camera.position.copy(position);
         this.controls.update();
@@ -1347,7 +1275,6 @@ export class Headquarters {
             this.rings.forEach((m, i) => { m.rotation.z = t * (i % 2 ? -.12 : .15); });
             for (const p of this.gamePulse) p.material.emissiveIntensity = p.base + Math.sin(t * 2.1 + p.phase) * .35;
             for (const b of this.beacons) { b.mesh.position.y = b.baseY + Math.sin(t * 1.4 + b.phase) * .12; b.mesh.rotation.y = t * .7; b.mesh.rotation.z = Math.sin(t * .9 + b.phase) * .15; }
-            this.elevator.position.y = 1.7 + (Math.sin(t * .12) * .5 + .5) * 12;
             this.dust.rotation.y = t * .008;
             this.pulse = Math.max(0, this.pulse - dt * .5);
             for (const a of this.actors.values()) {
@@ -1453,43 +1380,36 @@ export class Headquarters {
             }
             return obj;
         };
-        // 1F · arrival, coffee, play, lounge
-        place('KIT_CoffeeBar', -6.2, 0, 4.95, .08, .95);
-        place('KIT_Arcade', 6.15, 0, 3.55, -.18, 1.02);
-        place('KIT_Arcade', 7.55, 0, 3.55, -.18, 1.02);
-        place('KIT_Arcade', 8.95, 0, 3.55, -.18, 1.02);
-        place('KIT_Sofa', 3.35, 0, 4.35, -.22, 1.02);
-        place('KIT_Shelf', -12.7, 0, 5.5, .15, .95);
-        place('KIT_Whiteboard', 12.7, 0, 5.55, -.15, .9);
-        place('KIT_Rug', 3.35, .015, 4.35, -.22, 1.15);
-        place('KIT_FloorLamp', 10.2, 0, 4.8, 0, .9);
-        place('KIT_PlantTall', 12.6, 0, 3.0, 0, 1);
-        place('KIT_Neon', 0, 2.55, -7.55, 0, 1.1);
+        // One flat campus: central coffee/play lounge, team neighbourhoods around it.
+        place('KIT_CoffeeBar', -6, 0, 0, .08, .95);
+        place('KIT_Arcade', 7, 0, -2.4, -.18, 1.02);
+        place('KIT_Arcade', 8.5, 0, -2.4, -.18, 1.02);
+        place('KIT_Arcade', 10, 0, -2.4, -.18, 1.02);
+        place('KIT_Sofa', 6, 0, 2.7, -.2, 1.02);
+        place('KIT_Rug', 6, .015, 2.7, -.2, 1.15);
+        place('KIT_Conference', -18, 0, 0, .08, .72);
+        place('KIT_Shelf', -14.5, 0, 0, .15, .95);
+        place('KIT_Whiteboard', 14.5, 0, 0, -.15, .9);
+        place('KIT_ToolCart', 0, 0, 5.6, .05, .95);
+        place('KIT_FloorLamp', 12, 0, 3.2, 0, .9);
+        place('KIT_PlantTall', 21.5, 0, -12, 0, 1);
+        place('KIT_PlantTall', -21.5, 0, 12, 0, 1);
+        place('KIT_Neon', 0, 3.2, -14.55, 0, 1.1);
         this.beanbag(-2.6, 0, 4.2, 0xff9f5a);
         this.beanbag(-1.2, 0, 4.8, 0x6ee7b7);
-        // 2F · production workshop
-        place('KIT_ToolCart', 0, 6, 5.7, .05, .95);
-        place('KIT_CoffeeBar', -6.2, 6, 4.95, .08, .9);
-        place('KIT_Sofa', 4.2, 6, 4.45, -.2, .95);
-        place('KIT_Shelf', -12.7, 6, 5.5, .12, .95);
-        place('KIT_PlantTall', 12.6, 6, 5.4, 0, 1);
-        place('KIT_PlantTall', -12.6, 6, 3.0, 0, .9);
-        this.beanbag(-2.6, 6, 4.2, 0x7cc4ff);
-        this.beanbag(-1.2, 6, 4.8, 0xffd166);
-        // 3F · engineering & design lounge
-        place('KIT_Conference', 0, 12, 5.35, .08, .82);
-        place('KIT_Sofa', -5.6, 12, 4.45, .25, .95);
-        place('KIT_Arcade', 7.2, 12, 4.55, -.2, .95);
-        place('KIT_Whiteboard', 12.7, 12, 5.55, -.15, .9);
-        place('KIT_Shelf', -12.7, 12, 5.5, .12, .95);
-        place('KIT_FloorLamp', -8.7, 12, 3.2, 0, .9);
-        place('KIT_PlantTall', 12.6, 12, 3.0, 0, 1);
-        place('KIT_PlantTall', -12.6, 12, 5.4, 0, .9);
-        this.beanbag(2.8, 12, 4.2, 0xc7a6ff);
-        this.beanbag(4.2, 12, 4.8, 0xff8fb1);
-        this.label('COFFEE + PLAY', -2.2, 2.5, 6.4, 4.8, '#ffcf8c', 'ARRIVAL LOUNGE');
-        this.label('MAKE + TEST', 0, 8.4, 6.3, 4.4, '#8cecff', 'PRODUCTION WORKSHOP');
-        this.label('THINK + BUILD', 0, 14.3, 6.3, 4.4, '#ff9fba', 'ENGINEERING STUDIO');
+        this.beanbag(2.8, 0, 4.2, 0xc7a6ff);
+        this.cafeTable(-8, 6.8);
+        this.cafeTable(8, 6.8);
+        this.cafeTable(0, 7.4);
+        place('KIT_Sofa', -6, 0, 11.8, .08, 1);
+        place('KIT_Sofa', 6, 0, 11.8, -.08, 1);
+        this.beanbag(-2, 0, 11.4, 0xffb36b);
+        this.beanbag(2, 0, 11.4, 0x7cc4ff);
+        this.plant(0, 0, 13.2, .8);
+        for (const x of [-21, -11, 11, 21])
+            this.plant(x, 0, 13.4, .9);
+        this.label('COFFEE + PLAY', -2, 2.6, 1.8, 4.8, '#ffcf8c', 'CENTRAL LOUNGE');
+        this.label('MAKE + TEST', 0, 2.7, 7.4, 4.4, '#8cecff', 'TEAM NEIGHBOURHOODS');
     }
     loadAssetKit() {
         // Optional Blender-authored kit. The procedural scene stays complete if the
