@@ -532,11 +532,6 @@ export class Headquarters {
             this.box(0, .028, z, 39, .004, .006, this.mat('plankSeam', 0xb49d82, .05));
         for (const x of [-7, 7])
             this.box(x, .037, 0, .035, .012, 27, soft);
-        // Open pergola frames and pendant pools keep the single floor architectural without a roof.
-        for (const z of [-12, 0, 12])
-            this.box(0, 5.2, z, 40, .12, .18, metal);
-        for (const x of [-14, -7, 0, 7, 14])
-            this.box(x, 5.2, 0, .18, .12, 28, metal);
         // Central collaboration hub and ORCA table.
         const hubR = 3.4;
         this.cyl(0, .16, 0, hubR + .65, .3, dark);
