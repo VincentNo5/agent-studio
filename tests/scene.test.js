@@ -89,11 +89,11 @@ test('lower-floor camera presets keep every roster agent visible through the ope
 test('status map drives actors, and only an observed transition plays the completion burst', async () => {
     const world = await buildWorld(), board = { source: 'Orca', total: 0, counts: {} };
     const state = { workers: [{ dispatchId: 'queued', dispatchStatus: 'pending' }], audit: { events: [] } };
-    world.update(state, new Map([['qa-tester', { status: 'completed' }], ['engine-programmer', { status: 'working' }], ['level-designer', { status: 'failed' }]]), board);
+    world.update(state, new Map([['qa-tester', { status: 'completed' }], ['engine-programmer', { status: 'working' }], ['gameplay-programmer', { status: 'failed' }]]), board);
     expect(world.actors.get('qa-tester').status).toBe('completed');
     expect(world.actors.get('qa-tester').burst).toBe(0);
     expect(world.actors.get('engine-programmer').busy).toBe(true);
-    expect(world.actors.get('level-designer').status).toBe('failed');
+    expect(world.actors.get('gameplay-programmer').status).toBe('failed');
     expect(world.actors.get('ai-programmer').status).toBe('idle');
     // A visitor without a map entry falls back to its own reported state.
     expect(world.actors.get('worker:queued').status).toBe('pending');

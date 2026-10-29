@@ -1,10 +1,6 @@
 {
   "rooms": [
-    "directors",
-    "leads",
     "engineering",
-    "design",
-    "qa",
     "engines"
   ],
   "agents": [
@@ -23,38 +19,10 @@
       "tier": 3
     },
     {
-      "name": "art-director",
-      "model": "inherit",
-      "desc": "Owns visual identity — style guides, art bible, asset standards, color palettes, UI visual",
-      "room": "leads",
-      "tier": 2
-    },
-    {
-      "name": "audio-director",
-      "model": "inherit",
-      "desc": "Owns sonic identity — music direction, sound palette, audio implementation strategy, mix b",
-      "room": "leads",
-      "tier": 2
-    },
-    {
-      "name": "creative-director",
-      "model": "opus",
-      "desc": "Highest creative authority — vision, tone, aesthetic direction. Use when a decision affect",
-      "room": "directors",
-      "tier": 1
-    },
-    {
       "name": "devops-engineer",
       "model": "sonnet",
       "desc": "Build pipelines, CI/CD configuration, version control workflow, branching strategy, automa",
       "room": "engineering",
-      "tier": 3
-    },
-    {
-      "name": "economy-designer",
-      "model": "inherit",
-      "desc": "Resource economies — loot tables, sink/faucet analysis, progression curve calibration, eco",
-      "room": "design",
       "tier": 3
     },
     {
@@ -63,13 +31,6 @@
       "desc": "Core engine systems — rendering pipeline, physics, memory, resource loading, scene managem",
       "room": "engineering",
       "tier": 3
-    },
-    {
-      "name": "game-designer",
-      "model": "inherit",
-      "desc": "Mechanical and systems design — core loops, progression, combat, economy, player-facing ru",
-      "room": "leads",
-      "tier": 2
     },
     {
       "name": "gameplay-programmer",
@@ -114,41 +75,6 @@
       "tier": 3
     },
     {
-      "name": "lead-programmer",
-      "model": "sonnet",
-      "desc": "Lead programmer — code-level architecture, coding standards, code review, API design, refa",
-      "room": "leads",
-      "tier": 2
-    },
-    {
-      "name": "level-designer",
-      "model": "inherit",
-      "desc": "Spatial design for levels and areas — encounter layouts, pacing, difficulty, layout planni",
-      "room": "design",
-      "tier": 3
-    },
-    {
-      "name": "live-ops-designer",
-      "model": "inherit",
-      "desc": "Post-launch content — seasonal events, battle passes, content cadence, retention, engageme",
-      "room": "design",
-      "tier": 3
-    },
-    {
-      "name": "localization-lead",
-      "model": "inherit",
-      "desc": "Internationalization architecture — i18n system design, string extraction workflows, local",
-      "room": "leads",
-      "tier": 2
-    },
-    {
-      "name": "narrative-director",
-      "model": "inherit",
-      "desc": "Story architecture, world-building, character design, dialogue strategy. Narrative structu",
-      "room": "leads",
-      "tier": 2
-    },
-    {
       "name": "network-programmer",
       "model": "inherit",
       "desc": "Multiplayer networking — state replication, lag compensation, matchmaking, network protoco",
@@ -163,39 +89,11 @@
       "tier": 3
     },
     {
-      "name": "producer",
-      "model": "opus",
-      "desc": "Production concerns — sprint planning, milestone tracking, risk, scope, cross-department c",
-      "room": "directors",
-      "tier": 1
-    },
-    {
-      "name": "prototyper",
-      "model": "sonnet",
-      "desc": "Throwaway builds — concept prototypes after brainstorm to test an idea is fun before GDDs;",
-      "room": "design",
-      "tier": 3
-    },
-    {
-      "name": "qa-lead",
-      "model": "inherit",
-      "desc": "Test strategy and process — test plan creation, bug severity assessment, regression planni",
-      "room": "leads",
-      "tier": 2
-    },
-    {
       "name": "qa-tester",
       "model": "inherit",
       "desc": "Writes test cases, bug reports, and checklists — test case generation, regression checklis",
-      "room": "qa",
+      "room": "engineering",
       "tier": 3
-    },
-    {
-      "name": "release-manager",
-      "model": "inherit",
-      "desc": "Release pipeline — certification checklists, store submissions and page prep, platform req",
-      "room": "leads",
-      "tier": 2
     },
     {
       "name": "security-engineer",
@@ -203,20 +101,6 @@
       "desc": "Protects against cheating, exploits, breaches — anti-cheat measures, secure save data and ",
       "room": "engineering",
       "tier": 3
-    },
-    {
-      "name": "systems-designer",
-      "model": "inherit",
-      "desc": "Detailed subsystem mechanics — combat formulas, progression curves, crafting recipes, stat",
-      "room": "design",
-      "tier": 3
-    },
-    {
-      "name": "technical-director",
-      "model": "opus",
-      "desc": "High-level technical decisions — engine architecture, technology choices, performance stra",
-      "room": "directors",
-      "tier": 1
     },
     {
       "name": "tools-programmer",
@@ -300,13 +184,6 @@
       "model": "inherit",
       "desc": "Authority on Unreal-specific patterns and APIs — guides Blueprint vs C++, UE subsystems (G",
       "room": "engines",
-      "tier": 3
-    },
-    {
-      "name": "world-builder",
-      "model": "inherit",
-      "desc": "World builder for lore — factions, cultures, history, geography, ecology, world rules. Fac",
-      "room": "design",
       "tier": 3
     }
   ]
