@@ -11,7 +11,7 @@ async function buildWorld() {
     globalThis.document = { createElement: () => ({ width: 0, height: 0, getContext: () => context }) };
     try {
         const world = Object.create(Headquarters.prototype);
-        Object.assign(world, { scene: new THREE.Scene(), geometries: new Map(), materials: new Map(), textures: new Set(), staticBatches: new Map(), actors: new Map(), deskSlots: [], kitTemplates: null, gameTemplates: null, gamePulse: [], beacons: [], kitPromise: Promise.resolve(false), gameKitPromise: Promise.resolve(false), pickables: [], rings: [], roomSigns: new Map(), floorLabels: [], streams: [], statuses: new Map(), clock: 0 });
+        Object.assign(world, { scene: new THREE.Scene(), geometries: new Map(), materials: new Map(), textures: new Set(), staticBatches: new Map(), actors: new Map(), deskSlots: [], kitTemplates: null, gameTemplates: null, gamePulse: [], beacons: [], kitPromise: Promise.resolve(false), gameKitPromise: Promise.resolve(false), pickables: [], rings: [], roomSigns: new Map(), roomFloorLabels: new Map(), floorLabels: [], streams: [], statuses: new Map(), clock: 0 });
         world.architecture();
         await world.setRoster(roster);
         world.makeParticles();
@@ -24,13 +24,14 @@ async function buildWorld() {
 test('all 49 roster characters and their stations fit inside the single campus floor', async () => {
     const world = await buildWorld();
     expect(world.actors.size).toBe(roster.agents.length);
+    expect(world.roomFloorLabels.size).toBe(roster.rooms.length);
     const structure = world.scene.children.find(m => m.material === world.materials.get('metal'));
     expect(structure).toBeDefined();
     structure.geometry.computeBoundingBox();
     expect(structure.geometry.boundingBox.max.y).toBeGreaterThan(4);
     for (const actor of world.actors.values()) {
         expect(Math.abs(actor.home.x)).toBeLessThan(24);
-        expect(Math.abs(actor.home.z)).toBeLessThan(15);
+        expect(Math.abs(actor.home.z)).toBeLessThan(17);
         expect(Math.abs(actor.home.y)).toBeLessThan(.2);
     }
 });

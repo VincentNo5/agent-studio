@@ -14,8 +14,8 @@ const STATUS_COLORS = Object.fromEntries(Object.entries(STATUS_META).map(([key, 
 const BADGE_INDEX = { working: 0, completed: 1, pending: 2, failed: 3, idle: 4 }, BADGE_CELLS = 6;
 const _matrix = new THREE.Matrix4(), _position = new THREE.Vector3(), _scale = new THREE.Vector3(), _color = new THREE.Color(), _quat = new THREE.Quaternion(), _ice = new THREE.Color(0xdff6ff);
 const roomLayout = {
-    directors: [-18, -9], leads: [-9, -9], engineering: [0, -9], design: [9, -9], art: [18, -9],
-    audio: [-18, 9], narrative: [-9, 9], qa: [0, 9], engines: [9, 9], community: [18, 9]
+    directors: [-21, -11], leads: [-10.5, -11], engineering: [0, -11], design: [10.5, -11], art: [21, -11],
+    audio: [-21, 11], narrative: [-10.5, 11], qa: [0, 11], engines: [10.5, 11], community: [21, 11]
 };
 export class Headquarters {
     constructor(container, { onSelect = () => { }, onFPS = () => { }, onFloor = () => { }, onStats = () => { } } = {}) {
@@ -69,6 +69,7 @@ export class Headquarters {
         this.pickables = [];
         this.rings = [];
         this.roomSigns = new Map();
+        this.roomFloorLabels = new Map();
         this.floorLabels = [];
         this.streams = [];
         this.low = false;
@@ -390,6 +391,40 @@ export class Headquarters {
         if (this.roofSign)
             this.roofSign.visible = visible;
     }
+    floorLabel(text, x, z, width, color) {
+        const canvas = document.createElement('canvas');
+        canvas.width = 1024;
+        canvas.height = 256;
+        const g = canvas.getContext('2d');
+        g.clearRect(0, 0, 1024, 256);
+        g.fillStyle = 'rgba(24,34,28,.45)';
+        g.beginPath();
+        g.roundRect(118, 28, 788, 190, 28);
+        g.fill();
+        g.textAlign = 'center';
+        g.textBaseline = 'middle';
+        g.font = '700 126px "Avenir Next", "Trebuchet MS", sans-serif';
+        g.lineWidth = 12;
+        g.strokeStyle = 'rgba(28,35,30,.55)';
+        g.strokeText(text, 512, 118);
+        g.fillStyle = color;
+        g.fillText(text, 512, 118);
+        g.fillStyle = color;
+        g.globalAlpha = .75;
+        g.fillRect(300, 196, 424, 8);
+        g.globalAlpha = 1;
+        const texture = new THREE.CanvasTexture(canvas);
+        texture.colorSpace = THREE.SRGBColorSpace;
+        texture.anisotropy = 4;
+        this.textures.add(texture);
+        const mesh = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), new THREE.MeshBasicMaterial({ map: texture, transparent: true, depthWrite: false, toneMapped: false, polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4 }));
+        mesh.rotation.x = -Math.PI / 2;
+        mesh.position.set(x, .041, z);
+        mesh.scale.set(width, width / 4, 1);
+        mesh.renderOrder = 4;
+        this.scene.add(mesh);
+        return mesh;
+    }
     label(text, x, y, z, width = 5, color = '#bdeaff', small = '') {
         const canvas = document.createElement('canvas');
         canvas.width = 768;
@@ -415,7 +450,7 @@ export class Headquarters {
         floor.needsUpdate = true;
         const cyan = this.mat('cyan', CYAN, .2, 2.4), soft = this.mat('soft', 0x8fb3ad, .3, .35), amber = this.mat('amber', AMBER, .2, 2.4);
         const glass = this.mat('glass', 0xbfe6f2, .05, .02, .08);
-        const shape = new THREE.Shape(), w = 24, d = 15, r = 3;
+        const shape = new THREE.Shape(), w = 28, d = 17, r = 3;
         shape.moveTo(-w + r, -d);
         shape.lineTo(w - r, -d);
         shape.quadraticCurveTo(w, -d, w, -d + r);
@@ -427,36 +462,36 @@ export class Headquarters {
         shape.quadraticCurveTo(-w, -d, -w + r, -d);
         const slabGeo = this.geo('slab', () => { const g = new THREE.ExtrudeGeometry(shape, { depth: .34, bevelEnabled: true, bevelSegments: 2, steps: 1, bevelSize: .12, bevelThickness: .12, curveSegments: 12 }); g.rotateX(-Math.PI / 2); return g; });
         // One continuous campus floor: no stacked storeys, no elevator core.
-        this.box(0, -2, 0, 51, 2, 33, dark);
+        this.box(0, -2, 0, 59, 2, 37, dark);
         this.mesh(slabGeo, floor, 0, -.34, 0);
         this.mesh(slabGeo, metal, 0, -.68, 0, 1, .45, 1);
-        for (const x of [-23.5, 23.5])
-            for (const z of [-14.5, 14.5]) {
+        for (const x of [-27.5, 27.5])
+            for (const z of [-16.5, 16.5]) {
                 this.box(x, 2.6, z, .45, 5.2, .45, metal);
                 this.box(x + (x < 0 ? .24 : -.24), 2.6, z, .045, 5.2, .13, soft);
             }
         // Glass perimeter and open sky: the whole studio reads as one Google/Meta-style floor.
-        this.box(0, 1.7, 15, 47, 3.4, .03, glass);
-        this.box(0, 1.7, -15, 47, 3.4, .03, glass);
-        this.box(-24, 1.7, 0, .03, 3.4, 30, glass);
-        this.box(24, 1.7, 0, .03, 3.4, 30, glass);
-        this.box(0, .02, 15.16, 47, .03, .06, cyan);
-        this.box(0, .02, -15.16, 47, .03, .06, cyan);
-        this.box(-24.16, .02, 0, .06, .03, 30, cyan);
-        this.box(24.16, .02, 0, .06, .03, 30, cyan);
-        for (let x = -20; x <= 20; x += 4)
-            this.box(x, .025, 0, .015, .01, 29, edge);
-        for (let z = -12; z <= 12; z += 4)
-            this.box(0, .026, z, 47, .01, .015, edge);
-        for (let z = -13; z <= 13; z += 1.25)
-            this.box(0, .028, z, 47, .004, .006, this.mat('plankSeam', 0xb49d82, .05));
-        for (const x of [-8, 8])
-            this.box(x, .037, 0, .035, .012, 29, soft);
+        this.box(0, 1.7, 17, 55, 3.4, .03, glass);
+        this.box(0, 1.7, -17, 55, 3.4, .03, glass);
+        this.box(-28, 1.7, 0, .03, 3.4, 34, glass);
+        this.box(28, 1.7, 0, .03, 3.4, 34, glass);
+        this.box(0, .02, 17.16, 55, .03, .06, cyan);
+        this.box(0, .02, -17.16, 55, .03, .06, cyan);
+        this.box(-28.16, .02, 0, .06, .03, 34, cyan);
+        this.box(28.16, .02, 0, .06, .03, 34, cyan);
+        for (let x = -24; x <= 24; x += 4)
+            this.box(x, .025, 0, .015, .01, 33, edge);
+        for (let z = -14; z <= 14; z += 4)
+            this.box(0, .026, z, 55, .01, .015, edge);
+        for (let z = -15; z <= 15; z += 1.25)
+            this.box(0, .028, z, 55, .004, .006, this.mat('plankSeam', 0xb49d82, .05));
+        for (const x of [-10, 10])
+            this.box(x, .037, 0, .035, .012, 33, soft);
         // Open pergola frames and pendant pools keep the single floor architectural without a roof.
-        for (const z of [-12, 0, 12])
-            this.box(0, 5.2, z, 48, .12, .18, metal);
-        for (const x of [-16, -8, 0, 8, 16])
-            this.box(x, 5.2, 0, .18, .12, 30, metal);
+        for (const z of [-14, 0, 14])
+            this.box(0, 5.2, z, 56, .12, .18, metal);
+        for (const x of [-20, -10, 0, 10, 20])
+            this.box(x, 5.2, 0, .18, .12, 34, metal);
         // Central collaboration hub and ORCA table.
         const hubR = 3.4;
         this.cyl(0, .16, 0, hubR + .65, .3, dark);
@@ -477,27 +512,27 @@ export class Headquarters {
         const shaft = this.mesh(shaftGeo, this.mat('shaft', 0x2b9dcc, 0, .8, .035), 0, 2.4, 0, 1, 1, 1, this.scene, false);
         shaft.castShadow = false;
         // Reception and live task display at opposite ends of the open floor.
-        this.box(-17, .85, 12.6, 6, 1.5, 1.4, metal);
-        this.box(-17, 1.65, 12.6, 6.1, .15, 1.7, edge);
-        this.box(-17, .9, 13.34, 5, .065, .02, amber);
-        this.label('PASEO', -17, 3.3, 14.2, 4, '#ffcf8c', 'CONNECTED AGENT BAY');
-        this.label('WELCOME', -17, 2.4, 11.6, 4.3, '#90eaff', 'VISITOR ARRIVALS');
+        this.box(-19, .85, 14.6, 6, 1.5, 1.4, metal);
+        this.box(-19, 1.65, 14.6, 6.1, .15, 1.7, edge);
+        this.box(-19, .9, 15.34, 5, .065, .02, amber);
+        this.label('PASEO', -19, 3.3, 16.2, 4, '#ffcf8c', 'CONNECTED AGENT BAY');
+        this.label('WELCOME', -19, 2.4, 13.6, 4.3, '#90eaff', 'VISITOR ARRIVALS');
         this.taskCanvas = document.createElement('canvas');
         this.taskCanvas.width = 768;
         this.taskCanvas.height = 512;
         this.taskTexture = new THREE.CanvasTexture(this.taskCanvas);
         this.taskTexture.colorSpace = THREE.SRGBColorSpace;
         this.textures.add(this.taskTexture);
-        this.box(0, 2.4, -14.6, 6.8, 3.8, .4, metal);
+        this.box(0, 2.4, -16.6, 6.8, 3.8, .4, metal);
         const screen = new THREE.Mesh(new THREE.PlaneGeometry(6.35, 3.4), new THREE.MeshBasicMaterial({ map: this.taskTexture }));
-        screen.position.set(0, 2.4, -14.36);
+        screen.position.set(0, 2.4, -16.36);
         this.scene.add(screen);
         this.drawTasks(null);
-        this.label('DISPATCH / LIVE TASKS', 0, 4.7, -14.3, 5, '#a0dbff');
-        this.roofSign = this.label('AGENT STUDIO', 0, 7.2, -14.5, 7.8, '#bdedff', 'AUTONOMOUS OPERATIONS / ONE OPEN CAMPUS');
-        this.floorLabels.push(this.plate('AGENT CAMPUS  ·  ONE FLOOR', -14, .5, 15.6, 7.4, '#a6eaff'));
-        for (const x of [-22, 22])
-            for (const z of [-13, 13])
+        this.label('DISPATCH / LIVE TASKS', 0, 4.7, -16.3, 5, '#a0dbff');
+        this.roofSign = this.label('AGENT STUDIO', 0, 7.2, -16.5, 7.8, '#bdedff', 'AUTONOMOUS OPERATIONS / ONE OPEN CAMPUS');
+        this.floorLabels.push(this.plate('AGENT CAMPUS  ·  ONE FLOOR', -16, .5, 17.6, 7.4, '#a6eaff'));
+        for (const x of [-26, 26])
+            for (const z of [-15, 15])
                 this.plant(x, 0, z, 1.15);
     }
     cafeTable(x, z) {
@@ -567,28 +602,18 @@ export class Headquarters {
         for (const room of roster.rooms) {
             const [cx, cz] = roomLayout[room] || [0, 0], members = roster.agents.filter(a => a.room === room), color = ROOM_COLORS[room] || CYAN;
             const y = 0;
-            const sign = this.label(room.toUpperCase(), cx, y + 3.45, cz, 4.2, `#${color.toString(16).padStart(6, '0')}`);
-            sign.userData.room = room;
-            this.roomSigns.set(room, sign);
             this.cyl(cx, 4.75, cz, .018, .7, edge);
             this.cyl(cx, 4.38, cz, .16, .05, this.mat('pendant', 0xffd6a1, .1, 1.8));
-            this.box(cx, y + 3.10, cz, 4.2, .025, .025, this.mat(`roomNeon${color}`, color, .2, 2.4));
-            const neon = this.mat(`roomNeon${color}`, color, .2, 2.4);
-            for (const side of [-1, 1])
-                this.box(cx + side * 4.1, y + 1.55, cz, .035, 2.8, .035, neon);
-            const beaconMat = this.mat(`beacon${color}`, color, .1, 2.8);
-            const beacon = new THREE.Mesh(this.geo('beacon', () => new THREE.OctahedronGeometry(.22, 0)), beaconMat);
-            beacon.position.set(cx, y + 4.35, cz);
-            this.scene.add(beacon);
-            this.beacons.push({ mesh: beacon, baseY: y + 4.35, phase: cx * .2 });
+            const labelZ = cz + (cz < 0 ? 4.2 : -4.2);
+            this.roomFloorLabels.set(room, this.floorLabel(room.toUpperCase(), cx, labelZ, 6.0, `#${color.toString(16).padStart(6, '0')}`));
             // Open-plan neighbourhood: no enclosing office walls, only low side planters.
-            const cols = members.length > 9 ? 5 : 4;
-            const spacing = cols === 5 ? 1.45 : 1.75;
-            const rows = Math.ceil(members.length / cols), width = (Math.min(cols, members.length) - 1) * spacing;
+            const cols = 4;
+            const spacing = 2.0;
+            const rows = Math.ceil(members.length / cols), width = (Math.min(cols, members.length) - 1) * spacing, rowGap = 2.0;
             // Warm floor zone under each department: warm interiors against the cool deck and cyan accents.
-            this.box(cx, y + .122, cz - 1 + (rows - 1) * .75 + .3, width + 2.3, .006, rows * 1.5 + 1.1, rug);
+            this.box(cx, y + .122, cz - 1 + (rows - 1) * 1.0 + .3, width + 2.5, .006, rows * rowGap + 1.1, rug);
             // Coloured, softly glowing floor inlays turn each department into a distinct game zone.
-            const zoneW = width + 2.05, zoneD = rows * 1.5 + .92, zoneZ = cz - 1 + (rows - 1) * .75 + .3;
+            const zoneW = width + 2.25, zoneD = rows * rowGap + .92, zoneZ = cz - 1 + (rows - 1) * 1.0 + .3;
             const zone = new THREE.Mesh(new THREE.PlaneGeometry(zoneW, zoneD), new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: .14, roughness: .95, metalness: .02, transparent: true, opacity: .22, depthWrite: false }));
             zone.rotation.x = -Math.PI / 2;
             zone.position.set(cx, y + .129, zoneZ);
@@ -600,21 +625,20 @@ export class Headquarters {
             if (!felt.map) { felt.map = this.feltTexture(); felt.map.wrapS = felt.map.wrapT = THREE.RepeatWrapping; felt.map.repeat.set(3, 2); felt.needsUpdate = true; }
             for (const side of [-1, 1]) {
                 this.box(cx + side * (width / 2 + 1.18), y + 1.25, cz, .62, 1.45, .055, felt);
-                this.plant(cx + side * (width / 2 + 1.18), y, cz + 2.5, .78);
-                this.plant(cx + side * (width / 2 + 1.18), y, cz - 2.5, .78);
+                this.plant(cx + side * (width / 2 + 1.35), y, cz + 2.8, .78);
             }
-            this.greenWall(cx - width / 2 - 1.22, y + 1.15, cz + .2, 2.2, 1.6);
+            this.greenWall(cx - width / 2 - 1.4, y + 1.15, cz + .2, 2.2, 1.6);
             // Low glass side partitions between neighbouring departments.
             for (const side of [-1, 1]) {
                 const px = cx + side * (width / 2 + 1.15);
                 if (Math.abs(px) > 23.2)
                     continue;
-                this.box(px, y + .75, cz - .9 + (rows - 1) * .5, .02, 1.25, rows * 1.5 + .6, glass);
-                this.box(px, y + 1.39, cz - .9 + (rows - 1) * .5, .05, .04, rows * 1.5 + .6, edge);
+                this.box(px, y + .75, cz - .9 + (rows - 1) * .7, .02, 1.25, rows * rowGap + .6, glass);
+                this.box(px, y + 1.39, cz - .9 + (rows - 1) * .7, .05, .04, rows * rowGap + .6, edge);
             }
             members.forEach((role, i) => {
                 const x = cx + (i % cols - (Math.min(cols, members.length) - 1) / 2) * spacing;
-                const z = cz + Math.floor(i / cols) * 1.5 - 1;
+                const z = cz + Math.floor(i / cols) * rowGap - 1;
                 this.desk(x, y, z, color, role.name);
                 this.box(x, y + .53, z + 1.02, .43, .07, .40, this.mat(`seat${color}`, color, .12, .25));
                 const actor = this.createActor(role.name, role, x, y + .08, z + .64, color);
@@ -1185,28 +1209,13 @@ export class Headquarters {
             if (!a.visitor)
                 this.setStatus(a, statuses.get(id)?.status || 'idle');
         }
-        this.updateRoomSigns();
         this.updateStreams();
         const event = state.audit?.events?.at(-1), eventKey = event ? `${event.ts}:${event.agent}:${event.kind}` : null;
         if (this.lastEvent && eventKey !== this.lastEvent)
             this.pulse = 1;
         this.lastEvent = eventKey;
     }
-    // Room signs carry live per-department counts; canvases are repainted only when the counts change.
-    updateRoomSigns() {
-        for (const [room, sign] of this.roomSigns) {
-            const members = this.roster?.agents.filter(a => a.room === room) || [];
-            const count = s => members.filter(m => this.actors.get(m.name)?.status === s).length;
-            const chips = ['working', 'completed', 'pending', 'failed'].map(s => [count(s), s]).filter(([n]) => n).map(([n, s]) => ({ text: `${n} ${STATUS_META[s].label.toLowerCase()}`, color: STATUS_META[s].color }));
-            const key = chips.map(c => c.text).join('|') || 'idle';
-            if (sign.userData.key === key)
-                continue;
-            sign.userData.key = key;
-            this.paintLabel(sign.userData.canvas.getContext('2d'), sign.userData.text, sign.userData.color, `${members.length} agent${members.length === 1 ? '' : 's'} · idle`, chips.length ? chips : null);
-            sign.material.map.needsUpdate = true;
-            sign.material.color.set(count('working') ? 0xffffff : 0xb9cad8);
-        }
-    }
+    // Lane filters brighten matching halos; idle matches get a neutral ice halo so status colours stay truthful.
     drawTasks(board) {
         const c = this.taskCanvas.getContext('2d'), bg = c.createLinearGradient(0, 0, 0, 512);
         bg.addColorStop(0, '#072339');
@@ -1276,7 +1285,6 @@ export class Headquarters {
         const target = a.group.position.clone().add(new THREE.Vector3(0, 1, 0));
         this.fly(target, target.clone().add(new THREE.Vector3(12, 8, 16)));
     } }
-    // Lane filters brighten matching halos; idle matches get a neutral ice halo so status colours stay truthful.
     highlight(ids) { this.highlighted = ids ? new Set(ids) : null; }
     pose(a, t, moving, dt) {
         const [leftArm, leftLeg, rightArm, rightLeg] = a.limbs, s = a.status, phase = a.phase;
@@ -1328,7 +1336,7 @@ export class Headquarters {
         a.head.position.y = a.headBaseY + (moving ? 0 : Math.sin(t * 2.3 + phase) * .012);
     }
     focusFloor() { this.floor = 0; this.onFloor(0); this.showLabels(true); this.reset(); }
-    reset(immediate = false) { this.floor = 0; this.onFloor(0); this.showLabels(true); const target = new THREE.Vector3(0, 1, 0), position = new THREE.Vector3(32, 26, 42); if (immediate) {
+    reset(immediate = false) { this.floor = 0; this.onFloor(0); this.showLabels(true); const target = new THREE.Vector3(0, 1, 0), position = new THREE.Vector3(38, 31, 50); if (immediate) {
         this.controls.target.copy(target);
         this.camera.position.copy(position);
         this.controls.update();
@@ -1366,7 +1374,6 @@ export class Headquarters {
         if (!this.reduced) {
             this.rings.forEach((m, i) => { m.rotation.z = t * (i % 2 ? -.12 : .15); });
             for (const p of this.gamePulse) p.material.emissiveIntensity = p.base + Math.sin(t * 2.1 + p.phase) * .35;
-            for (const b of this.beacons) { b.mesh.position.y = b.baseY + Math.sin(t * 1.4 + b.phase) * .12; b.mesh.rotation.y = t * .7; b.mesh.rotation.z = Math.sin(t * .9 + b.phase) * .15; }
             this.dust.rotation.y = t * .008;
             this.pulse = Math.max(0, this.pulse - dt * .5);
             for (const a of this.actors.values()) {
@@ -1491,9 +1498,9 @@ export class Headquarters {
         this.beanbag(-2.6, 0, 4.2, 0xff9f5a);
         this.beanbag(-1.2, 0, 4.8, 0x6ee7b7);
         this.beanbag(2.8, 0, 4.2, 0xc7a6ff);
-        this.cafeTable(-8, 6.8);
-        this.cafeTable(8, 6.8);
-        this.cafeTable(0, 7.4);
+        this.cafeTable(-8, 5.2);
+        this.cafeTable(8, 5.2);
+        this.cafeTable(0, 5.2);
         place('KIT_Sofa', -6, 0, 11.8, .08, 1);
         place('KIT_Sofa', 6, 0, 11.8, -.08, 1);
         this.beanbag(-2, 0, 11.4, 0xffb36b);
