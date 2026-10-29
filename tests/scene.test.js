@@ -6,14 +6,14 @@ import roster from '../roster.json';
 // Canvas 2D is the only platform dependency of the builders: every drawing call is a no-op.
 const gradient = { addColorStop() { } };
 const context = new Proxy({}, { get: (target, key) => key in target ? target[key] : key === 'measureText' ? () => ({ width: 10 }) : () => gradient });
-function buildWorld() {
+async function buildWorld() {
     const saved = globalThis.document;
     globalThis.document = { createElement: () => ({ width: 0, height: 0, getContext: () => context }) };
     try {
         const world = Object.create(Headquarters.prototype);
-        Object.assign(world, { scene: new THREE.Scene(), geometries: new Map(), materials: new Map(), textures: new Set(), staticBatches: new Map(), actors: new Map(), pickables: [], rings: [], roomSigns: new Map(), floorLabels: [], streams: [], statuses: new Map(), clock: 0 });
+        Object.assign(world, { scene: new THREE.Scene(), geometries: new Map(), materials: new Map(), textures: new Set(), staticBatches: new Map(), actors: new Map(), deskSlots: [], kitTemplates: null, kitPromise: Promise.resolve(false), pickables: [], rings: [], roomSigns: new Map(), floorLabels: [], streams: [], statuses: new Map(), clock: 0 });
         world.architecture();
-        world.setRoster(roster);
+        await world.setRoster(roster);
         world.makeParticles();
         return world;
     }
@@ -21,8 +21,8 @@ function buildWorld() {
         globalThis.document = saved;
     }
 }
-test('all 49 roster characters and their stations fit inside their assigned decks', () => {
-    const world = buildWorld();
+test('all 49 roster characters and their stations fit inside their assigned decks', async () => {
+    const world = await buildWorld();
     expect(world.actors.size).toBe(roster.agents.length);
     const structure = world.scene.children.find(m => m.material === world.materials.get('metal'));
     expect(structure).toBeDefined();
@@ -34,8 +34,8 @@ test('all 49 roster characters and their stations fit inside their assigned deck
         expect([6.08, 12.08]).toContain(actor.home.y);
     }
 });
-test('polling does not teleport agents and removes visitors no longer on the floor', () => {
-    const world = buildWorld(), positions = new Map([...world.actors].map(([id, a]) => [id, a.group.position.clone()]));
+test('polling does not teleport agents and removes visitors no longer on the floor', async () => {
+    const world = await buildWorld(), positions = new Map([...world.actors].map(([id, a]) => [id, a.group.position.clone()]));
     const state = { workers: [{ dispatchId: 'test-dispatch', workerState: 'running', liveness: 'live' }], audit: { events: [] } };
     const board = { source: 'Orca', total: 0, counts: {} };
     world.update(state, new Map([['engine-programmer', { status: 'working' }]]), board);
@@ -48,8 +48,8 @@ test('polling does not teleport agents and removes visitors no longer on the flo
     world.update({ ...state, workers: [] }, new Map(), board);
     expect(world.actors.has('worker:test-dispatch')).toBe(false);
 });
-test('character parts are instanced and instance transforms are finite', () => {
-    const world = buildWorld();
+test('character parts are instanced and instance transforms are finite', async () => {
+    const world = await buildWorld();
     world.updateActorInstances();
     // Chibi characters add face, hair and department accessories: ~1.5k parts still collapse
     // to a few dozen instanced draw calls (one per material/geometry pair), not one per part.
@@ -58,8 +58,8 @@ test('character parts are instanced and instance transforms are finite', () => {
     for (const batch of world.actorBatches)
         expect([...batch.mesh.instanceMatrix.array].every(Number.isFinite)).toBe(true);
 });
-test('lower-floor camera presets keep every roster agent visible through the open facade', () => {
-    const world = buildWorld();
+test('lower-floor camera presets keep every roster agent visible through the open facade', async () => {
+    const world = await buildWorld();
     world.onFloor = () => { };
     world.focusRing = {};
     world.focusLight = {};
@@ -85,8 +85,8 @@ test('lower-floor camera presets keep every roster agent visible through the ope
         expect(ray.intersectObjects(decks, false).length).toBe(0);
     }
 });
-test('status map drives actors, and only an observed transition plays the completion burst', () => {
-    const world = buildWorld(), board = { source: 'Orca', total: 0, counts: {} };
+test('status map drives actors, and only an observed transition plays the completion burst', async () => {
+    const world = await buildWorld(), board = { source: 'Orca', total: 0, counts: {} };
     const state = { workers: [{ dispatchId: 'queued', dispatchStatus: 'pending' }], audit: { events: [] } };
     world.update(state, new Map([['qa-tester', { status: 'completed' }], ['engine-programmer', { status: 'working' }], ['sound-designer', { status: 'failed' }]]), board);
     expect(world.actors.get('qa-tester').status).toBe('completed');
@@ -103,8 +103,8 @@ test('status map drives actors, and only an observed transition plays the comple
     expect(finished.nod).toBe(1);
     expect(world.actors.get('qa-tester').status).toBe('idle');
 });
-test('status halos, badges, shadows and desk strips are a handful of instanced draws', () => {
-    const world = buildWorld();
+test('status halos, badges, shadows and desk strips are a handful of instanced draws', async () => {
+    const world = await buildWorld();
     world.update({ workers: [{ dispatchId: 'live', workerState: 'running', liveness: 'live' }], audit: { events: [] } }, new Map([['qa-tester', { status: 'completed' }]]), { source: 'Orca', total: 0, counts: {} });
     world.updateActorInstances();
     const layer = world.statusLayer, n = world.actors.size;

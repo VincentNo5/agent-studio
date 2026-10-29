@@ -685,7 +685,7 @@ outputTimer = setInterval(refreshOutput, 2000);
 import('./hq3d.js?v=10').then(({ Headquarters }) => {
     if (closed)
         return;
-    world = new Headquarters($('world'), { onSelect: id => selectAgent(id, false), onFPS: fps => { $('fps').textContent = `${fps} FPS`; }, onFloor: floorChanged });
+    world = new Headquarters($('world'), { onSelect: id => selectAgent(id, false), onFPS: fps => { $('fps').textContent = `${fps} FPS`; }, onStats: stats => { $('fps').title = `${stats.calls} draw calls · ${stats.triangles.toLocaleString()} triangles · DPR ${stats.dpr.toFixed(2)}`; }, onFloor: floorChanged });
     world.setParticles($('particles').checked);
     world.setLow($('low-performance').checked);
     if (rosterLoaded)

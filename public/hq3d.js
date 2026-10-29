@@ -19,17 +19,20 @@ const roomLayout = {
 };
 const floorNames = ['AGENT LOBBY & DISPATCH', 'PRODUCTION & QUALITY', 'ENGINEERING & DESIGN'];
 export class Headquarters {
-    constructor(container, { onSelect = () => { }, onFPS = () => { }, onFloor = () => { } } = {}) {
+    constructor(container, { onSelect = () => { }, onFPS = () => { }, onFloor = () => { }, onStats = () => { } } = {}) {
         this.container = container;
         this.onSelect = onSelect;
         this.onFPS = onFPS;
         this.onFloor = onFloor;
+        this.onStats = onStats;
+        this.dprCap = Math.min(devicePixelRatio, 1.65);
+        this.dpr = this.dprCap;
         this.scene = new THREE.Scene();
         this.scene.background = new THREE.Color(0x030b16);
         this.scene.fog = new THREE.FogExp2(0x071222, .014);
         this.camera = new THREE.PerspectiveCamera(40, 1, .1, 240);
         this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false, powerPreference: 'high-performance' });
-        this.renderer.setPixelRatio(Math.min(devicePixelRatio, 1.65));
+        this.renderer.setPixelRatio(this.dpr);
         this.renderer.shadowMap.enabled = true;
         this.renderer.shadowMap.type = THREE.PCFShadowMap;
         this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -59,6 +62,8 @@ export class Headquarters {
         this.textures = new Set();
         this.staticBatches = new Map();
         this.actors = new Map();
+        this.deskSlots = [];
+        this.kitTemplates = null;
         this.pickables = [];
         this.rings = [];
         this.roomSigns = new Map();
@@ -75,7 +80,7 @@ export class Headquarters {
         this.lights();
         this.architecture();
         this.city();
-        this.loadAssetKit();
+        this.kitPromise = this.loadAssetKit();
         this.flushStatics();
         this.makeParticles();
         this.composer = new EffectComposer(this.renderer);
@@ -471,10 +476,11 @@ export class Headquarters {
         grid.position.y = -14.9;
         this.scene.add(grid);
     }
-    setRoster(roster) {
+    async setRoster(roster) {
         if (this.roster)
             return;
         this.roster = roster;
+        await this.kitPromise;
         const glass = this.materials.get('glass'), edge = this.materials.get('edge');
         if (!this.materials.has('rug'))
             this.materials.set('rug', new THREE.MeshStandardMaterial({ color: 0x3a2a20, roughness: .92, metalness: .05 }));
@@ -512,6 +518,38 @@ export class Headquarters {
         }
         this.flushStatics();
         this.statusAssets();
+        this.buildKitInstances();
+    }
+    buildKitInstances() {
+        if (!this.kitTemplates || !this.deskSlots.length) return;
+        const targets = {
+            'KIT_Desk': this.deskSlots,
+            'KIT_Chair': this.deskSlots,
+            'KIT_Plant': this.deskSlots.filter((_, i) => i % 5 === 0),
+            'KIT_Rack': this.deskSlots.filter((_, i) => i % 12 === 0)
+        };
+        const scales = { 'KIT_Desk': [.78, 1, .78], 'KIT_Chair': [.9, .9, .9], 'KIT_Plant': [.8, .8, .8], 'KIT_Rack': [.9, .9, .9] };
+        const offsets = { 'KIT_Chair': [0, 0, .64], 'KIT_Plant': [.66, 0, -.18], 'KIT_Rack': [0, 0, -1.05] };
+        const matrix = new THREE.Matrix4(), local = new THREE.Matrix4();
+        for (const [asset, slots] of Object.entries(targets)) {
+            const parts = this.kitTemplates.get(asset);
+            if (!parts || !slots.length) continue;
+            const [sx, sy, sz] = scales[asset];
+            const [ox, oy, oz] = offsets[asset] || [0, 0, 0];
+            for (const part of parts) {
+                const inst = new THREE.InstancedMesh(part.geometry, part.material, slots.length);
+                inst.instanceMatrix.setUsage(THREE.StaticDrawUsage);
+                inst.castShadow = true;
+                inst.receiveShadow = true;
+                slots.forEach((slot, i) => {
+                    local.makeScale(sx, sy, sz).multiply(part.local);
+                    matrix.makeTranslation(slot.x + ox, slot.y + oy, slot.z + oz).multiply(local);
+                    inst.setMatrixAt(i, matrix);
+                });
+                inst.instanceMatrix.needsUpdate = true;
+                this.scene.add(inst);
+            }
+        }
     }
     desk(x, y, z, color, key) {
         const metal = this.materials.get('metal'), edge = this.materials.get('edge'), box = this.geometries.get('box'), h = hash(key);
@@ -519,9 +557,14 @@ export class Headquarters {
         const fabric = this.mat('fabric', 0x24384c, .15), shade = this.mat('lampShade', 0x2a3644, .7), glow = this.mat('lampGlow', 0xffc887, .1, 2.6);
         // Contact shadow grounds the desk and its chair.
         this.mesh(this.geo('flat', () => new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2)), this.contactMaterial(), x + .15, y + .128, z + .35, 2.1, 1, 1.7);
-        this.box(x, y + .8, z, 1.48, .12, .82, edge);
-        this.box(x, y + .38, z, .08, .75, .65, metal);
-        this.box(x, y + .05, z, 1, .08, .65, metal);
+        this.deskSlots.push({ x, y, z });
+        // The Blender kit supplies the desk shell when available; the procedural
+        // monitor, status strip and lamp stay because they are live data surfaces.
+        if (!this.kitTemplates) {
+            this.box(x, y + .8, z, 1.48, .12, .82, edge);
+            this.box(x, y + .38, z, .08, .75, .65, metal);
+            this.box(x, y + .05, z, 1, .08, .65, metal);
+        }
         this.box(x, y + 1.15, z - .17, 1.08, .61, .1, metal);
         this.box(x, y + .92, z - .17, .08, .23, .1, edge);
         // Shared inactive screens have real architectural light; status is carried by the desk strip and halo.
@@ -537,7 +580,7 @@ export class Headquarters {
             add(cyl, shade, .17, .37, .05, .07, .08, .07, 0, .5);
             add(cyl, glow, .185, .335, .05, .055, .012, .055, 0, .5);
         });
-        if (h % 3 !== 1) {
+        if (!this.kitTemplates && h % 3 !== 1) {
             this.cyl(x + .64, y + .92, z - .22, .065, .12, this.mat('planter', 0x69757b, .6));
             const green = this.mat('leaves', 0x38776e, .05), leaf = this.geo('leaf', () => new THREE.IcosahedronGeometry(1, 0));
             for (let i = 0; i < 4; i++) {
@@ -1152,7 +1195,7 @@ export class Headquarters {
         this.flight = null;
     } }
     setParticles(value) { this.particles = value; this.dust.visible = value; this.energy.visible = value; }
-    setLow(value) { this.low = value; this.bloom.enabled = !value; this.renderer.setPixelRatio(value ? 1 : Math.min(devicePixelRatio, 1.65)); this.composer.setPixelRatio(value ? 1 : Math.min(devicePixelRatio, 1.65)); this.renderer.shadowMap.enabled = !value; this.key.castShadow = !value; this.dust.geometry.setDrawRange(0, value ? 200 : 850); this.updateStreams(); this.resize(); }
+    setLow(value) { this.low = value; this.bloom.enabled = !value; this.dpr = value ? 1 : this.dprCap; this.renderer.setPixelRatio(this.dpr); this.composer.setPixelRatio(this.dpr); this.renderer.shadowMap.enabled = !value; this.key.castShadow = !value; this.dust.geometry.setDrawRange(0, value ? 200 : 850); this.updateStreams(); this.resize(); }
     resize() { const w = this.container.clientWidth, h = this.container.clientHeight; this.camera.aspect = w / h; this.camera.updateProjectionMatrix(); this.renderer.setSize(w, h); this.composer?.setSize(w, h); }
     animate(now) {
         this.frame = null;
@@ -1213,7 +1256,24 @@ export class Headquarters {
             this.composer.render();
         this.frames++;
         if (now - this.fpsStart > 1000) {
-            this.onFPS(Math.round(this.frames * 1000 / (now - this.fpsStart)));
+            const fps = Math.round(this.frames * 1000 / (now - this.fpsStart));
+            this.onFPS(fps);
+            // Keep the 3D floor responsive on integrated GPUs and high-DPR displays.
+            // Low performance mode pins DPR at 1; otherwise nudge between 1 and the cap.
+            if (!this.low) {
+                if (fps < 30 && this.dpr > 1) {
+                    this.dpr = Math.max(1, this.dpr - .15);
+                    this.renderer.setPixelRatio(this.dpr);
+                    this.composer.setPixelRatio(this.dpr);
+                    this.resize();
+                } else if (fps > 55 && this.dpr < this.dprCap) {
+                    this.dpr = Math.min(this.dprCap, this.dpr + .1);
+                    this.renderer.setPixelRatio(this.dpr);
+                    this.composer.setPixelRatio(this.dpr);
+                    this.resize();
+                }
+            }
+            this.onStats({ fps, dpr: this.dpr, calls: this.renderer.info.render.calls, triangles: this.renderer.info.render.triangles });
             this.frames = 0;
             this.fpsStart = now;
         }
@@ -1221,44 +1281,37 @@ export class Headquarters {
     loadAssetKit() {
         // Optional Blender-authored kit. The procedural scene stays complete if the
         // file is absent or fails to parse; this is a quality upgrade, not a dependency.
-        new GLTFLoader().load('/assets/studio-kit.glb', gltf => {
-            if (this.disposed) return;
-            const kit = gltf.scene;
-            kit.name = 'BLENDER_STUDIO_KIT';
-            kit.scale.setScalar(.92);
-            kit.rotation.y = -.55;
-            kit.position.set(8.2, .12, 4.4);
-            kit.traverse(o => {
-                if (!o.isMesh) return;
-                o.castShadow = true;
-                o.receiveShadow = true;
-                o.frustumCulled = true;
-                for (const m of Array.isArray(o.material) ? o.material : [o.material]) {
-                    if (m?.isMeshStandardMaterial) {
-                        m.envMapIntensity = .9;
-                        if (/cyan/i.test(m.name)) {
-                            m.emissive.setHex(0x1b8cac);
-                            m.emissiveIntensity = .45;
-                        } else if (/green/i.test(m.name)) {
-                            m.emissive.setHex(0x1d7d4d);
-                            m.emissiveIntensity = .35;
+        return new Promise(resolve => {
+            new GLTFLoader().load('/assets/studio-kit.glb', gltf => {
+                if (this.disposed) return resolve(false);
+                const templates = new Map();
+                const root = gltf.scene;
+                root.updateWorldMatrix(true, true);
+                for (const group of root.children) {
+                    if (!group.name?.startsWith('KIT_') || !group.isGroup) continue;
+                    group.updateWorldMatrix(true, true);
+                    const inverse = new THREE.Matrix4().copy(group.matrixWorld).invert();
+                    const parts = [];
+                    group.traverse(child => {
+                        if (!child.isMesh) return;
+                        child.updateWorldMatrix(true, false);
+                        const local = new THREE.Matrix4().multiplyMatrices(inverse, child.matrixWorld);
+                        const material = Array.isArray(child.material) ? child.material.map(m => m.clone()) : child.material.clone();
+                        const mats = Array.isArray(material) ? material : [material];
+                        for (const m of mats) {
+                            if (!m?.isMeshStandardMaterial) continue;
+                            m.envMapIntensity = .9;
+                            if (/cyan/i.test(m.name)) { m.emissive.setHex(0x1b8cac); m.emissiveIntensity = .45; }
+                            else if (/green/i.test(m.name)) { m.emissive.setHex(0x1d7d4d); m.emissiveIntensity = .35; }
+                            m.needsUpdate = true;
                         }
-                        m.needsUpdate = true;
-                    }
+                        parts.push({ geometry: child.geometry, material, local });
+                    });
+                    if (parts.length) templates.set(group.name, parts);
                 }
-            });
-            const base = this.cyl(8.2, .05, 4.4, 3.15, .1, this.mat('kitBase', 0x0b2336, .55, .1));
-            base.receiveShadow = true;
-            this.ring(8.2, .13, 4.4, 2.95, .018, this.mat('kitRim', CYAN, 0, 1.4));
-            const key = new THREE.PointLight(0xffcf9a, 7, 8);
-            key.position.set(8.2, 3.2, 5.6);
-            const fill = new THREE.PointLight(0x4ccfff, 4.5, 7);
-            fill.position.set(6.6, 1.2, 3.4);
-            this.scene.add(kit, key, fill);
-            this.assetKit = kit;
-            this.label('BLENDER KIT', 8.2, 2.2, 6.5, 4.1, '#ffcf8c', 'MCP → GLB · OPTIONAL');
-        }, undefined, () => {
-            // Keep the procedural floor untouched; no console noise for an optional asset.
+                this.kitTemplates = templates;
+                resolve(true);
+            }, undefined, () => resolve(false));
         });
     }
     dispose() { this.disposed = true; cancelAnimationFrame(this.frame); this.controls.dispose(); removeEventListener('resize', this.resizeHandler); document.removeEventListener('visibilitychange', this.visibilityHandler); this.renderer.domElement.removeEventListener('pointerdown', this.pointerDown); this.renderer.domElement.removeEventListener('pointerup', this.pointerUp); this.renderer.domElement.removeEventListener('keydown', this.keyHandler); const gs = new Set(this.geometries.values()), ms = new Set(this.materials.values()); this.scene.traverse(o => { o.shadow?.dispose(); if (o.isInstancedMesh)

@@ -28,7 +28,10 @@ and the production path for agent-authored assets live in
 `blender/agent_studio_kit.py`. Run `scripts/build-blender-assets.sh` when Blender is installed;
 otherwise the procedural fallback remains the source of truth.
 
-<img src="docs/floor-kit.png" alt="Blender kit on the Agent Studio lobby floor" width="720">
+The kit desk/chair/plant/rack parts are instanced across the 49 workstation slots; the
+procedural monitors and status strips stay because they carry live state.
+
+<img src="docs/floor-kit.png" alt="Blender kit workstations on the Agent Studio engineering floor" width="720">
 
 <img src="docs/mobile.png" alt="Mobile view" width="330">
 
@@ -73,6 +76,7 @@ the scene gives each agent a status halo, a billboard badge and a desk strip in 
 bun run server.ts          # http://127.0.0.1:8787        (panel)
                            # http://127.0.0.1:8787/floor  (floor plan)
 bun run --hot server.ts    # same, with reload
+bun run visual-review      # capture /, /floor, /anatomy and /mobile into docs/review
 ```
 
 Environment:

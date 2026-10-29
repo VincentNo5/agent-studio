@@ -6,12 +6,16 @@
   "type": "module",
   "scripts": {
     "start": "bun run server.ts",
-    "dev": "bun run --hot server.ts"
+    "dev": "bun run --hot server.ts",
+    "visual-review": "bun scripts/visual-review.mjs"
   },
   "engines": {
     "bun": ">=1.0.0"
   },
   "dependencies": {
     "three": "^0.186.1"
+  },
+  "devDependencies": {
+    "playwright": "^1.64.1"
   }
 }

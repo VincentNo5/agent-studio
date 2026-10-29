@@ -45,6 +45,8 @@ review**, and **runtime rendering**.
 - Export: GLB, apply transforms, no cameras/lights, no external textures.
 - Runtime: load via `GLTFLoader` only when `studio-kit.glb` exists; procedural meshes remain the
   fallback, so a missing or failed asset never breaks the floor.
+- Current implementation: the kit desk/chair/plant/rack parts are `InstancedMesh` batches at the
+  49 workstation slots; procedural monitors, status strips and lamps remain live-data surfaces.
 
 ## Commands
 

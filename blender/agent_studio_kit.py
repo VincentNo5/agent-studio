@@ -135,12 +135,19 @@ def main():
     for obj in coll.objects:
         if obj.type == "MESH":
             obj["kit"] = KIT
+            uv(obj)
     bpy.context.scene["asset_kit"] = KIT
     bpy.context.scene["units"] = "metric"
     bpy.context.scene["forward"] = "-Y"
     os.makedirs(os.path.dirname(OUT), exist_ok=True)
     bpy.ops.export_scene.gltf(filepath=OUT, export_format="GLB", use_selection=False, export_apply=True, export_yup=True)
-    print(f"Wrote {OUT}")
+    # Round-trip validation: a GLB that cannot be imported is not a deliverable.
+    bpy.ops.wm.read_factory_settings(use_empty=True)
+    bpy.ops.import_scene.gltf(filepath=OUT)
+    meshes = [o for o in bpy.context.scene.objects if o.type == "MESH"]
+    if not meshes:
+        raise RuntimeError("GLB validation failed: no meshes imported")
+    print(f"Wrote {OUT}; validated {len(meshes)} meshes on re-import")
 
 if __name__ == "__main__":
     main()
