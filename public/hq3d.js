@@ -230,6 +230,68 @@ export class Headquarters {
             this.scene.add(cloud);
         }
     }
+    woodTexture() {
+        return this.canvasTexture(512, 512, (g) => {
+            g.fillStyle = '#b79a76';
+            g.fillRect(0, 0, 512, 512);
+            for (let row = 0; row < 8; row++) {
+                const y = row * 64;
+                g.fillStyle = row % 2 ? '#c1a37f' : '#b19370';
+                g.fillRect(0, y, 512, 62);
+                g.strokeStyle = 'rgba(95,66,44,.28)';
+                g.lineWidth = 2;
+                g.beginPath();
+                g.moveTo(0, y + 63);
+                g.lineTo(512, y + 63);
+                g.stroke();
+                for (let i = 0; i < 14; i++) {
+                    const yy = y + 6 + ((i * 37 + row * 11) % 50), xx = (i * 83 + row * 29) % 512;
+                    g.strokeStyle = 'rgba(116,82,54,.12)';
+                    g.lineWidth = 1;
+                    g.beginPath();
+                    g.moveTo(xx, yy);
+                    g.bezierCurveTo(xx + 40, yy - 5, xx + 80, yy + 5, xx + 120, yy);
+                    g.stroke();
+                }
+            }
+        });
+    }
+    carpetTexture() {
+        return this.canvasTexture(256, 256, (g) => {
+            g.fillStyle = '#cfc5b5';
+            g.fillRect(0, 0, 256, 256);
+            for (let i = 0; i < 1800; i++) {
+                const v = 185 + (i * 37 % 45);
+                g.fillStyle = `rgba(${v},${v - 8},${v - 18},.35)`;
+                g.fillRect((i * 73) % 256, (i * 151) % 256, 2, 2);
+            }
+        });
+    }
+    feltTexture() {
+        return this.canvasTexture(256, 256, (g) => {
+            g.fillStyle = '#d8d8d8';
+            g.fillRect(0, 0, 256, 256);
+            for (let i = 0; i < 2600; i++) {
+                const v = 170 + (i * 41 % 70);
+                g.fillStyle = `rgba(${v},${v},${v},.35)`;
+                g.fillRect((i * 97) % 256, (i * 53) % 256, 2, 3);
+            }
+        });
+    }
+    screenTexture(color) {
+        return this.canvasTexture(256, 128, (g) => {
+            g.fillStyle = '#07151f';
+            g.fillRect(0, 0, 256, 128);
+            const hex = `#${color.toString(16).padStart(6, '0')}`;
+            for (let i = 0; i < 15; i++) {
+                const y = 10 + i * 7.2, w = 28 + (i * 53 % 150);
+                g.fillStyle = i % 5 === 0 ? hex : i % 3 === 0 ? '#8fe8ff' : 'rgba(190,230,240,.55)';
+                g.fillRect(14, y, w, 2.5);
+            }
+            g.fillStyle = hex;
+            g.fillRect(14, 112, 54, 3);
+        });
+    }
     tree(x, z, s = 1) {
         const y = -15, trunk = this.mat('trunk', 0x6f5237, .05), leaf = this.mat('leafOutdoor', 0x4f8f5a, .02);
         this.cyl(x, y + 1.1 * s, z, .13 * s, 2.2 * s, trunk);
@@ -346,7 +408,11 @@ export class Headquarters {
         return sprite;
     }
     architecture() {
-        const metal = this.mat('metal', 0x9aa9a5, .32), edge = this.mat('edge', 0x859995, .38), floor = this.mat('floor', 0xc9b69d, .2), dark = this.mat('dark', 0x344545, .45);
+        const metal = this.mat('metal', 0x9aa9a5, .32), edge = this.mat('edge', 0x859995, .38), floor = this.mat('floor', 0xffffff, .2), dark = this.mat('dark', 0x344545, .45);
+        floor.map = this.woodTexture();
+        floor.map.wrapS = floor.map.wrapT = THREE.RepeatWrapping;
+        floor.map.repeat.set(5, 4);
+        floor.needsUpdate = true;
         const cyan = this.mat('cyan', CYAN, .2, 2.4), soft = this.mat('soft', 0x8fb3ad, .3, .35), amber = this.mat('amber', AMBER, .2, 2.4);
         const glass = this.mat('glass', 0xbfe6f2, .05, .02, .08);
         const shape = new THREE.Shape(), w = 24, d = 15, r = 3;
@@ -496,7 +562,7 @@ export class Headquarters {
         await Promise.all([this.kitPromise, this.gameKitPromise]);
         const glass = this.materials.get('glass'), edge = this.materials.get('edge');
         if (!this.materials.has('rug'))
-            this.materials.set('rug', new THREE.MeshStandardMaterial({ color: 0xd8cfc2, roughness: .92, metalness: .02 }));
+            this.materials.set('rug', (() => { const m = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: .92, metalness: .02 }); m.map = this.carpetTexture(); m.map.wrapS = m.map.wrapT = THREE.RepeatWrapping; m.map.repeat.set(3, 3); return m; })());
         const rug = this.materials.get('rug');
         for (const room of roster.rooms) {
             const [cx, cz] = roomLayout[room] || [0, 0], members = roster.agents.filter(a => a.room === room), color = ROOM_COLORS[room] || CYAN;
@@ -531,6 +597,7 @@ export class Headquarters {
             this.box(cx, y + .134, zoneZ + zoneD / 2, zoneW, .01, .045, this.mat(`zoneLine${color}`, color, .2, 1.6));
             // Google/Meta-style greenery and acoustic felt panels.
             const felt = this.mat(`felt${color}`, color, .92, .04);
+            if (!felt.map) { felt.map = this.feltTexture(); felt.map.wrapS = felt.map.wrapT = THREE.RepeatWrapping; felt.map.repeat.set(3, 2); felt.needsUpdate = true; }
             for (const side of [-1, 1]) {
                 this.box(cx + side * (width / 2 + 1.18), y + 1.25, cz, .62, 1.45, .055, felt);
                 this.plant(cx + side * (width / 2 + 1.18), y, cz + 2.5, .78);
@@ -558,6 +625,7 @@ export class Headquarters {
         this.statusAssets();
         this.buildKitInstances();
         this.placeGameAssets();
+        this.flushStatics();
     }
     buildKitInstances() {
         if (!this.kitTemplates || !this.deskSlots.length) return;
@@ -607,7 +675,9 @@ export class Headquarters {
         this.box(x, y + 1.15, z - .17, 1.08, .61, .1, metal);
         this.box(x, y + .92, z - .17, .08, .23, .1, edge);
         // Shared inactive screens have real architectural light; status is carried by the desk strip and halo.
-        this.box(x, y + 1.16, z - .105, .97, .49, .015, this.mat(`screen${color}`, color, .1, .95));
+        const screenMat = this.mat(`screen${color}`, color, .1, .95);
+        if (!screenMat.map) { screenMat.map = this.screenTexture(color); screenMat.color.set(0xffffff); screenMat.needsUpdate = true; }
+        this.box(x, y + 1.16, z - .105, .97, .49, .015, screenMat);
         this.box(x, y + .846, z + .08, .92, .012, .46, this.mat(`deskMat${color}`, color, .18, .12));
         this.box(x, y + .56, z + .40, 1.18, .34, .028, this.mat(`deskFront${color}`, color, .2, .22));
         this.box(x, y + .74, z + 1.21, .42, .38, .05, this.mat(`chairBack${color}`, color, .16, .2));
@@ -620,6 +690,15 @@ export class Headquarters {
         for (let i = 0; i < 3; i++)
             this.box(x - .3, y + 1.3 - i * .12, z - .09, .22 + (hash(key + i) % 5) * .09, .022, .01, this.mat('code', 0x8ebfd0, 0, .55));
         this.box(x, y + .88, z + .19, .65, .025, .23, metal);
+        for (let r = 0; r < 2; r++)
+            for (let c = 0; c < 6; c++)
+                this.box(x - .26 + c * .105, y + .899, z + .165 + r * .055, .072, .012, .035, this.mat('keys', 0x26343c, .25));
+        this.box(x + .34, y + .90, z + .20, .09, .03, .13, edge);
+        this.box(x - .36, y + .90, z + .27, .16, .015, .22, this.mat('notebook', 0xf2eadb, .05));
+        this.box(x - .30, y + .912, z + .30, .12, .012, .012, this.mat('pen', 0xe9b978, .1));
+        this.cyl(x + .58, y + .96, z - .02, .035, .18, metal);
+        this.box(x, y + .55, z + .34, 1.02, .22, .035, edge);
+        this.box(x, y + .55, z + .365, .22, .022, .02, metal);
         // Desk lamp: weighted base, angled arm and a warm practical head.
         this.batchGroup(x - .64, y + .86, z - .22, .5, add => {
             add(cyl, metal, 0, .012, 0, .075, .024, .075);
@@ -643,8 +722,12 @@ export class Headquarters {
             add(box, fabric, 0, .45, 0, .46, .08, .44);
             add(box, fabric, 0, .76, .2, .44, .46, .07, -.12);
             add(box, edge, 0, .76, .24, .3, .3, .02, -.12);
-            for (const side of [-1, 1])
+            for (const side of [-1, 1]) {
                 add(box, edge, side * .23, .58, -.02, .035, .035, .3);
+                add(box, edge, side * .25, .64, .02, .05, .04, .36);
+            }
+            for (const [wx, wz] of [[-.2, -.18], [.2, -.18], [-.2, .18], [.2, .18]])
+                add(cyl, metal, wx, .04, wz, .055, .05, .055);
         });
     }
     createActor(id, data, x, y, z, color, visitor = false) {
@@ -730,6 +813,12 @@ export class Headquarters {
             add(box, white, 0, .86, .141, .17, .20, .02);
             add(box, trim, 0, .79, .147, .032, .30, .012);
             add(box, ink, 0, .585, 0, .42, .07, .28);
+            add(box, outfit, 0, .70, .151, .24, .12, .02);
+            add(box, white, -.045, .78, .153, .018, .14, .012);
+            add(box, white, .045, .78, .153, .018, .14, .012);
+            if (h % 4 === 0)
+                for (const side of [-1, 1])
+                    add(box, trim, side * .16, .79, .15, .035, .28, .018);
             add(box, white, .135, .88, .147, .07, .045, .022);
             add(box, edge, 0, .64, .225, .28, .20, .025);
             add(box, this.mat('slate', 0xbfeaff, .1, .9), 0, .64, .242, .24, .16, .008);
@@ -738,6 +827,8 @@ export class Headquarters {
             head.scale.setScalar(1.08);
             g.add(head);
             add(sphere, skin, 0, 0, 0, .30, .31, .28, head);
+            add(sphere, skin, -.285, .01, 0, .055, .075, .045, head);
+            add(sphere, skin, .285, .01, 0, .055, .075, .045, head);
             if (style === 0 || style === 3)
                 add(sphere, outfit, 0, .02, -.16, .25, .20, .18, head);
             add(sphere, hair, 0, .04, -.03, .31, .30, .29, head);
@@ -758,6 +849,7 @@ export class Headquarters {
                 // Slightly larger eyes keep faces legible from the elevated overview camera.
                 add(sphere, ink, side * .105, -.01, .272, .041, .049, .02, head);
                 add(sphere, this.mat('eyeHi', 0xffffff, 0, 2.2), side * .117, .012, .29, .013, .016, .008, head);
+                add(box, hair, side * .105, .055, .292, .072, .012, .012, head);
             }
             add(box, ink, 0, -.105, .286, .062, .014, .014, head);
             add(sphere, this.mat('blush', 0xff9fa6, .05, .35), -.185, -.065, .235, .036, .018, .012, head);
@@ -1351,6 +1443,7 @@ export class Headquarters {
                         for (const m of mats) {
                             if (!m?.isMeshStandardMaterial) continue;
                             m.envMapIntensity = 1.1;
+                            if (/wood/i.test(m.name)) { m.map = this.woodTexture(); m.map.wrapS = m.map.wrapT = THREE.RepeatWrapping; m.color.set(0xffffff); }
                             m.needsUpdate = true;
                         }
                     });
@@ -1434,6 +1527,7 @@ export class Headquarters {
                         for (const m of mats) {
                             if (!m?.isMeshStandardMaterial) continue;
                             m.envMapIntensity = .9;
+                            if (/warm/i.test(m.name)) { m.map = this.woodTexture(); m.map.wrapS = m.map.wrapT = THREE.RepeatWrapping; m.color.set(0xffffff); }
                             if (/cyan/i.test(m.name)) { m.emissive.setHex(0x1b8cac); m.emissiveIntensity = .45; }
                             else if (/green/i.test(m.name)) { m.emissive.setHex(0x1d7d4d); m.emissiveIntensity = .35; }
                             m.needsUpdate = true;
