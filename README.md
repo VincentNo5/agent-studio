@@ -15,6 +15,19 @@ Orca dispatches occupy the lobby.
 counts, active agents, rooms. This is the view to open from an iPhone; see
 [docs/REMOTE-CONTROL.md](docs/REMOTE-CONTROL.md).
 
+**System Anatomy** (`/anatomy`) — an isometric cutaway of the data plane, `/state` collector and
+the four experience views, with live counts and keyboard-accessible hotspots.
+
+<img src="docs/anatomy.png" alt="Agent Studio system anatomy" width="720">
+
+## 3D asset pipeline
+
+The live floor is still procedural and has no runtime Blender dependency. An optional Blender kit
+and the production path for agent-authored assets live in
+[docs/BLENDER-PIPELINE.md](docs/BLENDER-PIPELINE.md), with the deterministic source at
+`blender/agent_studio_kit.py`. Run `scripts/build-blender-assets.sh` when Blender is installed;
+otherwise the procedural fallback remains the source of truth.
+
 <img src="docs/mobile.png" alt="Mobile view" width="330">
 
 Built on top of [Claude Code Game Studios](https://github.com/donchitos/claude-code-game-studios)

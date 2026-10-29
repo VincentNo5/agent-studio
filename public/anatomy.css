@@ -1,0 +1,55 @@
+body[data-view="anatomy"] { overflow: auto; background: var(--bg); }
+.anatomy-grain { position: fixed; inset: 0; pointer-events: none; z-index: 0; opacity: .35; background-image: radial-gradient(#54d9fa10 1px, transparent 1px); background-size: 26px 26px; mask-image: linear-gradient(180deg, #000, transparent 80%); }
+.anatomy-top { position: sticky; top: 0; z-index: 10; display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 14px 26px; border-bottom: 1px solid var(--hair); background: #030b15e6; backdrop-filter: blur(18px); }
+.anatomy-top .brand { display: flex; align-items: center; gap: 10px; }
+.anatomy-top .brand-mark { width: 34px; height: 34px; display: grid; place-items: center; border: 1px solid #54d9fa66; border-radius: 9px; color: var(--cyan); font-size: 18px; }
+.anatomy-top h1 { font-size: 14px; letter-spacing: .02em; }
+.anatomy-top p { color: var(--muted); font-size: 10px; margin-top: 2px; }
+.anatomy-top .view-links { display: flex; flex-wrap: wrap; gap: 5px; }
+.anatomy-top .view-links a { font-size: 10px; color: var(--muted); padding: 7px 10px; border: 1px solid transparent; border-radius: 6px; }
+.anatomy-top .view-links a:hover, .anatomy-top .view-links a[aria-current="page"] { color: var(--ice); border-color: var(--hair); background: #0f253a99; }
+.anatomy-shell { position: relative; z-index: 1; max-width: 1540px; margin: 0 auto; padding: 34px 26px 60px; }
+.anatomy-intro { max-width: 760px; margin-bottom: 26px; }
+.anatomy-intro h2 { font-size: clamp(28px, 3.2vw, 46px); line-height: 1.02; letter-spacing: -.045em; margin: 10px 0 12px; }
+.anatomy-intro p { color: var(--muted); max-width: 680px; line-height: 1.65; }
+.anatomy-intro code { color: var(--cyan); font-family: var(--mono); font-size: 11px; }
+.anatomy-layout { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 18px; align-items: start; }
+.anatomy-stage { min-width: 0; border: 1px solid var(--hair); border-radius: 14px; background: radial-gradient(ellipse at 50% 0, #0d2b43, #04101c 70%); box-shadow: 0 30px 80px #0008, inset 0 1px #ffffff0a; overflow: hidden; }
+.stage-toolbar { display: flex; justify-content: space-between; gap: 12px; align-items: center; padding: 12px 14px; border-bottom: 1px solid var(--hair); }
+.live-pill { display: inline-flex; align-items: center; gap: 6px; font-size: 10px; color: var(--green); }
+.live-pill i { width: 6px; height: 6px; border-radius: 50%; background: currentColor; box-shadow: 0 0 10px currentColor; }
+.stage-hint { font-size: 10px; color: var(--faint); }
+.stage-scroll { overflow: auto; }
+.anatomy-stage svg { display: block; width: 100%; min-width: 780px; height: auto; }
+.plane-label { fill: #7f9bb0; font: 10px var(--mono); letter-spacing: .16em; }
+.iso-grid path { filter: drop-shadow(0 18px 30px #0006); }
+.flow path { fill: none; stroke: #54d9fa; stroke-opacity: .32; stroke-width: 1.2; stroke-dasharray: 3 6; }
+.node { cursor: pointer; }
+.node rect { fill: #0a2134d9; stroke: #54d9fa3d; stroke-width: 1; transition: fill .18s, stroke .18s; }
+.node:hover rect, .node:focus-visible rect { fill: #123a55; stroke: #54d9fa99; }
+.node.selected rect { fill: #0c3551; stroke: var(--cyan); stroke-width: 1.5; }
+.node text { fill: var(--ice); font: 12px var(--font); }
+.node .node-sub { fill: var(--muted); font: 9px var(--mono); letter-spacing: .02em; }
+.node .node-metric { fill: var(--cyan); font: 11px var(--mono); }
+.node circle { fill: var(--green); opacity: .8; }
+.node--collector rect { fill: #0b2b42e6; stroke: #ffb54755; }
+.node--future rect { fill: #1b1409b8; stroke: #ffb54766; stroke-dasharray: 5 4; }
+.node--future circle { fill: var(--amber); }
+.node:focus-visible { outline: none; }
+.anatomy-inspector { position: sticky; top: 94px; border: 1px solid var(--hair); border-radius: 14px; padding: 22px; background: linear-gradient(160deg, #0d2438d9, #050f1bd9); box-shadow: 0 24px 60px #0007; }
+.anatomy-inspector h2 { font-size: 22px; letter-spacing: -.035em; margin: 10px 0 10px; }
+.anatomy-inspector p { color: var(--muted); line-height: 1.65; font-size: 12px; }
+.anatomy-inspector dl { margin: 20px 0; display: grid; gap: 12px; }
+.anatomy-inspector dl div { display: grid; grid-template-columns: 70px 1fr; gap: 10px; border-top: 1px solid var(--hair); padding-top: 10px; }
+.anatomy-inspector dt { color: var(--faint); font: 9px var(--mono); letter-spacing: .1em; text-transform: uppercase; }
+.anatomy-inspector dd { color: var(--ice); font-size: 11px; }
+.inspector-link { display: inline-flex; color: var(--cyan); font-size: 11px; padding-top: 8px; }
+@media (max-width: 900px) {
+  .anatomy-top { align-items: flex-start; flex-direction: column; padding: 14px 18px; }
+  .anatomy-shell { padding: 24px 18px 48px; }
+  .anatomy-layout { grid-template-columns: 1fr; }
+  .anatomy-inspector { position: static; }
+  .stage-hint { display: none; }
+}
+@media (prefers-reduced-motion: reduce) { .node rect { transition: none; } }
+.anatomy-top .view-links { position: static; left: auto; top: auto; margin-left: auto; }

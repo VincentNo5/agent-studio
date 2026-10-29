@@ -671,6 +671,9 @@ Bun.serve({
     if (path === "/mobile") {
       return new Response(Bun.file(`${DIR}/mobile.html`), { headers: { "content-type": "text/html; charset=utf-8" } });
     }
+    if (path === "/anatomy") {
+      return new Response(Bun.file(`${DIR}/anatomy.html`), { headers: { "content-type": "text/html; charset=utf-8" } });
+    }
     if (path.startsWith("/worker/")) {
       return workerOutput(path.slice("/worker/".length));
     }

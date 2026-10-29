@@ -11,11 +11,11 @@ beforeAll(async () => {
 });
 const request = (path: string) => handler(new Request(`http://127.0.0.1:8788${path}`), local);
 test('desktop entry points and every recursively imported module resolve locally', async () => {
-  for (const path of ['/', '/floor', '/mobile', '/roster.json', '/assets/studio.css']) {
+  for (const path of ['/', '/floor', '/mobile', '/anatomy', '/roster.json', '/assets/studio.css', '/assets/anatomy.css']) {
     const res = await request(path); expect(res.status).toBe(200); expect((await res.text()).length).toBeGreaterThan(0);
   }
   const visited = new Set<string>();
-  const queue = ['/assets/studio.js', '/assets/hq3d.js'];
+  const queue = ['/assets/studio.js', '/assets/hq3d.js', '/assets/anatomy.js'];
   while (queue.length) {
     const path = queue.pop()!; if (visited.has(path)) continue; visited.add(path);
     const res = await request(path); expect(res.status).toBe(200); expect(res.headers.get('content-type')).toContain('javascript');

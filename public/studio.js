@@ -84,7 +84,7 @@ $('hud').innerHTML = `
  <button class="settings-button" id="settings" aria-label="Rendering settings" title="Rendering settings">⚙</button>
 </header>
 <div class="world-heading"><div class="eyebrow">Headquarters · live spatial view</div><h2 id="world-title">ONE STUDIO. EVERY AGENT.</h2><p id="world-subtitle">Three floors. One connected operation.</p></div>
-<nav class="view-links" aria-label="Studio view"><a href="/" ${!isFloor ? 'aria-current="page"' : ''}>Command overview</a><a href="/floor" ${isFloor ? 'aria-current="page"' : ''}>Floor view ↗</a></nav>
+<nav class="view-links" aria-label="Studio view"><a href="/" ${!isFloor ? 'aria-current="page"' : ''}>Command overview</a><a href="/floor" ${isFloor ? 'aria-current="page"' : ''}>Floor view ↗</a><a href="/anatomy">Anatomy ↗</a></nav>
 <aside class="left-column" aria-label="Agent status, task board and operations">
  <section class="panel agent-status" aria-labelledby="agent-status-title"><div class="panel-head"><h2 id="agent-status-title">Agent status</h2><small id="status-total">—</small></div>
   <div class="status-strip">${['working', 'completed', 'idle'].map(s => `<div style="--s:${meta(s).color}" data-status="${s}"><b>${icon(s)}<span id="count-${s}">—</span></b><span>${meta(s).label}</span></div>`).join('')}</div>
