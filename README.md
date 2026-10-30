@@ -4,7 +4,8 @@ A live **three-dimensional headquarters** for multi-agent work, with a cinematic
 HUD and two desktop views of the same read-only state.
 
 **Command Overview** (`/`) — the complete single-floor campus, task lanes, active roles,
-agent inspection, live events, and operational panels.
+agent inspection, live events, and operational panels. Click a character to show a short
+role-specific line above the floor.
 
 **Studio Floor** (`/floor`) — the spatial-first version of the same world. The command
 dashboards are hidden so the two enlarged coding offices, central ORCA hub and collaboration

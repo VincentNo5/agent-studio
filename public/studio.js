@@ -684,7 +684,7 @@ connection();
 poll();
 clockTimer = setInterval(connection, 1000);
 outputTimer = setInterval(refreshOutput, 2000);
-import('./hq3d.js?v=11').then(({ Headquarters }) => {
+import('./hq3d.js?v=13').then(({ Headquarters }) => {
     if (closed)
         return;
     world = new Headquarters($('world'), { onSelect: id => selectAgent(id, false), onFPS: fps => { $('fps').textContent = `${fps} FPS`; }, onStats: stats => { $('fps').title = `${stats.calls} draw calls · ${stats.triangles.toLocaleString()} triangles · DPR ${stats.dpr.toFixed(2)}`; }, onFloor: floorChanged });

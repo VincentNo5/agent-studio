@@ -30,6 +30,46 @@ const ROLE_GROUPS = {
         ['UNREAL', 0xff9f5a, ['ue-blueprint-specialist', 'ue-gas-specialist', 'ue-replication-specialist', 'ue-umg-specialist', 'unreal-specialist']]
     ]
 };
+
+const SPEECH_GENERIC = [
+    'Shipping beats perfect.', 'The build is green. Suspicious.', 'I found the bug. It was me.',
+    'One more commit and we ship.', 'I need five more minutes.', 'This is fine. Probably.',
+    'Who moved my semicolon?', 'The tests pass locally.', 'I have a theory about this.',
+    'Coffee first, then refactor.'
+];
+const SPEECH_VISITORS = [
+    'Just passing through.', 'I brought snacks.', 'Is this the engine room?',
+    'I am only here for the coffee.', 'Do not mind me.'
+];
+const SPEECH_ROLES = {
+    'ai-programmer': ['The pathfinding is learning to cut corners.', 'My NPCs are becoming self-aware.'],
+    'analytics-engineer': ['I found a metric nobody asked for.', 'The dashboard is lying, gently.'],
+    'devops-engineer': ['It works on my machine. That is the problem.', 'The pipeline is green. For now.'],
+    'engine-programmer': ['I shaved 0.2ms off the frame.', 'The renderer and I have an understanding.'],
+    'gameplay-programmer': ['The jump feels 4% too floaty.', 'I turned the fun knob up to eleven.'],
+    'network-programmer': ['Latency is just spice.', 'The packet loss is a feature.'],
+    'performance-analyst': ['The profiler says it is the profiler.', 'Sixty frames or it did not happen.'],
+    'qa-tester': ['I broke it. You are welcome.', 'I found an edge case in the edge case.'],
+    'security-engineer': ['I trust no input.', 'That is not a bug, it is an exploit.'],
+    'tools-programmer': ['I built a tool to avoid this meeting.', 'The build script has feelings now.'],
+    'ui-programmer': ['The button is one pixel off.', 'The hover state is load-bearing.'],
+    'godot-csharp-specialist': ['C# in Godot? Bold.', 'The signals are strong with this one.'],
+    'godot-gdextension-specialist': ['I live in the extension layer.', 'Native code, native problems.'],
+    'godot-gdscript-specialist': ['GDScript is fine. Mostly.', 'Tabs, not spaces. Obviously.'],
+    'godot-shader-specialist': ['One more shader pass.', 'The normals are lying again.'],
+    'godot-specialist': ['Godot says hello.', 'The scene tree is balanced today.'],
+    'unity-addressables-specialist': ['Everything is an asset.', 'The addressables are addressable.'],
+    'unity-dots-specialist': ['Data-oriented. Feelings-oriented.', 'The entities are behaving.'],
+    'unity-shader-specialist': ['One more shader pass.', 'The specular is doing something.'],
+    'unity-specialist': ['The scene is not dirty.', 'Unity and I have reached an accord.'],
+    'unity-ui-specialist': ['The UI is pixel perfect. Trust me.', 'Canvas scaling is a lifestyle.'],
+    'ue-blueprint-specialist': ['Blueprints are just visual C++.', 'The node graph is load-bearing.'],
+    'ue-gas-specialist': ['Gameplay ability: procrastinate.', 'The ability system has abilities.'],
+    'ue-replication-specialist': ['It is only a race condition if they notice.', 'Replicate all the things.'],
+    'ue-umg-specialist': ['UMG: U Must Grind.', 'The widget hierarchy is a mood.'],
+    'unreal-specialist': ['Unreal says hello.', 'The engine is warm today.']
+};
+
 const ROLE_SHORT = {
     'ai-programmer': 'AI', 'gameplay-programmer': 'GAMEPLAY', 'engine-programmer': 'ENGINE',
     'network-programmer': 'NETWORK', 'security-engineer': 'SECURITY', 'tools-programmer': 'TOOLS',
@@ -67,6 +107,17 @@ export class Headquarters {
         this.tagLayer = document.createElement('div');
         this.tagLayer.className = 'role-tag-layer';
         container.append(this.tagLayer);
+        this.speechLayer = document.createElement('div');
+        this.speechLayer.className = 'speech-layer';
+        this.speechLayer.setAttribute('aria-live', 'polite');
+        this.speechBubble = document.createElement('div');
+        this.speechBubble.className = 'speech-bubble';
+        this.speechBubble.setAttribute('role', 'status');
+        this.speechLayer.append(this.speechBubble);
+        container.append(this.speechLayer);
+        this.speechActor = null;
+        this.speechTimer = null;
+        this.lastSpeech = '';
         const environment = new RoomEnvironment(), pmrem = new THREE.PMREMGenerator(this.renderer);
         this.environmentTarget = pmrem.fromScene(environment, .04);
         this.scene.environment = this.environmentTarget.texture;
@@ -1270,6 +1321,8 @@ export class Headquarters {
                 this.scene.remove(a.group);
                 this.roleLabels.get(id)?.remove();
                 this.roleLabels.delete(id);
+                if (this.speechActor === id)
+                    this.hideSpeech();
                 this.pickables = this.pickables.filter(p => p.userData.actorId !== id);
                 this.actors.delete(id);
                 this.actorBatchesDirty = true;
@@ -1346,8 +1399,10 @@ export class Headquarters {
             this.streams.push(new THREE.CatmullRomCurve3([new THREE.Vector3(0, 1.2, 0), new THREE.Vector3(x * .35, 2.4, z * .35), new THREE.Vector3(x * .7, 1.2, z * .7), new THREE.Vector3(x, .9, z)]));
         } this.energy.geometry.setDrawRange(0, this.streams.length * (this.low ? 12 : 48)); }
     pick(event) { const rect = this.renderer.domElement.getBoundingClientRect(); this.pointer.set((event.clientX - rect.left) / rect.width * 2 - 1, -(event.clientY - rect.top) / rect.height * 2 + 1); this.ray.setFromCamera(this.pointer, this.camera); const hit = this.ray.intersectObjects(this.pickables)[0]; if (hit) {
-        this.select(hit.object.userData.actorId);
-        this.onSelect(hit.object.userData.actorId);
+        const id = hit.object.userData.actorId;
+        this.speak(id);
+        this.select(id);
+        this.onSelect(id);
     } }
     select(id, focus = true) { const a = this.actors.get(id); this.selected = id; this.focusRing.visible = !!a; this.focusLight.visible = !!a; if (a && focus) {
         this.showLabels(false);
@@ -1417,6 +1472,49 @@ export class Headquarters {
         this.camera.position.copy(position);
         this.flight = null;
     } }
+    speak(id) {
+        const a = this.actors.get(id);
+        if (!a || !this.speechBubble)
+            return;
+        const lines = a.visitor ? SPEECH_VISITORS : (SPEECH_ROLES[id] || SPEECH_GENERIC);
+        let text = lines[Math.floor(Math.random() * lines.length)];
+        if (lines.length > 1 && text === this.lastSpeech)
+            text = lines[(lines.indexOf(text) + 1) % lines.length];
+        this.lastSpeech = text;
+        this.speechActor = id;
+        this.speechBubble.textContent = text;
+        this.speechBubble.style.display = 'block';
+        this.speechBubble.classList.remove('show');
+        void this.speechBubble.offsetWidth;
+        this.speechBubble.classList.add('show');
+        clearTimeout(this.speechTimer);
+        this.speechTimer = setTimeout(() => this.hideSpeech(), 6000);
+        this.updateSpeech();
+    }
+    hideSpeech() {
+        clearTimeout(this.speechTimer);
+        this.speechTimer = null;
+        this.speechActor = null;
+        if (!this.speechBubble)
+            return;
+        this.speechBubble.classList.remove('show');
+        this.speechBubble.style.display = 'none';
+    }
+    updateSpeech() {
+        if (!this.speechBubble || !this.speechActor)
+            return;
+        const a = this.actors.get(this.speechActor);
+        if (!a) { this.hideSpeech(); return; }
+        const w = this.container.clientWidth, h = this.container.clientHeight, v = new THREE.Vector3();
+        a.group.getWorldPosition(v);
+        v.y += 2.55;
+        v.project(this.camera);
+        const x = (v.x * .5 + .5) * w, y = (-v.y * .5 + .5) * h;
+        const bx = Math.max(110, Math.min(w - 110, x));
+        const by = Math.max(70, Math.min(h - 80, y));
+        this.speechBubble.style.display = 'block';
+        this.speechBubble.style.transform = `translate(-50%,-100%) translate(${bx}px,${by}px)`;
+    }
     setRoleLabels(value) { this.showRoleLabels = value; if (this.tagLayer) this.tagLayer.style.display = value ? 'block' : 'none'; }
     updateRoleTags() {
         if (!this.tagLayer) return;
@@ -1493,6 +1591,7 @@ export class Headquarters {
         }
         this.updateActorInstances();
         this.updateRoleTags();
+        this.updateSpeech();
         if (this.low)
             this.renderer.render(this.scene, this.camera);
         else
@@ -1648,7 +1747,7 @@ export class Headquarters {
             }, undefined, () => resolve(false));
         });
     }
-    dispose() { this.disposed = true; this.tagLayer?.remove(); cancelAnimationFrame(this.frame); this.controls.dispose(); removeEventListener('resize', this.resizeHandler); document.removeEventListener('visibilitychange', this.visibilityHandler); this.renderer.domElement.removeEventListener('pointerdown', this.pointerDown); this.renderer.domElement.removeEventListener('pointerup', this.pointerUp); this.renderer.domElement.removeEventListener('pointermove', this.hoverHandler); this.renderer.domElement.removeEventListener('pointerleave', this.leaveHandler); this.renderer.domElement.removeEventListener('keydown', this.keyHandler); const gs = new Set(this.geometries.values()), ms = new Set(this.materials.values()); this.scene.traverse(o => { o.shadow?.dispose(); if (o.isInstancedMesh)
+    dispose() { this.disposed = true; clearTimeout(this.speechTimer); this.tagLayer?.remove(); this.speechLayer?.remove(); cancelAnimationFrame(this.frame); this.controls.dispose(); removeEventListener('resize', this.resizeHandler); document.removeEventListener('visibilitychange', this.visibilityHandler); this.renderer.domElement.removeEventListener('pointerdown', this.pointerDown); this.renderer.domElement.removeEventListener('pointerup', this.pointerUp); this.renderer.domElement.removeEventListener('pointermove', this.hoverHandler); this.renderer.domElement.removeEventListener('pointerleave', this.leaveHandler); this.renderer.domElement.removeEventListener('keydown', this.keyHandler); const gs = new Set(this.geometries.values()), ms = new Set(this.materials.values()); this.scene.traverse(o => { o.shadow?.dispose(); if (o.isInstancedMesh)
         o.dispose(); if (o.geometry)
         gs.add(o.geometry); if (o.material)
         for (const m of Array.isArray(o.material) ? o.material : [o.material])
