@@ -93,7 +93,7 @@ export class Headquarters {
         this.dpr = this.dprCap;
         this.scene = new THREE.Scene();
         this.scene.background = new THREE.Color(0xcfe9f7);
-        this.scene.fog = new THREE.FogExp2(0xe8f4f8, .0015);
+        this.scene.fog = new THREE.FogExp2(0xf3e6d4, .0015);
         this.camera = new THREE.PerspectiveCamera(40, 1, .1, 240);
         this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false, powerPreference: 'high-performance' });
         this.renderer.setPixelRatio(this.dpr);
@@ -300,9 +300,9 @@ export class Headquarters {
         c.height = 512;
         const g = c.getContext('2d'), grad = g.createLinearGradient(0, 0, 0, 512);
         grad.addColorStop(0, '#2f8fd8');
-        grad.addColorStop(.45, '#9ed2f2');
-        grad.addColorStop(.72, '#e7f5fb');
-        grad.addColorStop(1, '#f4f0e4');
+        grad.addColorStop(.42, '#a9d5ee');
+        grad.addColorStop(.72, '#f5ead8');
+        grad.addColorStop(1, '#f7dfc2');
         g.fillStyle = grad;
         g.fillRect(0, 0, 2, 512);
         const texture = new THREE.CanvasTexture(c);
@@ -327,39 +327,51 @@ export class Headquarters {
         }
     }
     woodTexture() {
-        return this.canvasTexture(512, 512, (g) => {
-            g.fillStyle = '#b79a76';
-            g.fillRect(0, 0, 512, 512);
-            for (let row = 0; row < 8; row++) {
-                const y = row * 64;
-                g.fillStyle = row % 2 ? '#c1a37f' : '#b19370';
-                g.fillRect(0, y, 512, 62);
-                g.strokeStyle = 'rgba(95,66,44,.28)';
-                g.lineWidth = 2;
-                g.beginPath();
-                g.moveTo(0, y + 63);
-                g.lineTo(512, y + 63);
-                g.stroke();
-                for (let i = 0; i < 14; i++) {
-                    const yy = y + 6 + ((i * 37 + row * 11) % 50), xx = (i * 83 + row * 29) % 512;
-                    g.strokeStyle = 'rgba(116,82,54,.12)';
-                    g.lineWidth = 1;
+        return this.canvasTexture(1024, 1024, (g) => {
+            g.fillStyle = '#a97444';
+            g.fillRect(0, 0, 1024, 1024);
+            const rows = 8, rowH = 1024 / rows;
+            for (let row = 0; row < rows; row++) {
+                const y = row * rowH;
+                const tone = ['#b9824f', '#a97444', '#c28f5d', '#9d6a3f', '#b27b4b'][row % 5];
+                g.fillStyle = tone;
+                g.fillRect(0, y, 1024, rowH - 3);
+                // Long grain: fine, slightly wandering lines with a warm highlight.
+                for (let i = 0; i < 34; i++) {
+                    const yy = y + 8 + ((i * 31 + row * 17) % (rowH - 16));
+                    const xx = (i * 149 + row * 71) % 1024;
+                    g.strokeStyle = i % 3 ? 'rgba(92,58,33,.13)' : 'rgba(255,236,207,.18)';
+                    g.lineWidth = i % 5 === 0 ? 2.2 : 1;
                     g.beginPath();
-                    g.moveTo(xx, yy);
-                    g.bezierCurveTo(xx + 40, yy - 5, xx + 80, yy + 5, xx + 120, yy);
+                    g.moveTo(xx - 120, yy);
+                    g.bezierCurveTo(xx - 30, yy - 7, xx + 90, yy + 7, xx + 260, yy);
                     g.stroke();
                 }
-            }
-        });
-    }
-    carpetTexture() {
-        return this.canvasTexture(256, 256, (g) => {
-            g.fillStyle = '#cfc5b5';
-            g.fillRect(0, 0, 256, 256);
-            for (let i = 0; i < 1800; i++) {
-                const v = 185 + (i * 37 % 45);
-                g.fillStyle = `rgba(${v},${v - 8},${v - 18},.35)`;
-                g.fillRect((i * 73) % 256, (i * 151) % 256, 2, 2);
+                // A few soft knots keep the oak from looking like a flat colour swatch.
+                if (row % 3 === 1) {
+                    const kx = 140 + (row * 233) % 740, ky = y + rowH * .52;
+                    for (let k = 0; k < 4; k++) {
+                        g.strokeStyle = `rgba(86,52,29,${.16 - k * .03})`;
+                        g.lineWidth = 2;
+                        g.beginPath();
+                        g.ellipse(kx, ky, 18 + k * 10, 7 + k * 5, .08, 0, Math.PI * 2);
+                        g.stroke();
+                    }
+                }
+                // Staggered end joints and a fine bevel line at each plank edge.
+                const joints = row % 2 ? [256, 640] : [448, 864];
+                for (const jx of joints) {
+                    g.strokeStyle = 'rgba(78,46,26,.38)';
+                    g.lineWidth = 3;
+                    g.beginPath(); g.moveTo(jx, y); g.lineTo(jx, y + rowH - 3); g.stroke();
+                    g.strokeStyle = 'rgba(255,240,214,.2)';
+                    g.lineWidth = 1;
+                    g.beginPath(); g.moveTo(jx + 2, y + 3); g.lineTo(jx + 2, y + rowH - 6); g.stroke();
+                }
+                g.fillStyle = 'rgba(80,48,28,.26)';
+                g.fillRect(0, y + rowH - 3, 1024, 3);
+                g.fillStyle = 'rgba(255,241,216,.2)';
+                g.fillRect(0, y, 1024, 2);
             }
         });
     }
@@ -406,7 +418,7 @@ export class Headquarters {
         key.shadow.normalBias = .035;
         this.scene.add(key);
         this.key = key;
-        const rim = new THREE.DirectionalLight(0xa8dcff, .8);
+        const rim = new THREE.DirectionalLight(0xffd6a6, .62);
         rim.position.set(10, 18, -15);
         this.scene.add(rim);
         // One open floor: warm collaboration pools, cool task light and a cyan hub.
@@ -491,9 +503,14 @@ export class Headquarters {
         canvas.width = 1024;
         canvas.height = 256;
         const g = canvas.getContext('2d');
-        g.fillStyle = '#1b2420';
+        g.fillStyle = '#f6ead8';
         g.fillRect(0, 0, 1024, 256);
-        g.fillStyle = 'rgba(255,255,255,.06)';
+        g.strokeStyle = 'rgba(176,132,70,.85)';
+        g.lineWidth = 10;
+        g.beginPath();
+        g.roundRect(18, 18, 988, 220, 34);
+        g.stroke();
+        g.fillStyle = 'rgba(255,255,255,.32)';
         g.beginPath();
         g.roundRect(118, 28, 788, 190, 28);
         g.fill();
@@ -501,12 +518,12 @@ export class Headquarters {
         g.textBaseline = 'middle';
         g.font = '700 126px "Avenir Next", "Trebuchet MS", sans-serif';
         g.lineWidth = 12;
-        g.strokeStyle = 'rgba(28,35,30,.55)';
+        g.strokeStyle = 'rgba(255,248,235,.8)';
         g.strokeText(text, 512, 118);
-        g.fillStyle = color;
+        g.fillStyle = '#3b2a1f';
         g.fillText(text, 512, 118);
         g.fillStyle = color;
-        g.globalAlpha = .75;
+        g.globalAlpha = .9;
         g.fillRect(300, 196, 424, 8);
         g.globalAlpha = 1;
         const texture = new THREE.CanvasTexture(canvas);
@@ -542,10 +559,23 @@ export class Headquarters {
         const metal = this.mat('metal', 0x9aa9a5, .32), edge = this.mat('edge', 0x859995, .38), floor = this.mat('floor', 0xffffff, .2), dark = this.mat('dark', 0x344545, .45);
         floor.map = this.woodTexture();
         floor.map.wrapS = floor.map.wrapT = THREE.RepeatWrapping;
-        floor.map.repeat.set(5, 4);
+        floor.map.repeat.set(4, 3);
+        floor.roughness = .42;
+        floor.metalness = .02;
+        floor.color.set(0xffffff);
         floor.needsUpdate = true;
         const cyan = this.mat('cyan', CYAN, .2, 2.4), soft = this.mat('soft', 0x8fb3ad, .3, .35), amber = this.mat('amber', AMBER, .2, 2.4);
-        const glass = this.mat('glass', 0xbfe6f2, .05, .02, .08);
+        const glass = this.mat('glass', 0xd3e9e1, .3, .01, .28);
+        glass.roughness = .06;
+        glass.metalness = .16;
+        glass.envMapIntensity = 1.25;
+        const brass = this.mat('brass', 0xc9a15a, .88);
+        brass.roughness = .24;
+        const frost = this.mat('frost', 0xfff3df, .03, .01, .72);
+        frost.roughness = .78;
+        const cream = this.mat('cream', 0xf2e6d2, .05);
+        cream.roughness = .64;
+        const fairy = this.mat('fairy', 0xffd89a, .12, 2.6);
         const shape = new THREE.Shape(), w = 20, d = 14, r = 3;
         shape.moveTo(-w + r, -d);
         shape.lineTo(w - r, -d);
@@ -575,14 +605,11 @@ export class Headquarters {
         this.box(0, .02, -14.16, 39, .03, .06, cyan);
         this.box(-20.16, .02, 0, .06, .03, 28, cyan);
         this.box(20.16, .02, 0, .06, .03, 28, cyan);
-        for (let x = -17; x <= 17; x += 4)
-            this.box(x, .025, 0, .015, .01, 27, edge);
-        for (let z = -12; z <= 12; z += 4)
-            this.box(0, .026, z, 39, .01, .015, edge);
-        for (let z = -13; z <= 13; z += 1.25)
-            this.box(0, .028, z, 39, .004, .006, this.mat('plankSeam', 0xb49d82, .05));
-        for (const x of [-7, 7])
-            this.box(x, .037, 0, .035, .012, 27, soft);
+        // Thin brass expansion inlays let the oak planks read without a game-grid overlay.
+        for (const x of [-13, -6.5, 0, 6.5, 13])
+            this.box(x, .031, 0, .014, .008, 27.6, brass);
+        for (const z of [-9, 9])
+            this.box(0, .031, z, 39.4, .008, .014, brass);
         // Central collaboration hub and ORCA table.
         const hubR = 3.4;
         this.cyl(0, .16, 0, hubR + .65, .3, dark);
@@ -686,13 +713,9 @@ export class Headquarters {
         this.beacons ??= [];
         this.gamePulse ??= [];
         await Promise.all([this.kitPromise, this.gameKitPromise]);
-        const glass = this.materials.get('glass'), edge = this.materials.get('edge');
-        if (!this.materials.has('rug'))
-            this.materials.set('rug', (() => { const m = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: .92, metalness: .02 }); m.map = this.carpetTexture(); m.map.wrapS = m.map.wrapT = THREE.RepeatWrapping; m.map.repeat.set(3, 3); return m; })());
-        const rug = this.materials.get('rug');
         for (const room of roster.rooms) {
             const [cx, cz] = roomLayout[room] || [0, 0], members = roster.agents.filter(a => a.room === room), color = ROOM_COLORS[room] || CYAN;
-            const y = 0;
+            const y = 0, edge = this.materials.get('edge');
             const groups = ROLE_GROUPS[room] || [], groupOrder = new Map();
             groups.forEach(([name, , names], i) => names.forEach(n => groupOrder.set(n, i)));
             members.sort((a, b) => (groupOrder.get(a.name) ?? 99) - (groupOrder.get(b.name) ?? 99) || a.name.localeCompare(b.name));
@@ -705,25 +728,32 @@ export class Headquarters {
             const cols = members.length > 12 ? 5 : 4;
             const spacing = 2.4;
             const rows = Math.ceil(members.length / cols), width = (Math.min(cols, members.length) - 1) * spacing, rowGap = 2.3;
-            // Warm floor zone under each department: warm interiors against the cool deck and cyan accents.
-            this.box(cx, y + .122, cz, officeW, .006, officeD, rug);
-            // Coloured, softly glowing floor inlays turn each department into a distinct game zone.
-            const zoneW = officeW, zoneD = officeD, zoneZ = cz;
-            const zone = new THREE.Mesh(new THREE.PlaneGeometry(zoneW, zoneD), new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: .14, roughness: .95, metalness: .02, transparent: true, opacity: .22, depthWrite: false }));
-            zone.rotation.x = -Math.PI / 2;
-            zone.position.set(cx, y + .129, zoneZ);
-            zone.renderOrder = 2;
-            this.scene.add(zone);
-            this.box(cx, y + .134, zoneZ + zoneD / 2, zoneW, .01, .045, this.mat(`zoneLine${color}`, color, .2, 1.6));
-            // Office shell: glass back and sides, open front to the shared campus.
-            this.box(cx, y + 1.6, cz - officeD / 2, officeW, 3.0, .03, glass);
-            for (const side of [-1, 1])
-                this.box(cx + side * officeW / 2, y + 1.6, cz, .03, 3.0, officeD, glass);
-            this.box(cx, y + 3.12, cz - officeD / 2, officeW, .05, .06, edge);
+            const brass = this.materials.get('brass'), cream = this.materials.get('cream');
+            // Oak floor continues through each studio; brass inlays mark the room edge.
+            for (const side of [-1, 1]) {
+                this.box(cx, y + .132, cz + side * officeD / 2, officeW, .012, .035, brass);
+                this.box(cx + side * officeW / 2, y + .132, cz, .035, .012, officeD, brass);
+            }
+            // Premium glass enclosure: brass-framed, frosted-band partitions with an arched portal.
+            const wallH = 2.9, frontZ = cz + officeD / 2, opening = 4.6, seg = (officeW - opening) / 2;
+            this.partition(cx, y + 1.55, cz - officeD / 2, officeW, wallH, 'x');
+            for (const side of [-1, 1]) {
+                this.partition(cx + side * officeW / 2, y + 1.55, cz, officeD, wallH, 'z');
+                this.partition(cx + side * (opening / 2 + seg / 2), y + 1.55, frontZ, seg, wallH, 'x');
+                this.box(cx + side * opening / 2, y + 1.55, frontZ, .075, wallH, .075, brass);
+            }
+            const archGeo = this.geo(`portalArch${opening}`, () => new THREE.TorusGeometry(opening / 2, .055, 8, 48, Math.PI));
+            this.mesh(archGeo, brass, cx, y + 2.28, frontZ + .055, 1, .32, 1, this.scene, false);
+            this.mesh(this.geo('portalStar', () => new THREE.OctahedronGeometry(1, 0)), this.mat('star', 0xffd36e, .55, 1.2), cx, y + 3.03, frontZ + .07, .09, .13, .09, this.scene, false);
+            this.box(cx, y + .135, frontZ, opening, .012, .05, brass);
+            this.label(room === 'engineering' ? 'ENGINEERING' : 'ENGINES', cx, y + 3.35, frontZ + .08, 4.6, '#ffe0a3', 'PREMIUM GLASS STUDIO');
+            this.awning(cx, y + 3.08, frontZ + .28, officeW - .5);
+            const officeLight = new THREE.PointLight(0xffd6a3, 55, 10, 2);
+            officeLight.position.set(cx, 3.7, cz);
+            this.scene.add(officeLight);
             // Central collaboration spine between the two adjacent offices (created once).
             if (room === 'engineering') {
-                this.box(0, y + 1.55, cz, .035, 2.9, officeD, glass);
-                this.box(0, y + 3.02, cz, .05, .05, officeD, edge);
+                this.partition(0, y + 1.55, cz, officeD, wallH, 'z');
                 for (const z of [cz - 3.6, cz, cz + 3.6])
                     this.plant(0, y, z, .62);
                 this.box(0, y + 1.05, cz + 4.2, 1.9, 1.1, .06, this.mat('whiteboard', 0xf4f2ea, .05));
@@ -736,13 +766,12 @@ export class Headquarters {
                 this.plant(cx + side * (officeW / 2 - .9), y, cz + officeD / 2 - .9, .72);
             }
             this.greenWall(cx - officeW / 2 + .18, y + 1.15, cz + .2, 2.2, 1.6);
-            // Low glass side partitions between neighbouring departments.
+            // Low framed glass dividers between neighbouring work clusters.
             for (const side of [-1, 1]) {
                 const px = cx + side * (width / 2 + 1.15);
                 if (Math.abs(px) > 23.2)
                     continue;
-                this.box(px, y + .75, cz - .9 + (rows - 1) * .7, .02, 1.25, rows * rowGap + .6, glass);
-                this.box(px, y + 1.39, cz - .9 + (rows - 1) * .7, .05, .04, rows * rowGap + .6, edge);
+                this.partition(px, y + .75, cz - .9 + (rows - 1) * .7, rows * rowGap + .6, 1.25, 'z', { frost: false });
             }
             members.forEach((role, i) => {
                 const x = cx + (i % cols - (Math.min(cols, members.length) - 1) / 2) * spacing;
@@ -762,14 +791,13 @@ export class Headquarters {
     }
     buildKitInstances() {
         if (!this.kitTemplates || !this.deskSlots.length) return;
+        // The old kit desk and chair are retired: the walnut/brass desk and leather chair are procedural.
         const targets = {
-            'KIT_Desk': this.deskSlots,
-            'KIT_Chair': this.deskSlots,
             'KIT_Plant': this.deskSlots.filter((_, i) => i % 5 === 0),
             'KIT_Rack': this.deskSlots.filter((_, i) => i % 12 === 0)
         };
-        const scales = { 'KIT_Desk': [.78, 1, .78], 'KIT_Chair': [.9, .9, .9], 'KIT_Plant': [.8, .8, .8], 'KIT_Rack': [.9, .9, .9] };
-        const offsets = { 'KIT_Chair': [0, 0, 1.02], 'KIT_Plant': [.66, 0, -.18], 'KIT_Rack': [0, 0, -1.05] };
+        const scales = { 'KIT_Plant': [.8, .8, .8], 'KIT_Rack': [.9, .9, .9] };
+        const offsets = { 'KIT_Plant': [.66, 0, -.18], 'KIT_Rack': [0, 0, -1.05] };
         const matrix = new THREE.Matrix4(), local = new THREE.Matrix4();
         for (const [asset, slots] of Object.entries(targets)) {
             const parts = this.kitTemplates.get(asset);
@@ -791,76 +819,130 @@ export class Headquarters {
             }
         }
     }
+
+    partition(x, y, z, w, h, axis = 'x', { posts = true, top = true, bottom = true, frost = true, lights = true } = {}) {
+        const glass = this.materials.get('glass'), brass = this.materials.get('brass'), frostMat = this.materials.get('frost'), fairy = this.materials.get('fairy');
+        const thick = .04;
+        this.box(x, y, z, axis === 'x' ? w : thick, h, axis === 'x' ? thick : w, glass);
+        if (bottom)
+            this.box(x, y - h / 2, z, axis === 'x' ? w : .07, .055, axis === 'x' ? .07 : w, brass);
+        if (top)
+            this.box(x, y + h / 2, z, axis === 'x' ? w : .07, .065, axis === 'x' ? .07 : w, brass);
+        const bays = Math.max(1, Math.round(w / 5));
+        if (posts)
+            for (let i = 0; i <= bays; i++) {
+                const t = -w / 2 + i * w / bays;
+                this.box(axis === 'x' ? x + t : x, y, axis === 'x' ? z : z + t, .055, h, .055, brass);
+            }
+        if (frost)
+            this.box(x, y - h / 2 + 1.55, z, axis === 'x' ? w : .055, .45, axis === 'x' ? .055 : w, frostMat);
+        if (lights) {
+            const count = Math.max(3, Math.round(w / 1.25));
+            for (let i = 0; i < count; i++) {
+                const t = -w / 2 + (i + .5) * w / count;
+                this.mesh(this.geo('fairy', () => new THREE.SphereGeometry(1, 6, 6)), fairy, axis === 'x' ? x + t : x, y + h / 2 - .04, axis === 'x' ? z : z + t, .032, .032, .032);
+            }
+        }
+    }
+
+    awning(x, y, z, w) {
+        const cream = this.materials.get('cream'), brass = this.materials.get('brass'), fairy = this.materials.get('fairy');
+        const rose = this.mat('awningRose', 0xe7b5ab, .04);
+        const n = 8, stripe = w / n;
+        for (let i = 0; i < n; i++)
+            this.box(x - w / 2 + (i + .5) * stripe, y, z, stripe - .02, .07, 1.15, i % 2 ? rose : cream);
+        this.box(x, y + .055, z + .59, w, .075, .07, brass);
+        this.box(x, y - .01, z - .55, w, .05, .05, brass);
+        // Scalloped valance: the storybook detail that reads as a boutique studio, not a cage.
+        const scallop = this.geo('awningScallop', () => new THREE.SphereGeometry(1, 12, 8, 0, Math.PI * 2, 0, Math.PI / 2));
+        for (let i = 0; i < n; i++) {
+            const t = -w / 2 + (i + .5) * stripe;
+            this.mesh(scallop, i % 2 ? rose : cream, x + t, y - .015, z + .61, stripe * .54, .22, .34);
+        }
+        for (let i = 0; i < 10; i++) {
+            const t = -w / 2 + (i + .5) * w / 10;
+            this.mesh(this.geo('fairy', () => new THREE.SphereGeometry(1, 6, 6)), fairy, x + t, y - .15, z + .66, .028, .028, .028);
+        }
+    }
     desk(x, y, z, color, key, accent = color) {
         const metal = this.materials.get('metal'), edge = this.materials.get('edge'), box = this.geometries.get('box'), h = hash(key);
         const cyl = this.geo('cyl', () => new THREE.CylinderGeometry(1, 1, 1, 32));
-        const fabric = this.mat('fabric', 0x24384c, .15), shade = this.mat('lampShade', 0x2a3644, .7), glow = this.mat('lampGlow', 0xffc887, .1, 2.6);
-        // Contact shadow grounds the desk and its chair.
-        this.mesh(this.geo('flat', () => new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2)), this.contactMaterial(), x + .15, y + .128, z + .35, 2.1, 1, 1.7);
-        this.deskSlots.push({ x, y, z });
-        // The Blender kit supplies the desk shell when available; the procedural
-        // monitor, status strip and lamp stay because they are live data surfaces.
-        if (!this.kitTemplates) {
-            this.box(x, y + .8, z, 1.48, .12, .82, edge);
-            this.box(x, y + .38, z, .08, .75, .65, metal);
-            this.box(x, y + .05, z, 1, .08, .65, metal);
+        const brass = this.mat('brass', 0xc9a15a, .88);
+        const walnut = this.mat('deskWalnut', 0xffffff, .08);
+        if (!walnut.map) {
+            walnut.map = this.woodTexture();
+            walnut.map.repeat.set(1, 1);
+            walnut.color.set(0xb07a4f);
+            walnut.roughness = .3;
         }
-        this.box(x, y + 1.15, z - .17, 1.08, .61, .1, metal);
-        this.box(x, y + .92, z - .17, .08, .23, .1, edge);
-        // Shared inactive screens have real architectural light; status is carried by the desk strip and halo.
+        const cream = this.mat('deskCream', 0xf1e4d0, .04), leather = this.mat('deskLeather', 0x5a4433, .03);
+        const chairLeather = this.mat('chairLeather', 0xe8d5bb, .03), shade = this.mat('lampShade', 0xf0dfc4, .5), glow = this.mat('lampGlow', 0xffc887, .1, 2.6);
+        // Contact shadow grounds the desk and its chair.
+        this.mesh(this.geo('flat', () => new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2)), this.contactMaterial(), x + .15, y + .128, z + .35, 2.2, 1, 1.75);
+        this.deskSlots.push({ x, y, z });
+        // Walnut top, brass frame and leather work surface: a premium desk rather than a kit shell.
+        this.box(x, y + .82, z, 1.56, .07, .86, walnut);
+        this.box(x, y + .78, z, 1.44, .028, .76, cream);
+        this.box(x, y + .857, z + .43, 1.56, .018, .025, brass);
+        for (const sx of [-.66, .66])
+            for (const sz of [-.33, .33])
+                this.box(x + sx, y + .39, z + sz, .052, .78, .052, brass);
+        this.box(x, y + .18, z - .33, 1.28, .035, .04, brass);
+        this.box(x, y + .47, z - .39, 1.28, .5, .028, walnut);
+        this.box(x, y + .47, z - .37, 1.18, .38, .012, cream);
+        // Pedestal with soft-close drawers and brass pulls.
+        this.box(x + .52, y + .43, z, .44, .58, .62, walnut);
+        for (let i = 0; i < 3; i++) {
+            this.box(x + .52, y + .27 + i * .17, z + .317, .37, .14, .018, cream);
+            this.box(x + .52, y + .27 + i * .17, z + .329, .11, .018, .012, brass);
+        }
+        this.box(x, y + .865, z + .08, .9, .012, .44, leather);
+        // Monitor on a brass arm; the screen remains the live data surface.
+        this.box(x, y + 1.02, z - .18, .075, .27, .075, brass);
+        this.box(x, y + 1.15, z - .18, .38, .022, .18, brass);
+        this.box(x, y + 1.2, z - .108, 1.04, .58, .026, this.mat('monitorBezel', 0x1a2026, .35));
         const screenMat = this.mat(`screen${color}`, color, .1, .95);
         if (!screenMat.map) { screenMat.map = this.screenTexture(color); screenMat.color.set(0xffffff); screenMat.needsUpdate = true; }
-        this.box(x, y + 1.16, z - .105, .97, .49, .015, screenMat);
-        this.box(x, y + .846, z + .08, .92, .012, .46, this.mat(`deskMat${accent}`, accent, .18, .12));
-        this.box(x, y + .56, z + .40, 1.18, .34, .028, this.mat(`deskFront${accent}`, accent, .2, .22));
-        this.box(x, y + .74, z + 1.21, .42, .38, .05, this.mat(`chairBack${accent}`, accent, .16, .2));
-        for (const side of [-1, 1])
-            this.box(x + side * .505, y + 1.16, z - .105, .016, .48, .016, this.mat(`rgb${accent}`, accent, .1, 2.4));
-        this.cyl(x + .47, y + .90, z + .20, .045, .10, this.mat('mug', 0xfff0d8, .1));
-        this.cyl(x - .58, y + .88, z + .18, .05, .08, this.mat('planter', 0xb9b0a0, .2));
-        for (let i = 0; i < 3; i++)
-            this.mesh(this.geo('leaf', () => new THREE.IcosahedronGeometry(1, 0)), this.mat('leaves', 0x3f7d55, .03), x - .58 + Math.sin(i * 2.1) * .045, y + .97, z + .18 + Math.cos(i * 2.1) * .045, .04, .11, .03);
+        this.box(x, y + 1.2, z - .091, .97, .49, .015, screenMat);
+        this.box(x + .47, y + .91, z + .20, .045, .1, .09, this.mat('mug', 0xfff0d8, .1));
+        this.box(x - .58, y + .89, z + .18, .11, .08, .11, this.mat('deskPlanter', 0xe7d7bd, .1));
+        for (let i = 0; i < 4; i++) {
+            const a = i * 1.7 + h % 7;
+            this.mesh(this.geo('leaf', () => new THREE.IcosahedronGeometry(1, 0)), this.mat('leaves', 0x3f7d55, .03), x - .58 + Math.sin(a) * .045, y + .99 + i * .025, z + .18 + Math.cos(a) * .045, .045, .1, .035);
+        }
         for (let i = 0; i < 3; i++)
             this.box(x - .3, y + 1.3 - i * .12, z - .09, .22 + (hash(key + i) % 5) * .09, .022, .01, this.mat('code', 0x8ebfd0, 0, .55));
-        this.box(x, y + .88, z + .19, .65, .025, .23, metal);
+        this.box(x, y + .89, z + .19, .65, .025, .23, metal);
         for (let r = 0; r < 2; r++)
             for (let c = 0; c < 6; c++)
-                this.box(x - .26 + c * .105, y + .899, z + .165 + r * .055, .072, .012, .035, this.mat('keys', 0x26343c, .25));
-        this.box(x + .34, y + .90, z + .20, .09, .03, .13, edge);
-        this.box(x - .36, y + .90, z + .27, .16, .015, .22, this.mat('notebook', 0xf2eadb, .05));
-        this.box(x - .30, y + .912, z + .30, .12, .012, .012, this.mat('pen', 0xe9b978, .1));
-        this.cyl(x + .58, y + .96, z - .02, .035, .18, metal);
-        this.box(x, y + .55, z + .34, 1.02, .22, .035, edge);
-        this.box(x, y + .55, z + .365, .22, .022, .02, metal);
-        // Desk lamp: weighted base, angled arm and a warm practical head.
-        this.batchGroup(x - .64, y + .86, z - .22, .5, add => {
-            add(cyl, metal, 0, .012, 0, .075, .024, .075);
-            add(box, edge, 0, .17, 0, .022, .32, .022);
-            add(box, edge, .07, .33, .03, .022, .2, .022, 0, -1.1);
+                this.box(x - .26 + c * .105, y + .909, z + .165 + r * .055, .072, .012, .035, this.mat('keys', 0x26343c, .25));
+        this.box(x + .34, y + .91, z + .20, .09, .03, .13, edge);
+        this.box(x - .36, y + .91, z + .27, .16, .015, .22, this.mat('notebook', 0xf2eadb, .05));
+        this.box(x - .30, y + .922, z + .30, .12, .012, .012, this.mat('pen', 0xe9b978, .1));
+        this.box(x, y + .56, z + .34, 1.02, .22, .035, walnut);
+        this.box(x, y + .56, z + .365, .22, .022, .02, brass);
+        // Desk lamp: brass arm and warm cream shade.
+        this.batchGroup(x - .64, y + .87, z - .22, .5, add => {
+            add(cyl, brass, 0, .012, 0, .075, .024, .075);
+            add(box, brass, 0, .17, 0, .022, .32, .022);
+            add(box, brass, .07, .33, .03, .022, .2, .022, 0, -1.1);
             add(cyl, shade, .17, .37, .05, .07, .08, .07, 0, .5);
             add(cyl, glow, .185, .335, .05, .055, .012, .055, 0, .5);
         });
-        if (!this.kitTemplates && h % 3 !== 1) {
-            this.cyl(x + .64, y + .92, z - .22, .065, .12, this.mat('planter', 0x69757b, .6));
-            const green = this.mat('leaves', 0x38776e, .05), leaf = this.geo('leaf', () => new THREE.IcosahedronGeometry(1, 0));
-            for (let i = 0; i < 4; i++) {
-                const a = i * 1.7 + h % 7;
-                this.mesh(leaf, green, x + .64 + Math.sin(a) * .045, y + 1.04 + i * .03, z - .22 + Math.cos(a) * .045, .055, .12, .045);
-            }
-        }
-        // Chair with a backrest, pulled out beside the agent so the character stays readable.
-        this.batchGroup(x + .58, y, z + .86, -.55 + (h % 5) * .05, add => {
-            add(cyl, metal, 0, .045, 0, .24, .03, .24);
-            add(cyl, metal, 0, .24, 0, .035, .36, .035);
-            add(box, fabric, 0, .45, 0, .46, .08, .44);
-            add(box, fabric, 0, .76, .2, .44, .46, .07, -.12);
-            add(box, edge, 0, .76, .24, .3, .3, .02, -.12);
+        // High-end ergonomic chair: cream leather, brass frame, five-star base.
+        this.batchGroup(x + .58, y, z + .9, -.55 + (h % 5) * .05, add => {
+            add(cyl, brass, 0, .045, 0, .3, .035, .3);
+            add(cyl, brass, 0, .24, 0, .04, .4, .04);
+            add(cyl, chairLeather, 0, .47, 0, .27, .08, .26);
+            add(box, chairLeather, 0, .73, .19, .46, .5, .1, -.12);
+            add(box, brass, 0, .73, .245, .31, .34, .018, -.12);
+            add(box, chairLeather, 0, .98, .22, .3, .18, .09, -.12);
             for (const side of [-1, 1]) {
-                add(box, edge, side * .23, .58, -.02, .035, .035, .3);
-                add(box, edge, side * .25, .64, .02, .05, .04, .36);
+                add(box, brass, side * .24, .59, .02, .035, .035, .34);
+                add(box, chairLeather, side * .25, .63, .02, .08, .035, .4);
             }
             for (const [wx, wz] of [[-.2, -.18], [.2, -.18], [-.2, .18], [.2, .18]])
-                add(cyl, metal, wx, .04, wz, .055, .05, .055);
+                add(cyl, brass, wx, .04, wz, .055, .05, .055);
         });
     }
     createActor(id, data, x, y, z, color, visitor = false, labelColor = color) {
@@ -1213,7 +1295,7 @@ export class Headquarters {
         }
         // Desk-front status strips are static geometry; only their instance colours change.
         desks.forEach((a, i) => {
-            layer.strips.setMatrixAt(i, _matrix.compose(_position.set(a.desk.x, a.desk.y + .8, a.desk.z + .418), _quat, _scale.set(1.3, .035, .016)));
+            layer.strips.setMatrixAt(i, _matrix.compose(_position.set(a.desk.x, a.desk.y + .855, a.desk.z + .43), _quat, _scale.set(1.3, .035, .016)));
             layer.strips.setColorAt(i, black);
         });
         this.statusLayer = layer;
