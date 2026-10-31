@@ -735,11 +735,11 @@ export class Headquarters {
                 this.box(cx + side * officeW / 2, y + .132, cz, .035, .012, officeD, brass);
             }
             // Premium glass enclosure: brass-framed, frosted-band partitions with an arched portal.
-            const wallH = 2.9, frontZ = cz + officeD / 2, opening = 4.6, seg = (officeW - opening) / 2;
+            const wallH = 2.9, frontZ = cz + officeD / 2, opening = 4.6;
             this.partition(cx, y + 1.55, cz - officeD / 2, officeW, wallH, 'x');
             for (const side of [-1, 1]) {
                 this.partition(cx + side * officeW / 2, y + 1.55, cz, officeD, wallH, 'z');
-                this.partition(cx + side * (opening / 2 + seg / 2), y + 1.55, frontZ, seg, wallH, 'x');
+                // Keep the entrance posts and arch, but leave the front open so every agent stays visible.
                 this.box(cx + side * opening / 2, y + 1.55, frontZ, .075, wallH, .075, brass);
             }
             const archGeo = this.geo(`portalArch${opening}`, () => new THREE.TorusGeometry(opening / 2, .055, 8, 48, Math.PI));
