@@ -30,11 +30,11 @@ export function activeRoles(state, roster) {
 // any working evidence beats pending, pending beats failed, failed beats completed.
 export const STATUS_ORDER = ['working', 'pending', 'failed', 'completed', 'idle'];
 export const STATUS_META = {
-    working: { label: 'Working', color: '#38d9ff', icon: '▶', description: 'A live worker or an open subagent invocation is doing this work now.' },
+    working: { label: 'Working', color: '#38d9ff', icon: '▶', description: 'A live worker or an open subagent invocation is doing this work now. On the floor: lit, pulsing monitor and a WORKING pill above the agent.' },
     completed: { label: 'Completed', color: '#4fe08f', icon: '✓', description: 'A worker on the floor has settled, or the role finished a subagent run in the last 30 minutes.' },
-    pending: { label: 'Pending', color: '#ffb547', icon: '⧗', description: 'A dispatch is queued and has not started work yet.' },
+    pending: { label: 'Pending', color: '#ffb547', icon: '⧗', description: 'A dispatch is queued and has not started work yet. On the floor: dark monitor with an amber blink and a PENDING pill.' },
     failed: { label: 'Failed', color: '#ff5d6c', icon: '!', description: 'The matching worker or dispatch reported a failure.' },
-    idle: { label: 'Idle', color: '#7f93a8', icon: '○', description: 'No current work is reported for this agent.' }
+    idle: { label: 'Idle', color: '#7f93a8', icon: '○', description: 'No current work is reported for this agent. On the floor: dimmed body, monitor dark, no pill.' }
 };
 export const COMPLETED_WINDOW_MS = 30 * 60 * 1000;
 const COMPLETED_STATES = ['succeeded', 'stopped', 'cancelled'];

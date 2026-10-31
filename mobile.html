@@ -32,6 +32,7 @@
     -webkit-font-smoothing: antialiased;
     font-variant-numeric: tabular-nums;
   }
+  .demo-banner { flex:none; padding:6px 8px; border:1px solid rgba(255,182,72,.48); background:rgba(255,182,72,.12); color:var(--amber); font:700 10px/1 var(--mono); letter-spacing:.12em; text-align:center; }
   .screen {
     width: 100%; height: 100%; height: 100dvh;
     max-width: 900px; margin: 0 auto;
@@ -112,6 +113,7 @@
 </head>
 <body>
 <main class="screen" aria-label="Agent Studio mobile overview">
+  <div class="demo-banner" id="demo-banner" hidden>DEMO MODE · SIMULATED DATA</div>
   <header>
     <div class="brand"><span class="sigil" aria-hidden="true"></span><h1>AGENT STUDIO</h1></div>
     <div class="sync" id="sync" aria-live="polite">CONNECTING</div>
@@ -142,6 +144,10 @@
 </dialog>
 <script>
   const $ = (id) => document.getElementById(id);
+  const demoMode = new URLSearchParams(location.search).get("demo") === "1";
+  let demoFeed = null;
+  const demoStarted = performance.now();
+  if (demoMode) $("demo-banner").hidden = false;
   let lastTs = 0;
   const settled = new Set(["succeeded", "failed", "stopped", "cancelled"]);
   const present = (worker) => worker.liveness === "live" || worker.dispatchStatus === "pending";
@@ -194,7 +200,8 @@
     }
     $("agents").innerHTML = list.length ? list.slice(0, 5).map((agent) => {
       const tone = ["working", "running", "pending", "idle", "error", "failed"].includes(agent.state) ? agent.state : "";
-      return `<${agent.dispatchId ? `button type="button" data-dispatch="${safe(agent.dispatchId)}"` : "div"} class="agent"><i class="dot ${tone}" aria-hidden="true"></i><span class="origin">${safe(agent.source)}</span><span class="agent-name" title="${safe(agent.name)}">${safe(agent.name)}</span></${agent.dispatchId ? "button" : "div"}>`;
+      const inspectable = agent.dispatchId && !demoMode;
+      return `<${inspectable ? `button type="button" data-dispatch="${safe(agent.dispatchId)}"` : "div"} class="agent"><i class="dot ${tone}" aria-hidden="true"></i><span class="origin">${safe(agent.source)}</span><span class="agent-name" title="${safe(agent.name)}">${safe(agent.name)}</span></${inspectable ? "button" : "div"}>`;
     }).join("") : '<div class="empty">NO ACTIVE AGENTS</div>';
   }
   function toolBrief(input) {
@@ -229,6 +236,7 @@
   let outputTimer = null;
   let outputDispatch = null;
   async function refreshOutput() {
+    if (demoMode) return;
     if (!outputDispatch || outputRequest) return;
     const controller = new AbortController();
     outputRequest = controller;
@@ -256,6 +264,7 @@
     }
   }
   $("agents").addEventListener("click", (event) => {
+    if (demoMode) return;
     const row = event.target.closest("button[data-dispatch]");
     if (!row) return;
     outputDispatch = row.dataset.dispatch;
@@ -288,6 +297,11 @@
     updateSync();
   }
   function updateSync() {
+    if (demoMode) {
+      $("sync").classList.remove("stale", "down");
+      $("sync").textContent = "Demo mode";
+      return;
+    }
     const age = lastTs ? Math.max(0, (Date.now() - lastTs) / 1000) : null;
     const badge = $("sync");
     if (age === null) return;
@@ -298,6 +312,14 @@
   }
   async function poll() {
     try {
+      if (demoMode) {
+        if (!demoFeed) {
+          const [{ createDemoFeed, DEMO_START }, rosterResponse] = await Promise.all([import('/assets/demo-state.js'), fetch('/roster.json', { cache: 'no-store' })]);
+          demoFeed = { feed: createDemoFeed(await rosterResponse.json()), start: DEMO_START };
+        }
+        render(demoFeed.feed.tick(demoFeed.start + performance.now() - demoStarted));
+        return;
+      }
       const response = await fetch("/state", { cache: "no-store" });
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       render(await response.json());

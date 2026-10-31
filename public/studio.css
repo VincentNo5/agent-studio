@@ -122,6 +122,21 @@ b,time,output,.metric b,.count {
   will-change:transform;
   opacity:.96;
 }
+.role-tag[data-status][data-word="1"] {
+  font:700 10px/1 "Avenir Next", "Trebuchet MS", sans-serif;
+  padding:3px 7px;
+  border-radius:999px;
+  background:rgba(6,16,26,.78);
+  border:1px solid currentColor;
+  text-shadow:none;
+  letter-spacing:.06em;
+}
+.role-tag[data-status="working"] { color:#8fe9ff; box-shadow:0 0 12px rgba(56,217,255,.35); }
+.role-tag[data-status="pending"] { color:#ffc066; }
+.role-tag[data-status="failed"] { color:#ff7d89; }
+.role-tag[data-status="completed"] { color:#7ff0ae; }
+.role-tag[data-status][data-word="1"]::after { display:none; }
+
 .role-tag::after {
   content:"";
   display:block;
@@ -345,6 +360,22 @@ b,time,output,.metric b,.count {
   margin:4px 0 0 14px;
   color:var(--faint)
 }
+.demo-banner {
+  position:absolute;
+  z-index:20;
+  top:calc(var(--top) + 8px);
+  left:50%;
+  transform:translateX(-50%);
+  padding:7px 12px;
+  border:1px solid rgba(255,181,71,.45);
+  border-radius:999px;
+  background:rgba(42,28,9,.9);
+  color:var(--amber);
+  font:700 10px/1 var(--mono);
+  letter-spacing:.1em;
+  box-shadow:0 8px 24px #0008;
+  white-space:nowrap
+}
 .metrics {
   display:flex;
   flex:1 1 auto;
@@ -515,6 +546,9 @@ b,time,output,.metric b,.count {
 .right-column {
   right:var(--side);
   width:var(--right-w)
+}
+.drawer-handle {
+  display:none
 }
 .left-column>*,.right-column>* {
   pointer-events:auto
@@ -1242,6 +1276,24 @@ b,time,output,.metric b,.count {
   padding:5px 0;
   cursor:pointer
 }
+.select-row {
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:10px;
+  padding:4px 0;
+  color:#9fbccf;
+  font-size:11px
+}
+.select-row select {
+  min-width:92px;
+  padding:4px 22px 4px 8px;
+  border:1px solid var(--hair);
+  border-radius:6px;
+  background:#0b2132;
+  color:var(--ice);
+  font:10px var(--mono)
+}
 .toggle-row input {
   appearance:none;
   cursor:pointer;
@@ -1773,4 +1825,96 @@ body[data-view="floor"] .topbar {
 }
 body[data-view="floor"] .right-column {
   top:78px
+}
+
+@media(max-width:820px) {
+  :root {
+    --top:56px;
+    --side:8px
+  }
+  #hud {
+    background:linear-gradient(180deg,#020a14b8,transparent 20%,transparent 74%,#020a1466)
+  }
+  .metrics,.legend,.floor-switch,.settings-button,.left-column,.events,.navigator,.preferences,.world-heading,.view-links,.scene-hint,.ticker {
+    display:none!important
+  }
+  .topbar {
+    height:var(--top);
+    padding:0 10px;
+    justify-content:space-between;
+    background:linear-gradient(180deg,rgba(3,13,23,.88),rgba(3,13,23,0));
+    border-bottom:0;
+    box-shadow:none
+  }
+  .brand p,.connection small {
+    display:none
+  }
+  .brand h1 {
+    font-size:12px;
+    letter-spacing:1.6px
+  }
+  .brand-mark {
+    width:28px;
+    height:32px;
+    font-size:18px
+  }
+  .demo-banner {
+    top:62px;
+    font-size:9px
+  }
+  .right-column,body[data-view="floor"] .right-column {
+    position:fixed;
+    z-index:18;
+    left:8px;
+    right:8px;
+    top:auto;
+    bottom:0;
+    width:auto;
+    height:min(58vh,480px);
+    display:flex!important;
+    gap:8px;
+    padding-top:42px;
+    transform:translateY(calc(100% - 42px));
+    transition:transform .24s cubic-bezier(.22,.9,.24,1);
+    pointer-events:none!important
+  }
+  .right-column[data-open=true] {
+    transform:translateY(0)
+  }
+  .right-column>* {
+    pointer-events:auto
+  }
+  .drawer-handle {
+    display:flex;
+    position:absolute;
+    inset:0 0 auto;
+    height:42px;
+    align-items:center;
+    justify-content:center;
+    gap:9px;
+    border-radius:12px 12px 0 0;
+    border:1px solid var(--hair-strong);
+    border-bottom:0;
+    background:rgba(5,17,29,.96);
+    color:#cde4f1;
+    box-shadow:0 -12px 30px #0008
+  }
+  .drawer-handle span {
+    width:36px;
+    height:4px;
+    border-radius:4px;
+    background:#5d7f92
+  }
+  .right-column .detail {
+    flex:1 1 58%;
+    min-height:0;
+    border-radius:0 0 0 10px
+  }
+  .right-column .live-work {
+    display:block;
+    flex:1 1 42%;
+    max-height:none;
+    min-height:0;
+    border-radius:0 0 10px 0
+  }
 }

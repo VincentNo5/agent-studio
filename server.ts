@@ -53,6 +53,7 @@ interface QuotaView {
 
 import { resolve, sep } from "node:path";
 import { realpath } from "node:fs/promises";
+import { hostname as systemHostname } from "node:os";
 
 const DIR = import.meta.dir;
 const PORT = Number(process.env.PORT ?? 8787);
@@ -211,6 +212,103 @@ interface StudioState {
   orcaTasks: OrcaTaskView[];
   audit: { source: string | null; events: AuditEvent[]; agents: AgentActivity[] };
 }
+
+export interface MarketSnapshot {
+  ts: number;
+  btc: { usd: number; change24h: number } | null;
+  fearGreed: { value: number; label: string } | null;
+  offline: boolean;
+}
+
+const MARKET_RESPONSE_LIMIT = 64 * 1024;
+
+async function readBoundedJson(response: Response): Promise<unknown> {
+  if (!response.ok || !response.body) return null;
+  const declared = Number(response.headers.get("content-length"));
+  if (Number.isFinite(declared) && declared > MARKET_RESPONSE_LIMIT) {
+    await response.body.cancel().catch(() => {});
+    return null;
+  }
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let bytes = 0;
+  let text = "";
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      bytes += value.byteLength;
+      if (bytes > MARKET_RESPONSE_LIMIT) {
+        await reader.cancel().catch(() => {});
+        return null;
+      }
+      text += decoder.decode(value, { stream: true });
+    }
+    text += decoder.decode();
+    return JSON.parse(text);
+  } catch {
+    await reader.cancel().catch(() => {});
+    return null;
+  }
+}
+
+/** Independent, cached market reader. It never shares work with `/state` and never rejects. */
+export function createMarketService({
+  fetchImpl = fetch,
+  now = Date.now,
+  ttlMs = 60_000,
+  timeoutMs = 2_500,
+}: {
+  fetchImpl?: typeof fetch;
+  now?: () => number;
+  ttlMs?: number;
+  timeoutMs?: number;
+} = {}) {
+  let marketCache: MarketSnapshot | null = null;
+  let marketInflight: Promise<MarketSnapshot> | null = null;
+
+  const read = async (): Promise<MarketSnapshot> => {
+    const ts = now();
+    try {
+      const [btcResult, fearResult] = await Promise.allSettled([
+        fetchImpl("https://api.exchange.coinbase.com/products/BTC-USD/stats", { signal: AbortSignal.timeout(timeoutMs) })
+          .then(async (response) => readBoundedJson(response) as Promise<{ open?: string; last?: string } | null>),
+        fetchImpl("https://api.alternative.me/fng/?limit=1&format=json", { signal: AbortSignal.timeout(timeoutMs) })
+          .then(async (response) => readBoundedJson(response) as Promise<{ data?: { value?: string; value_classification?: unknown }[] } | null>),
+      ]);
+      let btc: MarketSnapshot["btc"] = null;
+      if (btcResult.status === "fulfilled" && btcResult.value) {
+        const open = Number(btcResult.value.open), last = Number(btcResult.value.last);
+        if (Number.isFinite(open) && open > 0 && Number.isFinite(last)) {
+          btc = { usd: last, change24h: Math.round(((last - open) / open) * 10_000) / 100 };
+        }
+      }
+      let fearGreed: MarketSnapshot["fearGreed"] = null;
+      if (fearResult.status === "fulfilled") {
+        const row = fearResult.value?.data?.[0], value = Number(row?.value);
+        const label = typeof row?.value_classification === "string" ? row.value_classification.slice(0, 64) : "Unknown";
+        if (Number.isFinite(value)) fearGreed = { value, label };
+      }
+      return { ts, btc, fearGreed, offline: !btc && !fearGreed };
+    } catch {
+      return { ts, btc: null, fearGreed: null, offline: true };
+    }
+  };
+
+  return {
+    get(): Promise<MarketSnapshot> {
+      if (marketCache && now() - marketCache.ts <= ttlMs) return Promise.resolve(marketCache);
+      if (marketInflight) return marketInflight;
+      marketInflight = read()
+        .then((snapshot) => (marketCache = snapshot))
+        .catch(() => (marketCache = { ts: now(), btc: null, fearGreed: null, offline: true }))
+        .finally(() => { marketInflight = null; });
+      return marketInflight;
+    },
+  };
+}
+
+const marketService = createMarketService();
 
 
 /** JSON.parse that yields `unknown` instead of throwing (every CLI read shares it). */
@@ -596,6 +694,12 @@ function parseCidr(spec: string): Cidr | null {
 }
 
 const ALLOWED = ALLOW.map(parseCidr).filter((entry): entry is Cidr => entry !== null);
+const EXTRA_HOSTS = new Set((process.env.AGENT_STUDIO_HOSTS ?? "")
+  .split(",")
+  .map((entry) => entry.trim().replace(/\.$/, "").toLowerCase())
+  .filter(Boolean));
+const LOCAL_HOSTS = new Set(["localhost", systemHostname().replace(/\.$/, "").toLowerCase(), ...EXTRA_HOSTS]);
+const MAX_REQUEST_BODY_BYTES = 64 * 1024;
 
 function isAllowed(address: string | null | undefined): boolean {
   if (!address) return false;
@@ -609,6 +713,12 @@ function isAllowed(address: string | null | undefined): boolean {
     }
     return true;
   });
+}
+
+function isAllowedHost(url: URL): boolean {
+  const host = url.hostname.replace(/\.$/, "").toLowerCase();
+  if (LOCAL_HOSTS.has(host) || host.endsWith(".ts.net")) return true;
+  return ipToBytes(host) !== null && isAllowed(host);
 }
 
 /** Bounded live output for one dispatch, straight from `orca orchestration worker-read`. */
@@ -636,7 +746,16 @@ Bun.serve({
         headers: { "content-type": "text/plain; charset=utf-8" },
       });
     }
-    const path = new URL(req.url).pathname;
+    const url = new URL(req.url);
+    if (!isAllowedHost(url)) return new Response("Forbidden: host is not on the allowlist.\n", { status: 403 });
+    const declaredLength = Number(req.headers.get("content-length"));
+    if (Number.isFinite(declaredLength) && declaredLength > MAX_REQUEST_BODY_BYTES) {
+      return new Response("Request body too large.\n", { status: 413 });
+    }
+    if (req.method !== "GET" && req.method !== "HEAD") {
+      return new Response("Method not allowed.\n", { status: 405, headers: { allow: "GET, HEAD" } });
+    }
+    const path = url.pathname;
     // Desktop assets only. Reject encoded traversal, Windows separators and symlink escapes.
     if (path.startsWith("/assets/") || path.startsWith("/vendor/three/")) {
       const vendor = path.startsWith("/vendor/three/");
@@ -662,6 +781,9 @@ Bun.serve({
     if (path === "/state") {
       return Response.json(await stateForClients(), { headers: { "cache-control": "no-store" } });
     }
+    if (path === "/market") {
+      return Response.json(await marketService.get(), { headers: { "cache-control": "no-store" } });
+    }
     if (path === "/roster.json") {
       return new Response(Bun.file(`${DIR}/roster.json`), { headers: { "content-type": "application/json" } });
     }
@@ -673,6 +795,9 @@ Bun.serve({
     }
     if (path === "/anatomy") {
       return new Response(Bun.file(`${DIR}/anatomy.html`), { headers: { "content-type": "text/html; charset=utf-8" } });
+    }
+    if (path === "/demo") {
+      return new Response(Bun.file(`${DIR}/index.html`), { headers: { "content-type": "text/html; charset=utf-8" } });
     }
     if (path.startsWith("/worker/")) {
       return workerOutput(path.slice("/worker/".length));

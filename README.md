@@ -3,14 +3,19 @@
 A live **three-dimensional headquarters** for multi-agent work, with a cinematic command
 HUD and two desktop views of the same read-only state.
 
-**Command Overview** (`/`) — the complete single-floor campus, task lanes, active roles,
+**Command Overview** (`/`) — the complete single-floor office, task lanes, active roles,
 agent inspection, live events, and operational panels. Click a character to show a short
 role-specific line above the floor.
 
 **Studio Floor** (`/floor`) — the spatial-first version of the same world. The command
-dashboards are hidden so the two enlarged coding offices, central ORCA hub and collaboration
-spaces fill the screen; the right-side Agent detail and Live work panels remain. All 26 coding
-roles have stable workstations; multimedia, design and leadership offices were removed.
+dashboards are hidden so the office fills the screen; the right-side Agent detail and Live work
+panels remain. All 26 coding roles have stable desks in the open desk area.
+
+**Demo** (`/demo`, or `?demo=1` on any view) — the same pages driven by a deterministic,
+scripted studio run instead of `/state`. Use it on a fresh machine, between real runs, or for
+screenshots. A permanent `DEMO MODE · SIMULATED DATA` banner sits on top, the connection chip
+reads `Demo mode`, and no `/worker/<id>` output is requested. `?t=<seconds>` starts the 96-second
+loop part-way through (`/demo?t=29` lands just before the first completion).
 
 **Mobile** (`/mobile`) — phone-first single screen (390×844, no scrolling): quota bars, worker
 counts, active agents, rooms. This is the view to open from an iPhone; see
@@ -23,6 +28,59 @@ experience views consume it. Use it to understand the data flow; use `/` for ope
 
 <img src="docs/anatomy.png" alt="Agent Studio system anatomy" width="720">
 
+## The office
+
+One 42 × 22 m floor plate in a "quiet luxury" palette. Materials differ in roughness, metalness and
+relief, not only colour: oak planks with sunk joints and per-board tone, slate carpet tiles under the
+pods, matte travertine, rough felt baffles, clearcoat glass with dark-bronze mullions, polished
+brass, and sheen upholstery. The south and east edges are cut away so the default south-east camera
+looks straight in; planter troughs run along both open edges so the plate never ends in bare slab.
+The default camera frames the three glass rooms, the pods and the south band inside the window the
+HUD panels leave free; `/floor`, which has no left panels, keeps a closer view. Overhead, a plaster
+soffit with a bronze reveal runs along the back walls, linear brass pendants follow the main aisle
+and three globe pendants hang over the lounge table. None of them is over a seat (a test checks
+this). The north wall carries a framed colour-field canvas and felt acoustic panels, and a wall clock
+on Shanghai time with a rooms directory hangs on the mullion between the director's office and the
+meeting room. A light grade sits before the output pass. It warms highlights, cools shadows, deepens
+the low end and darkens toward the frame edges, and it leaves saturated pixels alone, so the status
+colours are unchanged.
+Zone names are small brass plaques at each entry; the zone footprints live in `OFFICE_ZONES`
+(`public/hq3d.js`).
+
+| Zone | What happens there |
+|---|---|
+| **Director's office** | Glass box, north-west. The orchestrator sits at the walnut desk while a Paseo session or any worker is live; nobody else goes in |
+| **Meeting room** | Two or more roles working on the same task walk here and take one of eight chairs, then walk back. The market display hangs on its travertine wall |
+| **Open desk area** | 32 desks in pods of four: one per roster role (whole pods per team, alphabetical inside a team, so a seat never moves) and six spare hot-desks |
+| **Main aisle** | The walk south of the pods, under a long linear brass pendant run |
+| **Reception** | A south-facing travertine feature wall closes the south band. West: a plant wall with the backlit `agent studio` wordmark over a fluted-oak reception desk, the first thing the default camera meets. Centre, on the entry axis: the low wayfinding band. East end: the quota scoreboard, held below full brightness. Orca workers that map to no roster role wait at the desk, or take a hot-desk while running |
+| **Lounge** | On the walkway in front of the camera: terracotta rug, two sofas, two armchairs. At most six roles resting after a completed task sit here, chosen alphabetically |
+| **Pantry** | Counter run, espresso machine, island with stools, and the neon wordmark |
+| **Library** | South-west, under the west glazing: sofas, armchairs and shelving |
+| **Entrance** | A glass vestibule with outer and inner double doors, on a travertine arrival hall |
+
+Every roster role always has a character **at its own desk**: `idle` sits leaning back with a dim
+monitor, `working` sits and types, `pending` stands at the desk, `failed` stands turned away and
+`completed` stands and celebrates. Agents walk along the aisles only when they relocate (meeting,
+lounge, home); the first state after page load places everyone without replaying walks.
+
+- **Market display.** Draws `/market` onto the meeting-room wall display: BTC/USD price, 24 h change, and
+  the Fear & Greed value with its label. Refreshes every 60 s. When the feed is offline it says
+  `NO SIGNAL`, never a stale or invented number.
+- **Quota display.** Shows the first two providers in `state.quotas`, each with its most constrained
+  remaining window (`ANTHROPIC 29%`), and `NO QUOTA DATA` when the gateway reports nothing. The
+  reception scoreboard repeats it at a size that reads from the default camera (numerals ≥ 26 px
+  tall at 1440×900; a test checks this); the original panel stays on the north wall.
+- **Completion.** When a role is *observed* changing to `completed`, it hops and a short confetti
+  burst (120 instanced pieces, 1.2 s) fires at its desk. Roles that were already completed when
+  the page loaded do not celebrate. Reduced-motion preferences skip the hop and the confetti.
+- **Day and night.** The lighting follows Asia/Shanghai time: day 07–17, dusk 05–07 and 17–20,
+  night otherwise. At night the sky goes dark, warm pools light the rooms, the recessed ceiling
+  strips, the glazing and the reception wordmark glow. Nobody leaves the floor: every role stays at its
+  own desk, and status still decides the pose. The **Lighting** control
+  (⚙ → Lighting: Auto / Day / Dusk / Night) overrides the clock and is remembered locally;
+  `?phase=day|dusk|night` sets it from the URL. Every change cross-fades over about 1.5 s.
+
 ## 3D asset pipeline
 
 The live floor is still procedural and has no runtime Blender dependency. An optional Blender kit
@@ -31,15 +89,11 @@ and the production path for agent-authored assets live in
 `blender/agent_studio_kit.py`. Run `scripts/build-blender-assets.sh` when Blender is installed;
 otherwise the procedural fallback remains the source of truth.
 
-The kit desk/chair/plant/rack parts are instanced across the 26 workstation slots; the
-procedural monitors and status strips stay because they carry live state. A second game-furniture
-kit (`blender/game_kit.py` → `public/game-kit.glb`) adds the coffee bar, arcade row, lounge sofa,
-conference table, tool cart, whiteboards, shelves, lamps and plants. Department neighbourhoods get a
-coloured inlay, a floor-printed team name, and arcade/neon emissives pulse at runtime. The scene uses a
-daylight sky and a Google/Meta-style campus palette: warm floors, glass offices, felt panels,
-beanbags, a coffee bar, and indoor/outdoor greenery.
+The office no longer loads the Blender kits (`public/studio-kit.glb`, `public/game-kit.glb`);
+every desk, chair, monitor and room is procedural, merged per material, and the whole cast of
+people is three instanced draws. A frame is about 85 draw calls including shadows and bloom.
 
-<img src="docs/floor-kit.png" alt="Blender kit workstations in the Agent Studio team neighbourhood" width="720">
+<img src="docs/review/floor.png" alt="The Agent Studio floor: pods of four, glass director and meeting rooms, reception wall with the quota scoreboard, lounge and library" width="720">
 
 <img src="docs/mobile.png" alt="Mobile view" width="330">
 
@@ -55,7 +109,9 @@ the roster is used as the *organizational* model.
 | **Subagent Activity** | `$CCGS_ROOT/production/session-logs/agent-audit.log` | Real per-role activity from CCGS's `SubagentStart`/`SubagentStop` hooks (`invoked` / `completed` / `active`) |
 | **Task Board** | `orca orchestration task-list`, else `hermes kanban list` | Tasks by status lane — see *Task board sources* below |
 | **Studio Roster** / floor plan | `roster.json` (generated from CCGS `.claude/agents`) | 26 roles in 2 coding rooms; a seat lights when that role is active |
-| **Corridor** (floor view) | same worker feed | Supervised workers as visitors, with their task label |
+| **Reception** (floor view) | same worker feed | Supervised workers as visitors, with their task label |
+| **Quota scoreboard** (reception wall, repeated on the back wall) | `state.quotas` | Remaining quota for the first two providers |
+| **Market TV** (meeting room) | `/market` → Coinbase BTC-USD stats + alternative.me Fear & Greed | BTC price, 24 h change, Fear & Greed; `NO SIGNAL` when offline |
 | **Live Work** (`/floor` sidebar) | `/state` + `/worker/<id>` | The run on the floor, the agents behind it, the tasks in flight, and the picked worker's live tail |
 | **Activity** | poll diff | Worker/task state transitions as they happen |
 
@@ -80,12 +136,23 @@ the scene gives each agent a status halo, a billboard badge and a desk strip in 
 
 ## Run
 
+The 3D view loads Three.js from `node_modules` (served under `/vendor/three/`), so install the
+dependencies once per clone. Without them the HUD still works and the scene area says
+"3D assets are missing. Run `bun install` in the repository root, then reload."
+
 ```bash
+bun install                # once: three (runtime) and playwright (visual review only)
 bun run server.ts          # http://127.0.0.1:8787        (panel)
                            # http://127.0.0.1:8787/floor  (floor plan)
+                           # http://127.0.0.1:8787/demo   (simulated run, clearly labelled)
 bun run --hot server.ts    # same, with reload
-bun run visual-review      # capture /, /floor, /anatomy and /mobile into docs/review
+bun run visual-review      # capture demo day / no-signal / confetti / night / floor / mobile into docs/review
 ```
+
+**Market feed.** `/market` answers `{ ts, btc: { usd, change24h } | null, fearGreed: { value, label } | null, offline }`.
+It reads two public endpoints with a 2.5 s timeout each, shares one 60 s cache across all
+clients, and never fails: if both sources are unreachable it answers `offline: true` with nulls.
+It is independent of `/state`, which stays read-only and never calls out to the network.
 
 Environment:
 
@@ -153,14 +220,15 @@ use `/mobile` for the phone interface.
   offer **View full logs**. Clicking a worker stops automatic worker following.
 - Task lanes filter the task inspector and highlight matching characters.
 - Run history, audit, quotas, Paseo, and the full roster open in keyboard-accessible dialogs.
-- Particle and low-performance settings persist locally. Low-performance mode disables
+- Lighting (Auto/Day/Dusk/Night), particle and low-performance settings persist locally. Low-performance mode disables
   bloom and shadows, reduces particles, and caps rendering at 1× device pixel ratio.
 
 The scene uses procedural geometry, instanced character parts, merged static architecture,
 local canvas labels, and generated environment lighting. Animation pauses in hidden tabs;
 reduced-motion preferences stop ambient movement. Normal rendering caps DPR at 1.65.
-No operational activity is simulated. Missing state is labeled as unavailable, and failed
-JSON requests retain the last scene with a retryable connection indicator.
+No operational activity is simulated outside `/demo`, which is labelled on every surface.
+Missing state is labelled as unavailable, and failed JSON requests retain the last scene with a
+retryable connection indicator.
 
 ## Verification
 
@@ -172,8 +240,9 @@ curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8788/
 ```
 
 The tests cover state interpretation, non-JSON error handling, local module routing,
-traversal rejection, structural geometry, roster bounds, character instancing, and
-stable positions across polls. Route tests invoke the actual request handler without
+traversal rejection, structural geometry, roster bounds, character instancing,
+stable positions across polls, the demo feed, the `/market` cache and offline path, the TV and
+quota-sign copy, confetti firing only on an observed transition, nobody leaving the floor at night, every zone being furnished, the scoreboard facing the default camera at ≥ 26 px and sitting off the entry axis, the default camera holding every zone clear of the HUD, no ceiling fixture over a seat, idle agents dimmed to about 0.8, planters covering the open plate edges, and nothing in the south band hiding an agent. Route tests invoke the actual request handler without
 binding a socket; they do not replace a browser/GPU check. Stop the test server with Ctrl-C.
 
 ## Run it as a service (macOS launchd)
@@ -204,10 +273,11 @@ git config core.hooksPath .githooks   # once per clone
 
 ## Files
 
-- `server.ts` — Bun HTTP server: collects the sources, serves `/state`, `/roster.json`, `/`, `/floor`
+- `server.ts` — Bun HTTP server: collects the sources, serves `/state`, `/market`, `/roster.json`, `/`, `/floor`, `/demo`
 - `index.html` — command overview entry and local import map
 - `floor.html` — focused floor entry and local import map
 - `public/` — shared Three.js world, state interpretation, responsive HUD and styles
+- `public/demo-state.js` — the deterministic `/demo` feed
 - `tests/` — data, routing and procedural scene regression checks
 - `roster.json` — generated roster: `{ rooms: [...], agents: [{ name, model, desc, room, tier }] }`
 - `docs/*.png` — screenshots (redacted: repository names and local paths replaced)
@@ -227,7 +297,10 @@ git config core.hooksPath .githooks   # once per clone
   of an agent's real-world actions. Matching roles to workers still depends on task text.
 - Provider quotas and Paseo sessions depend on their local services. No synthetic metrics
   are substituted when a service reports nothing.
-- The committed screenshots in `docs/` predate the 3D redesign.
+- The market TV is the only surface that depends on the public internet. Offline, it reads
+  `NO SIGNAL`.
+- The committed screenshots in `docs/*.png` predate the office redesign; `bun run visual-review`
+  writes current ones to `docs/review/`.
 
 ## Credits
 

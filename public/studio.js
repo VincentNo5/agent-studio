@@ -1,4 +1,5 @@
 import { agentStatuses, workerStatus, countStatuses, STATUS_META, STATUS_ORDER, COMPLETED_WINDOW_MS, isWorking, matchesRole, taskBoard, getJSON, outputBlocks, ROOM_COLORS, hash } from './studio-data.js';
+import { createDemoFeed, DEMO_START } from './demo-state.js';
 const $ = id => document.getElementById(id);
 const el = (tag, cls, text) => { const n = document.createElement(tag); if (cls)
     n.className = cls; if (text != null)
@@ -73,8 +74,16 @@ function portrait(id, room = 'lobby', visitor = false) {
     </svg>`;
 }
 const isFloor = document.body.dataset.view === 'floor';
+const urlParams = new URLSearchParams(location.search);
+const demoMode = location.pathname === '/demo' || urlParams.get('demo') === '1';
+const phaseOverride = ['day', 'dusk', 'night'].includes(urlParams.get('phase')) ? urlParams.get('phase') : null;
+const demoSuffix = demoMode ? '?demo=1' : '';
+// `?t=<seconds>` starts the scripted demo loop part-way through (handy for reviewing a specific beat).
+const demoOffset = demoMode ? Math.max(0, Number(urlParams.get('t')) || 0) * 1000 : 0;
+const demoStarted = performance.now() - demoOffset;
 const metric = (status, key, label) => `<div class="metric" data-status="${status}" style="--s:${meta(status).color}"><span class="metric-label">${icon(status)}${label}</span><b id="metric-${key}">—</b><small id="metric-${key}-sub">&nbsp;</small></div>`;
 $('hud').innerHTML = `
+${demoMode ? '<div class="demo-banner" role="status">DEMO MODE · SIMULATED DATA</div>' : ''}
 <header class="topbar">
  <a class="brand" href="/" aria-label="Agent Studio overview"><div class="brand-mark">⬡</div><div><h1>Agent Studio</h1><p>AI agent command center</p></div></a>
  <button class="connection" id="connection" data-state="loading" title="Retry connection"><strong id="connection-label">Connecting</strong><small id="clock">Awaiting state</small></button>
@@ -84,7 +93,7 @@ $('hud').innerHTML = `
  <button class="settings-button" id="settings" aria-label="Rendering settings" title="Rendering settings">⚙</button>
 </header>
 <div class="world-heading"><div class="eyebrow">Headquarters · live spatial view</div><h2 id="world-title">ONE STUDIO. EVERY AGENT.</h2><p id="world-subtitle">One open campus. Every team on the same floor.</p></div>
-<nav class="view-links" aria-label="Studio view"><a href="/" ${!isFloor ? 'aria-current="page"' : ''}>Command overview</a><a href="/floor" ${isFloor ? 'aria-current="page"' : ''}>Floor view ↗</a><a href="/anatomy">Anatomy ↗</a></nav>
+<nav class="view-links" aria-label="Studio view"><a href="/${demoSuffix}" ${!isFloor ? 'aria-current="page"' : ''}>Command overview</a><a href="/floor${demoSuffix}" ${isFloor ? 'aria-current="page"' : ''}>Floor view ↗</a><a href="/anatomy">Anatomy ↗</a></nav>
 <aside class="left-column" aria-label="Agent status, task board and operations">
  <section class="panel agent-status" aria-labelledby="agent-status-title"><div class="panel-head"><h2 id="agent-status-title">Agent status</h2><small id="status-total">—</small></div>
   <div class="status-strip">${['working', 'completed', 'idle'].map(s => `<div style="--s:${meta(s).color}" data-status="${s}"><b>${icon(s)}<span id="count-${s}">—</span></b><span>${meta(s).label}</span></div>`).join('')}</div>
@@ -93,21 +102,23 @@ $('hud').innerHTML = `
  <section class="panel task-board"><div class="panel-head"><h2>Task board</h2><small id="board-total">—</small></div><p class="board-source" id="board-source">Awaiting state</p><div class="board-progress" id="board-progress" hidden><i></i></div><div class="lanes" id="lanes"></div></section>
  <nav class="panel operations" aria-label="Operations">${[['history', '◷', 'Run history'], ['roster', '◈', 'Roster'], ['audit', '⌁', 'Audit'], ['quotas', '◴', 'Quotas'], ['paseo', '◇', 'Paseo'], ['tasks', '☷', 'All tasks']].map(([k, i, t]) => `<button data-panel="${k}" title="${t}" aria-label="${t}"><span>${i}</span><em>${t}</em></button>`).join('')}</nav>
 </aside>
-<aside class="right-column" aria-label="Agent inspection">
- <section class="panel detail"><div class="panel-head"><h2>Agent detail</h2><button id="clear-selection" class="icon-button" aria-label="Clear agent selection">×</button></div><div id="detail-body" class="detail-body"></div></section>
- <section class="panel live-work"><div class="panel-head"><h2>Live work</h2><small id="run-tag">—</small></div><p id="run-objective" class="run-objective">Awaiting orchestration state.</p><div id="worker-list" class="worker-list"></div><pre id="live-tail" class="live-tail" hidden></pre></section>
+<aside class="right-column" aria-label="Agent inspection" data-open="false">
+ <button class="drawer-handle" id="drawer-handle" type="button" aria-expanded="false" aria-controls="agent-detail live-work"><span></span>Agent details</button>
+ <section class="panel detail" id="agent-detail"><div class="panel-head"><h2>Agent detail</h2><button id="clear-selection" class="icon-button" aria-label="Clear agent selection">×</button></div><div id="detail-body" class="detail-body"></div></section>
+ <section class="panel live-work" id="live-work"><div class="panel-head"><h2>Live work</h2><small id="run-tag">—</small></div><p id="run-objective" class="run-objective">Awaiting orchestration state.</p><div id="worker-list" class="worker-list"></div><pre id="live-tail" class="live-tail" hidden></pre></section>
 </aside>
 <div class="scene-hint">Drag to orbit <span>·</span> scroll to zoom <span>·</span> select an agent</div>
 <nav class="panel navigator" aria-label="Campus navigator"><div class="mini-tower"><button data-floor="0" aria-label="Campus overview">◎</button></div><div class="nav-floors"><button data-floor="0" aria-pressed="true"><small>◈</small><span class="nav-name">Campus</span><span class="floor-badges" data-floor-badges="0"></span></button></div></nav>
 <section class="panel events"><div class="panel-head"><h2>Live events</h2><button data-panel="audit" class="link-button">Audit trail ↗</button></div><div class="event-list" id="events"><p class="empty">Awaiting audit events.</p></div></section>
-<section class="panel preferences" id="preferences" aria-label="Rendering preferences"><label class="toggle-row" for="particles">Particle effects<input type="checkbox" id="particles" checked></label><label class="toggle-row" for="role-labels">Role labels<input type="checkbox" id="role-labels" checked></label><label class="toggle-row" for="low-performance">Low performance mode<input type="checkbox" id="low-performance"></label><div class="performance"><button id="reset-camera">↺ Reset camera</button><output id="fps">— FPS</output></div></section>
+<section class="panel preferences" id="preferences" aria-label="Rendering preferences"><label class="select-row" for="phase-select">Lighting <select id="phase-select"><option value="auto">Auto</option><option value="day">Day</option><option value="dusk">Dusk</option><option value="night">Night</option></select></label><label class="toggle-row" for="particles">Particle effects<input type="checkbox" id="particles" checked></label><label class="toggle-row" for="role-labels">Role labels<input type="checkbox" id="role-labels" checked></label><label class="toggle-row" for="low-performance">Low performance mode<input type="checkbox" id="low-performance"></label><div class="performance"><button id="reset-camera">↺ Reset camera</button><output id="fps">— FPS</output></div></section>
 <footer class="ticker"><strong>Activity</strong><span id="ticker-text">Awaiting observed state changes.</span><span class="scope" id="scope">Read-only telemetry</span></footer>`;
 const dialog = el('dialog');
 dialog.setAttribute('aria-labelledby', 'dialog-title');
 dialog.innerHTML = '<div class="dialog-header"><h2 id="dialog-title"></h2><div class="dialog-actions"><button id="dialog-refresh" aria-label="Refresh panel">↻ Refresh</button><button id="dialog-close" aria-label="Close panel">×</button></div></div><div id="dialog-content" class="dialog-content"></div>';
 document.body.append(dialog);
 let world = null, state = null, roster = { rooms: [], agents: [] }, rosterLoaded = false, selected = null, statuses = new Map(), board = null, pickedWorker = null, follow = true, currentPanel = null, selectedLane = null;
-let pollTimer = null, outputTimer = null, clockTimer = null, loading = false, closed = false, logId = null, logGeneration = 0, outputBusy = false, outputCache = null, previous = null, transitions = [];
+let demoFeed = null, market = null;
+let pollTimer = null, outputTimer = null, clockTimer = null, marketTimer = null, loading = false, closed = false, logId = null, logGeneration = 0, outputBusy = false, outputCache = null, previous = null, transitions = [];
 let stateError = null, rosterError = null, lastSuccess = null;
 const floorNames = ['ONE CAMPUS. EVERY TEAM.'];
 function floorChanged(f) { document.querySelectorAll('[data-floor]').forEach(b => b.setAttribute('aria-pressed', String(Number(b.dataset.floor) === 0))); $('world-title').textContent = floorNames[0]; $('world-subtitle').textContent = 'One open campus. Every team on the same floor.'; }
@@ -117,6 +128,25 @@ document.querySelectorAll('[data-panel]').forEach(b => b.onclick = () => openPan
 $('clear-selection').onclick = () => { selected = null; world?.select(null, false); renderDetail(); };
 $('reset-camera').onclick = () => { world?.reset(); floorChanged(0); };
 $('settings').onclick = () => openPanel('settings');
+const drawer = document.querySelector('.right-column'), drawerHandle = $('drawer-handle');
+const drawerPanels = [$('agent-detail'), $('live-work')], mobileDrawer = matchMedia('(max-width: 820px)');
+function setDrawer(open) {
+    drawer.dataset.open = String(open);
+    drawerHandle.setAttribute('aria-expanded', String(open));
+    for (const panel of drawerPanels)
+        panel.toggleAttribute('inert', mobileDrawer.matches && !open);
+    if (!open && drawer.contains(document.activeElement) && document.activeElement !== drawerHandle)
+        drawerHandle.focus();
+}
+drawerHandle.onclick = () => setDrawer(drawer.dataset.open !== 'true');
+const drawerMediaChanged = () => setDrawer(drawer.dataset.open === 'true');
+mobileDrawer.addEventListener('change', drawerMediaChanged);
+const drawerKeydown = event => { if (event.key === 'Escape' && drawer.dataset.open === 'true') {
+    event.preventDefault();
+    setDrawer(false);
+} };
+drawer.addEventListener('keydown', drawerKeydown);
+setDrawer(false);
 function savePreference(key, val) { try {
     localStorage.setItem(`studio-${key}`, String(val));
 }
@@ -128,12 +158,18 @@ function preference(key, fallback) { try {
 catch {
     return fallback;
 } }
+function stringPreference(key, fallback) { try {
+    return localStorage.getItem(`studio-${key}`) || fallback;
+}
+catch { return fallback; } }
 $('particles').checked = preference('particles', true);
 $('role-labels').checked = preference('role-labels', true);
 $('low-performance').checked = preference('low', false);
+$('phase-select').value = phaseOverride || stringPreference('phase', 'auto');
 $('particles').onchange = () => { world?.setParticles($('particles').checked); savePreference('particles', $('particles').checked); };
 $('role-labels').onchange = () => { world?.setRoleLabels($('role-labels').checked); savePreference('role-labels', $('role-labels').checked); };
 $('low-performance').onchange = () => { world?.setLow($('low-performance').checked); savePreference('low', $('low-performance').checked); };
+$('phase-select').onchange = () => { world?.setPhase($('phase-select').value); savePreference('phase', $('phase-select').value); };
 $('dialog-refresh').onclick = () => { if (currentPanel === 'logs')
     refreshOutput();
 else
@@ -146,7 +182,7 @@ dialog.addEventListener('click', e => { if (e.target === dialog) {
 } });
 dialog.addEventListener('close', () => { currentPanel = null; logId = null; logGeneration++; });
 $('connection').onclick = () => poll();
-function connection() { const err = stateError || rosterError; const stale = state && Date.now() - Number(state.ts) > 10000; $('connection').dataset.state = err ? 'error' : stale ? 'loading' : state ? 'ok' : 'loading'; $('connection-label').textContent = err ? 'Link error · retry' : stale ? 'State is stale · retry' : state ? 'State connected' : 'Connecting'; $('connection').title = err ? `${err}. Click to retry.${lastSuccess ? ' Last success: ' + date(lastSuccess) : ''}` : state ? `State snapshot: ${date(state.ts)}. Click to refresh.` : 'Connecting to /state and /roster.json'; $('clock').textContent = new Date().toLocaleDateString('en-CA') + ' ' + time(Date.now()); }
+function connection() { const err = stateError || rosterError; const stale = !demoMode && state && Date.now() - Number(state.ts) > 10000; $('connection').dataset.state = err ? 'error' : stale ? 'loading' : state ? 'ok' : 'loading'; $('connection-label').textContent = demoMode ? 'Demo mode' : err ? 'Link error · retry' : stale ? 'State is stale · retry' : state ? 'State connected' : 'Connecting'; $('connection').title = demoMode ? 'Deterministic simulated studio feed.' : err ? `${err}. Click to retry.${lastSuccess ? ' Last success: ' + date(lastSuccess) : ''}` : state ? `State snapshot: ${date(state.ts)}. Click to refresh.` : 'Connecting to /state and /roster.json'; const shanghai = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date()); $('clock').textContent = `Asia/Shanghai · ${shanghai}`; }
 // Display name for a status-map key: a roster role, or an Orca dispatch on the floor.
 function agentName(id, entry) {
     if (!id.startsWith('worker:'))
@@ -470,12 +506,20 @@ async function poll() {
         return;
     loading = true;
     clearTimeout(pollTimer);
-    const jobs = [getJSON('/state').then(data => { if (!data || !Array.isArray(data.workers) || !Number.isFinite(data.ts))
-            throw new Error('Invalid state payload'); state = data; stateError = null; lastSuccess = Date.now(); }).catch(e => { stateError = `State: ${e.message}`; })];
+    const jobs = [];
+    if (!demoMode)
+        jobs.push(getJSON('/state').then(data => { if (!data || !Array.isArray(data.workers) || !Number.isFinite(data.ts))
+                throw new Error('Invalid state payload'); state = data; stateError = null; lastSuccess = Date.now(); }).catch(e => { stateError = `State: ${e.message}`; }));
     if (!rosterLoaded)
         jobs.push(getJSON('/roster.json').then(data => { if (!data || !Array.isArray(data.agents) || !Array.isArray(data.rooms))
             throw new Error('Invalid roster payload'); roster = data; rosterLoaded = true; rosterError = null; world?.setRoster(roster); }).catch(e => { rosterError = `Roster: ${e.message}`; }));
     await Promise.allSettled(jobs);
+    if (demoMode && rosterLoaded) {
+        demoFeed ||= createDemoFeed(roster);
+        state = demoFeed.tick(DEMO_START + performance.now() - demoStarted);
+        stateError = null;
+        lastSuccess = Date.now();
+    }
     if (closed)
         return;
     try {
@@ -644,10 +688,13 @@ function renderPanel() {
         table(['Task', 'Status', 'Run / ID', 'Inspect'], tasks.map(t => { const worker = state.workers.find(w => w.taskId === t.id) || state.runs?.flatMap(r => r.workers || []).find(w => w.taskId === t.id); const b = worker ? button('Worker ↗', () => { dialog.close(); selectAgent(`worker:${worker.dispatchId}`); }) : el('span', null, 'No associated dispatch'); return [t.title || t.name || t.id || 'Untitled task', t.status || 'unknown', t.runId || t.id, b]; }));
     }
 }
-function openLogs(id) { if (!id)
+function openLogs(id) { if (demoMode)
+    return; if (!id)
     return; currentPanel = 'logs'; $('dialog-refresh').hidden = false; logId = id; logGeneration++; $('dialog-title').textContent = 'Worker output'; $('dialog-content').replaceChildren(el('div', 'log-meta', findWorker(id)?.taskTitle || findWorker(id)?.label || id)); const meta = el('div', 'log-meta'); meta.id = 'log-meta'; const out = el('pre', 'log-output', 'Loading worker output…'); out.id = 'log-output'; $('dialog-content').append(meta, out, button('Refresh output', () => refreshOutput(), 'wide')); if (!dialog.open)
     dialog.showModal(); refreshOutput(); }
 async function refreshOutput() {
+    if (demoMode)
+        return;
     if (outputBusy || closed || document.hidden)
         return;
     const id = logId || (isFloor ? pickedWorker : null);
@@ -682,22 +729,34 @@ async function refreshOutput() {
 renderDetail();
 connection();
 poll();
+async function pollMarket() {
+    try {
+        market = await getJSON('/market');
+    }
+    catch {
+        market = { ts: Date.now(), btc: null, fearGreed: null, offline: true };
+    }
+    world?.setMarket(market);
+}
+pollMarket();
 clockTimer = setInterval(connection, 1000);
 outputTimer = setInterval(refreshOutput, 2000);
-import('./hq3d.js?v=19').then(({ Headquarters }) => {
+marketTimer = setInterval(pollMarket, 60_000);
+import('./hq3d.js?v=41').then(({ Headquarters }) => {
     if (closed)
         return;
-    world = new Headquarters($('world'), { onSelect: id => selectAgent(id, false), onFPS: fps => { $('fps').textContent = `${fps} FPS`; }, onStats: stats => { $('fps').title = `${stats.calls} draw calls · ${stats.triangles.toLocaleString()} triangles · DPR ${stats.dpr.toFixed(2)}`; }, onFloor: floorChanged });
+    world = new Headquarters($('world'), { onSelect: id => selectAgent(id, false), onFPS: fps => { $('fps').textContent = `${fps} FPS`; }, onStats: stats => { $('fps').title = `${stats.calls} draw calls · ${stats.triangles.toLocaleString()} triangles · DPR ${stats.dpr.toFixed(2)}`; }, onFloor: floorChanged, phase: $('phase-select').value, view: isFloor ? 'floor' : 'overview' });
     world.setParticles($('particles').checked);
     world.setRoleLabels($('role-labels').checked);
     world.setLow($('low-performance').checked);
+    world.setMarket(market);
     if (rosterLoaded)
         world.setRoster(roster);
     if (state)
         world.update(state, statuses, board);
     if (isFloor)
         world.focusFloor(3);
-}).catch(e => { console.error(e); const error = el('div', 'scene-error', `3D renderer unavailable: ${e.message}. Live data and inspection panels remain available.`); $('hud').append(error); $('fps').textContent = '3D unavailable'; });
+}).catch(e => { console.error(e); const error = el('div', 'scene-error', '3D assets are missing. Run `bun install` in the repository root, then reload.'); $('hud').append(error); $('fps').textContent = '3D unavailable'; });
 const visibility = () => { if (!document.hidden) {
     poll();
     refreshOutput();
@@ -705,7 +764,7 @@ const visibility = () => { if (!document.hidden) {
 else
     clearTimeout(pollTimer); };
 document.addEventListener('visibilitychange', visibility);
-addEventListener('pagehide', () => { closed = true; clearTimeout(pollTimer); clearInterval(outputTimer); clearInterval(clockTimer); document.removeEventListener('visibilitychange', visibility); world?.dispose(); });
+addEventListener('pagehide', () => { closed = true; clearTimeout(pollTimer); clearInterval(outputTimer); clearInterval(clockTimer); clearInterval(marketTimer); document.removeEventListener('visibilitychange', visibility); mobileDrawer.removeEventListener('change', drawerMediaChanged); drawer.removeEventListener('keydown', drawerKeydown); world?.dispose(); });
 // A restored page must recreate the GPU resources disposed on pagehide.
 addEventListener('pageshow', event => { if (event.persisted)
     location.reload(); });
