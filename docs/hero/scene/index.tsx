@@ -21,12 +21,19 @@ import './hero.css'
 //
 // Real strings: the product name, the three counters, three agent names,
 // the task title and its three log lines. Everything else is placeholder.
+//
+// The compact design (390 x 844, below 560 wide) is the same story built for
+// a phone column, not this one shrunk: the counters as one row, the floor
+// plan as a slim strip of desks, and the picked agent's row opening in place
+// into its card (task, progress, a three-line log) instead of a side rail,
+// carrying the rows below it down. The card is closed from its own head.
 
 type S = { selected: boolean; panel: boolean; log: number; done: boolean; burst: boolean }
 
 const initial: S = { selected: false, panel: false, log: 0, done: false, burst: false }
 const POSTER: S = { selected: true, panel: true, log: 3, done: true, burst: false }
 const REST = { x: 842, y: 548 }
+const REST_COMPACT = { x: 262, y: 790 }
 // The loop is a whole number of the 2s pulse, so a looping video has no seam
 const LOOP = 14000
 
@@ -41,7 +48,7 @@ async function script(a: Act<S>) {
   a.put({ selected: true, panel: true })
   await a.wait(500)
   // Out of the way: the empty middle of an idle row, clear of every word
-  await a.move({ x: 440, y: 548 }, { duration: 700 })
+  await a.move(a.layout === 'compact' ? { x: 236, y: 790 } : { x: 440, y: 548 }, { duration: 700 })
   await a.wait(200)
   a.mark('log')
   for (let i = 1; i <= 3; i++) {
@@ -54,8 +61,9 @@ async function script(a: Act<S>) {
   a.put({ burst: false })
   a.mark('hold')
   await a.wait(1500)
-  // The reset: close the panel, then the agent takes its next task
-  await a.move({ at: 'close', x: 0.5, y: 0.5 }, { duration: 800 })
+  // The reset: close the panel (on a phone, the card's own head), then the
+  // agent takes its next task
+  await a.move(a.layout === 'compact' ? { at: 'head-a', x: 0.45, y: 0.5 } : { at: 'close', x: 0.5, y: 0.5 }, { duration: 800 })
   await a.wait(100)
   await a.click()
   a.mark('reset')
@@ -63,7 +71,7 @@ async function script(a: Act<S>) {
   await a.wait(650)
   await a.snap({ log: 0 }, 'panel')
   a.put({ done: false })
-  await a.move(REST, { duration: 800 })
+  await a.move(a.layout === 'compact' ? REST_COMPACT : REST, { duration: 800 })
   await a.wait(Math.max(0, LOOP - (performance.now() - start)))
 }
 
@@ -76,6 +84,12 @@ const ROWS: { id: string; name: string | null; status: Status; time: string | nu
   { id: 'd', name: null, status: 'idle', time: null, task: 120 },
   { id: 'e', name: null, status: 'idle', time: null, task: 150 },
   { id: 'f', name: null, status: 'idle', time: null, task: 104 },
+]
+// The phone's column is taller: more idle rows run it off the bottom
+const MORE: typeof ROWS = [
+  { id: 'g', name: null, status: 'idle', time: null, task: 132 },
+  { id: 'h', name: null, status: 'idle', time: null, task: 112 },
+  { id: 'i', name: null, status: 'idle', time: null, task: 140 },
 ]
 
 const LOG = [
@@ -93,23 +107,25 @@ export default function StudioHero() {
       initial={initial}
       poster={POSTER}
       script={script}
-      cursor={{ at: REST }}
+      cursor={{ at: { wide: REST, compact: REST_COMPACT } }}
+      compact={{ below: 560, width: 390, height: 844 }}
       className="sth"
     >
-      {(s) => {
+      {(s, _rect, layout) => {
         const working = s.done ? 1 : 2
         const completed = s.done ? 1 : 0
+        if (layout === 'compact') return <Compact s={s} working={working} completed={completed} />
         return (
           <Window url="localhost:8787" className="sth-win">
             <div className="sth-body">
               <header className="sth-top">
                 <div className="sth-brand">Agent Studio</div>
-                <Metric label="Working" value={working} tone="cyan" icon={<i className="sth-dot sth-dot--cyan" />} />
-                <Metric label="Completed" value={completed} tone="green" icon={<Check size={12} strokeWidth={2.5} />} />
-                <Metric label="Idle" value={23} tone="muted" icon={<Circle size={11} strokeWidth={2.25} />} />
-                <span className="sth-top__end" aria-hidden>
+                <Metric label="Working" value={working} tone="cyan" icon={<i className="sth-dot sth-dot--cyan" />} n={0} />
+                <Metric label="Completed" value={completed} tone="green" icon={<Check size={12} strokeWidth={2.5} />} n={1} />
+                <Metric label="Idle" value={23} tone="muted" icon={<Circle size={11} strokeWidth={2.25} />} n={2} />
+                <span className="sth-top__end">
                   <Bar w={64} h={6} tone={2} />
-                  <Bar w={28} h={28} r={8} tone={1} />
+                  <button className="sth-menu" type="button" aria-label="Studio menu">⋯</button>
                 </span>
               </header>
               <Floor s={s} />
@@ -133,14 +149,51 @@ export default function StudioHero() {
   )
 }
 
-function Metric({ label, value, tone, icon }: { label: string; value: number; tone: 'cyan' | 'green' | 'muted'; icon: React.ReactNode }) {
+// The compact design: the HUD as a page, a gutter in from the top and both
+// sides, off the bottom. No desktop chrome: a window with traffic lights
+// squeezed to a phone column would be a squashed app. The roster is the
+// subject; the picked row is the card.
+function Compact({ s, working, completed }: { s: S; working: number; completed: number }) {
   return (
-    <div className="sth-metric" data-tone={tone}>
+    <div className="sth-win sth-page">
+      <div className="sth-body">
+        <div className="sth-brandbar">
+          <div className="sth-brand">Agent Studio</div>
+          <button className="sth-menu sth-menu--sm" type="button" aria-label="Studio menu">⋯</button>
+        </div>
+        <header className="sth-top">
+          <Metric label="Working" value={working} tone="cyan" icon={<i className="sth-dot sth-dot--cyan" />} n={0} />
+          <Metric label="Completed" value={completed} tone="green" icon={<Check size={12} strokeWidth={2.5} />} n={1} />
+          <Metric label="Idle" value={23} tone="muted" icon={<Circle size={11} strokeWidth={2.25} />} n={2} />
+        </header>
+        <Floor s={s} pods={PODS.slice(0, 6)} />
+        <section className="sth-list">
+          <div className="sth-list__head">
+            <span className="sth-label">Agent status</span>
+            <Bar w={44} h={6} tone={2} />
+          </div>
+          {[...ROWS, ...MORE].map((r) => (
+            <AgentRow key={r.id} row={r} s={s} compact />
+          ))}
+        </section>
+      </div>
+    </div>
+  )
+}
+
+// The counters arrive once, on first paint, as the HUD's first poll lands:
+// each value rises into its cell, left to right. They never leave again, so
+// every later loop opens on them already there.
+function Metric({ label, value, tone, icon, n = 0 }: { label: string; value: number; tone: 'cyan' | 'green' | 'muted'; icon: React.ReactNode; n?: number }) {
+  return (
+    <div className="sth-metric" data-tone={tone} style={{ '--n': n } as CSSProperties}>
       <span className="sth-metric__label">
         <span className="sth-metric__icon">{icon}</span>
         {label}
       </span>
-      <Count className="sth-metric__value" value={value} duration={600} />
+      <span className="sth-metric__in">
+        <Count className="sth-metric__value" value={value} duration={600} />
+      </span>
     </div>
   )
 }
@@ -150,7 +203,7 @@ function Metric({ label, value, tone, icon }: { label: string; value: number; to
 const PODS = [4, 4, 4, 4, 4, 4, 2]
 const DESK: Record<string, number> = { a: 5, b: 13, c: 18 }
 
-function Floor({ s }: { s: S }) {
+function Floor({ s, pods = PODS }: { s: S; pods?: number[] }) {
   let n = 0
   const tone = (i: number): string => {
     if (i === DESK.a) return s.done ? 'completed' : 'working'
@@ -168,7 +221,7 @@ function Floor({ s }: { s: S }) {
         ))}
       </div>
       <div className="sth-pods">
-        {PODS.map((size, p) => (
+        {pods.map((size, p) => (
           <span key={p} className="sth-pod" data-size={size}>
             {Array.from({ length: size }, () => {
               const i = n++
@@ -186,24 +239,58 @@ function Floor({ s }: { s: S }) {
   )
 }
 
-function AgentRow({ row, s }: { row: (typeof ROWS)[number]; s: S }) {
+function AgentRow({ row, s, compact }: { row: (typeof ROWS)[number]; s: S; compact?: boolean }) {
   const live = row.id === 'a'
   const status: Status = live && s.done ? 'completed' : row.status
+  // The last rows run off the bottom edge: filler, so no chip to slice
+  const filler = row.id >= 'e'
   return (
     <div className="sth-row" data-status={status} data-lifted={(live && s.selected) || undefined} data-target={live ? 'agent-a' : undefined} data-cursor={live ? 'pointer' : undefined}>
-      <Row
-        pad={10}
-        lead={<Lead status={status} />}
-        title={row.name ?? <Bar w={[118, 96, 132][row.id.charCodeAt(0) - 100]!} h={7} tone={3} />}
-        subtitle={<Bar w={row.task} h={6} tone={row.name ? 2 : 1} />}
-      >
-        <span className="sth-trail">
-          {/* The last rows run off the bottom edge: filler, so no chip to slice */}
-          {row.id === 'e' || row.id === 'f' ? <Bar w={52} h={24} r={12} tone={1} /> : <Chip status={status} flips={live} />}
-          <span className="sth-time">{row.time ?? <Bar w={30} h={6} tone={1} />}</span>
-        </span>
-      </Row>
+      <div className="sth-row__head" data-target={live && compact ? 'head-a' : undefined}>
+        <Row
+          pad={10}
+          lead={<Lead status={status} />}
+          title={row.name ?? <Bar w={[118, 96, 132, 108, 124, 100][row.id.charCodeAt(0) - 100]!} h={7} tone={3} />}
+          // On a phone a named row is one line: no placeholder under its name
+          subtitle={compact && row.name ? undefined : <Bar w={compact ? Math.min(row.task, 150) : row.task} h={6} tone={row.name ? 2 : 1} />}
+        >
+          <span className="sth-trail">
+            {filler ? <Bar w={52} h={24} r={12} tone={1} /> : <Chip status={status} flips={live} />}
+            {!compact && <span className="sth-time">{row.time ?? <Bar w={30} h={6} tone={1} />}</span>}
+          </span>
+        </Row>
+      </div>
+      {live && compact && (
+        // The card unrolls from its row's head, fading in from the first frame
+        <Collapse open={s.panel}>
+          <Card s={s} />
+        </Collapse>
+      )}
       {live && <Confetti on={s.burst} />}
+    </div>
+  )
+}
+
+// The compact card: the detail rail's content, opened under its own row
+function Card({ s }: { s: S }) {
+  const progress = s.done ? 1 : [0.46, 0.62, 0.78, 0.9][s.log]!
+  return (
+    <div className="sth-card" data-target="panel">
+      <div className="sth-task">Build the ability cooldown</div>
+      <div className="sth-progress">
+        <Meter value={progress} tone={s.done ? 'success' : 'accent'} className="sth-meter" />
+        <span className="sth-id">T-104</span>
+      </div>
+      <div className="sth-log">
+        {LOG.map((l, i) => (
+          <Collapse key={l.t} open={s.log > i}>
+            <div className="sth-line" data-last={(i === 2 && s.done) || undefined}>
+              <span className="sth-line__t">{l.t}</span>
+              <span className="sth-line__text">{l.text}</span>
+            </div>
+          </Collapse>
+        ))}
+      </div>
     </div>
   )
 }

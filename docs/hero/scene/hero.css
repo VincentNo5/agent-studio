@@ -3,11 +3,16 @@
   70%, 100% { box-shadow: 0 0 0 6px rgb(56 217 255 / 0); }
 }
 
+/* The counters' one entrance: each value rises into its cell on first paint */
+@keyframes sth-count-in {
+  from { opacity: 0; transform: translateY(7px); }
+}
+
 @keyframes sth-confetti {
   0% { opacity: 0; transform: translate(0, 0) rotate(0deg) scale(0.6); }
   12% { opacity: 1; }
   70% { opacity: 1; }
-  100% { opacity: 0; transform: translate(var(--x), calc(var(--y) + 26px)) rotate(var(--r)) scale(1); }
+  100% { opacity: 0; transform: translate(calc(var(--x) * var(--sx, 1)), calc(var(--y) * var(--sy, 1) + 26px)) rotate(var(--r)) scale(1); }
 }
 
 /* Agent Studio's own tokens (public/studio.css), mapped onto the kit's */
@@ -115,6 +120,15 @@
   width: 12px;
   height: 12px;
   color: var(--s);
+}
+
+.sth-metric__in {
+  display: block;
+  animation: sth-count-in 0.5s cubic-bezier(0.25, 0.8, 0.25, 1) calc(0.3s + var(--n, 0) * 0.08s) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sth-metric__in { animation: none; }
 }
 
 .sth-metric__value {
@@ -272,7 +286,8 @@
   font-weight: 600;
 }
 
-/* A row. Working rows carry the status rule on their left, like the HUD */
+/* A row. Working rows carry the status rule on their left, like the HUD.
+   The rule sits on the row's head, so an opened card below it stays clear */
 .sth-row {
   position: relative;
   margin-bottom: 4px;
@@ -282,7 +297,11 @@
   will-change: transform;
 }
 
-.sth-row::before {
+.sth-row__head {
+  position: relative;
+}
+
+.sth-row__head::before {
   content: '';
   position: absolute;
   left: 0;
@@ -294,9 +313,9 @@
   transition: background-color 0.25s ease;
 }
 
-.sth-row[data-status='working']::before { background: var(--sth-cyan); }
-.sth-row[data-status='pending']::before { background: var(--sth-amber); }
-.sth-row[data-status='completed']::before { background: var(--sth-green); }
+.sth-row[data-status='working'] > .sth-row__head::before { background: var(--sth-cyan); }
+.sth-row[data-status='pending'] > .sth-row__head::before { background: var(--sth-amber); }
+.sth-row[data-status='completed'] > .sth-row__head::before { background: var(--sth-green); }
 
 .sth-row .ss-row {
   --ss-row-title: 15.5px;
@@ -507,18 +526,29 @@
   inset: 0;
   padding: 14px 18px;
   background: linear-gradient(180deg, #11273a, #0c1c2b);
-  /* A short glide in from the right, arriving with its content: never a
-     blank surface, and nothing is cut at full strength by the rail edge */
+  /* A short glide in from the right, arriving with its content, by a
+     transform so its text moves as one picture. A soft mask travels with it:
+     at rest outside the open state it fades the panel to nothing at the
+     rail's edge (48px in from the panel's own, which is translated 48px),
+     and it slides off as the panel lands. Its clear point is always at or
+     past the rail's edge, so the close button and T-104 are never seen cut */
   opacity: 0;
   transform: translateX(48px);
-  /* Opacity eases in, so the panel stays faint while the rail edge cuts it */
-  transition: transform 0.45s cubic-bezier(0.25, 0.8, 0.25, 1), opacity 0.45s cubic-bezier(0.55, 0, 0.75, 0.2);
+  -webkit-mask: linear-gradient(to right, #000 calc(100% - 64px), transparent) -112px 0 / calc(100% + 64px) 100% no-repeat;
+  mask: linear-gradient(to right, #000 calc(100% - 64px), transparent) -112px 0 / calc(100% + 64px) 100% no-repeat;
+  transition:
+    transform 0.45s cubic-bezier(0.25, 0.8, 0.25, 1),
+    -webkit-mask-position 0.45s cubic-bezier(0.25, 0.8, 0.25, 1),
+    mask-position 0.45s cubic-bezier(0.25, 0.8, 0.25, 1),
+    opacity 0.45s cubic-bezier(0.55, 0, 0.75, 0.2);
   will-change: transform;
 }
 
 .sth-panel[data-open] {
   opacity: 1;
   transform: none;
+  -webkit-mask-position: 0 0;
+  mask-position: 0 0;
 }
 
 .sth-panel__head {
@@ -614,3 +644,180 @@
 .sth-meter[data-tone='success'] .ss-meter__fill {
   background: var(--sth-green);
 }
+
+/* The compact design: a phone column, 390 x 844. The HUD as a page a
+   gutter in from the top and both sides, running well past the bottom so
+   only the stage crops it; everything at 1:1 */
+.sth .ss-stage[data-layout='compact'] .sth-win {
+  top: 16px;
+  left: 16px;
+  width: 358px;
+  height: 1100px;
+}
+
+.sth-page {
+  overflow: hidden;
+  border-radius: 12px;
+  background: var(--ss-surface);
+}
+
+.sth .ss-stage[data-layout='compact'] .sth-body {
+  height: auto;
+  padding: 6px 14px 0;
+}
+
+.sth .ss-stage[data-layout='compact'] .sth-body > * {
+  width: auto;
+}
+
+.sth-brandbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 48px;
+}
+
+.sth .ss-stage[data-layout='compact'] .sth-brand {
+  padding-right: 0;
+  font-size: 13px;
+  letter-spacing: 2.4px;
+}
+
+/* The counters as one row of three equal cells, split by hairlines */
+.sth .ss-stage[data-layout='compact'] .sth-top {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  height: 64px;
+  border-top: 1px solid var(--sth-hair);
+}
+
+.sth .ss-stage[data-layout='compact'] .sth-metric {
+  min-width: 0;
+  padding: 0 12px;
+}
+
+.sth .ss-stage[data-layout='compact'] .sth-metric:first-child {
+  padding-left: 0;
+  border-left: 0;
+}
+
+.sth .ss-stage[data-layout='compact'] .sth-metric__label {
+  font-size: 12px;
+}
+
+.sth .ss-stage[data-layout='compact'] .sth-metric__value {
+  font-size: 22px;
+}
+
+/* The floor plan as a slim strip: the desk pods only, still lit by status */
+.sth .ss-stage[data-layout='compact'] .sth-floor {
+  height: 44px;
+  margin: 12px 0;
+  padding: 0 12px;
+}
+
+.sth .ss-stage[data-layout='compact'] .sth-rooms,
+.sth .ss-stage[data-layout='compact'] .sth-lounge {
+  display: none;
+}
+
+.sth .ss-stage[data-layout='compact'] .sth-pods {
+  justify-content: space-between;
+  padding: 0;
+  border: 0;
+}
+
+.sth .ss-stage[data-layout='compact'] .sth-pod {
+  grid-template-columns: repeat(2, 16px);
+  gap: 5px;
+}
+
+.sth .ss-stage[data-layout='compact'] .sth-desk {
+  height: 9px;
+}
+
+.sth .ss-stage[data-layout='compact'] .sth-desk::after {
+  inset: -3px;
+  border-radius: 4px;
+}
+
+.sth .ss-stage[data-layout='compact'] .sth-list {
+  height: auto;
+  min-height: 1000px;
+  padding: 0 6px;
+}
+
+.sth .ss-stage[data-layout='compact'] .sth-list__head {
+  height: 46px;
+  padding: 0 10px;
+}
+
+.sth .ss-stage[data-layout='compact'] .sth-row .ss-row {
+  --ss-row-title: 15px;
+}
+
+/* The opened card: aligned under the agent's name, the log short. It is the
+   row's own surface, so its words come with the first frame of the opening
+   rather than after the kit's delay: the card is never seen empty, and it
+   unrolls from the top, so nothing draws past the opening space */
+.sth-row > .ss-collapse[data-open] {
+  transition: grid-template-rows 0.46s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.36s ease-out;
+}
+
+.sth-card {
+  padding: 0 14px 14px 36px;
+}
+
+.sth-card .sth-task {
+  margin-top: 0;
+  font-size: 15px;
+}
+
+.sth-card .sth-progress {
+  margin-top: 10px;
+  padding-bottom: 12px;
+}
+
+.sth-card .sth-id,
+.sth-card .sth-line__t {
+  font-size: 12px;
+}
+
+.sth-card .sth-log {
+  padding-top: 4px;
+}
+
+.sth-card .sth-line {
+  grid-template-columns: 42px minmax(0, 1fr);
+  gap: 12px;
+  height: 32px;
+}
+
+.sth-card .sth-line__text {
+  font-size: 14px;
+}
+
+/* The burst leaves the gap between the name and the chip, narrower, so it
+   rises clear of both and is gone above the row */
+.sth .ss-stage[data-layout='compact'] .sth-confetti {
+  --sx: 0.22;
+  --sy: 0.85;
+  right: 142px;
+  top: 6px;
+}
+
+/* A blank rounded chip reads as a broken control; the header menu is a real one. */
+.sth-menu {
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  padding: 0 0 4px;
+  border: 1px solid rgba(140, 178, 204, .22);
+  border-radius: 8px;
+  background: rgba(120, 170, 210, .06);
+  color: #9cb7ca;
+  font: 600 15px/1 "Avenir Next", "Trebuchet MS", sans-serif;
+  letter-spacing: .5px;
+}
+.sth-menu--sm { width: 26px; height: 26px; font-size: 14px; }

@@ -10,6 +10,7 @@ HUD: picking a working agent opens its detail panel, the log streams in, the chi
 `Working → Completed`, the header counters roll and the agent's desk on the floor plan turns
 green. The loop resets when the agent picks up its next task. It is an illustration of the
 HUD, not a screen recording; see [docs/hero/README.md](docs/hero/README.md) to re-render it.
+On a phone, the same task is built for a narrow column: [poster](docs/hero/poster-phone.png), [loop](docs/hero/hero-phone.webm).
 
 **Command Overview** (`/`) — the complete single-floor office, task lanes, active roles,
 agent inspection, live events, and operational panels. Click a character to show a short

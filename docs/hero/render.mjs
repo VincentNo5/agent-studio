@@ -1,8 +1,10 @@
 // Renders the README hero: copies scene/ into the installed Stageshow skill,
 // serves its playground, steps the skill's virtual clock frame by frame and
-// writes poster.png, hero.webm and contact sheets.
+// writes poster.png and hero.webm (the wide design), poster-phone.png and
+// hero-phone.webm (the compact design, filmed in a 390 wide page), and
+// contact sheets.
 //
-//   node docs/hero/render.mjs [--skill .agents/skills/stageshow] [--sheets <dir>]
+//   node docs/hero/render.mjs [--only wide|phone] [--skill .agents/skills/stageshow] [--sheets <dir>]
 //
 // Needs the skill installed (npx skills add benjitaylor/skills --skill
 // stageshow), `npm install` run inside it, Google Chrome, and ffmpeg on PATH.
@@ -21,11 +23,18 @@ const opt = (name, fallback) => {
 }
 const skill = resolve(opt('skill', join(here, '../../.agents/skills/stageshow')))
 const sheets = opt('sheets', null)
+const only = opt('only', null)
 const NAME = 'studio-hero'
 const FPS = 30 // output frame rate; the clock runs at 60, two steps per frame
 const LOOP = 14000 // the scene's loop length (LOOP in scene/index.tsx)
-const W = 1100
-const H = 620
+// The two designs. The page width picks the layout: the scene switches to
+// its compact design below 560, so the phone is filmed in a 390 wide page.
+// Both are captured at 2x; `out` is the loop's encoded width.
+const SHOTS = [
+  { id: 'wide', W: 1100, H: 620, page: 1140, out: 1650, poster: 'poster.png', video: 'hero.webm', sheet: [830, '3x5'] },
+  { id: 'phone', W: 390, H: 844, page: 390, out: 780, poster: 'poster-phone.png', video: 'hero-phone.webm', sheet: [390, '5x3'] },
+].filter((shot) => !only || shot.id === only)
+if (!SHOTS.length) throw new Error(`--only takes wide or phone, not ${only}`)
 
 // The scene lives beside the playground's examples so its kit import resolves
 const dest = join(skill, 'examples', NAME)
@@ -57,21 +66,24 @@ const until = async (page, fn) => {
 }
 const work = mkdtempSync(join(tmpdir(), 'studio-hero-'))
 
-try {
+const kb = (p) => `${(statSync(p).size / 1024).toFixed(0)} KB`
+const ff = (...a) => execFileSync('ffmpeg', ['-v', 'error', '-y', ...a], { stdio: 'inherit' })
+
+async function film({ id, W, H, page: pageW, out, poster, video, sheet }) {
   // The poster: the scene's own poster frame, as reduced motion shows it
   {
-    const page = await browser.newPage({ viewport: { width: W + 40, height: H + 40 }, deviceScaleFactor: 2, reducedMotion: 'reduce' })
+    const page = await browser.newPage({ viewport: { width: pageW, height: H + 40 }, deviceScaleFactor: 2, reducedMotion: 'reduce' })
     await page.goto(`${base}/?capture=${NAME}`)
     const stage = page.locator('.ss-stage').first()
     await stage.waitFor()
     await page.waitForTimeout(1500)
-    await stage.screenshot({ path: join(here, 'poster.png'), animations: 'disabled' })
+    await stage.screenshot({ path: join(here, poster), animations: 'disabled' })
     await page.close()
   }
 
   // The loop: the embed route installs the virtual clock before any scene
   // code runs. Playback is paused and the clock stepped from here.
-  const page = await browser.newPage({ viewport: { width: W + 40, height: H + 40 }, deviceScaleFactor: 2 })
+  const page = await browser.newPage({ viewport: { width: pageW, height: H + 40 }, deviceScaleFactor: 2 })
   page.on('pageerror', (e) => console.error('page error:', e.message))
   await page.goto(`${base}/?embed=${NAME}`)
   // The embed driver waits to be told it is visible; paused, it still lays out
@@ -89,8 +101,11 @@ try {
     }
   }
   const stage = page.locator('.ss-stage').first()
+  const layout = await stage.getAttribute('data-layout')
+  const size = await stage.evaluate((e) => [e.offsetWidth, e.offsetHeight])
+  if (size[0] !== W || size[1] !== H) throw new Error(`the ${id} stage is ${size.join('x')} (${layout}), not ${W}x${H}`)
   const frames = Math.round((LOOP / 1000) * FPS)
-  const dir = join(work, 'frames')
+  const dir = join(work, id)
   mkdirSync(dir)
   for (let f = 0; f < frames; f++) {
     await stage.screenshot({ path: join(dir, `f${String(f).padStart(4, '0')}.png`) })
@@ -98,19 +113,21 @@ try {
   }
   await page.close()
 
-  const ff = (...a) => execFileSync('ffmpeg', ['-v', 'error', '-y', ...a], { stdio: 'inherit' })
-  ff('-framerate', String(FPS), '-i', join(dir, 'f%04d.png'), '-vf', 'scale=1650:-2:flags=lanczos', '-c:v', 'libvpx-vp9', '-b:v', '0', '-crf', '34', '-row-mt', '1', '-pix_fmt', 'yuv420p', '-an', join(here, 'hero.webm'))
+  ff('-framerate', String(FPS), '-i', join(dir, 'f%04d.png'), '-vf', `scale=${out}:-2:flags=lanczos`, '-c:v', 'libvpx-vp9', '-b:v', '0', '-crf', '34', '-row-mt', '1', '-pix_fmt', 'yuv420p', '-an', join(here, video))
   if (sheets) {
     mkdirSync(sheets, { recursive: true })
-    // One frame a second at the shown width (830) and at a phone's (390)
-    ff('-framerate', String(FPS), '-i', join(dir, 'f%04d.png'), '-vf', `select='not(mod(n\\,${FPS}))',scale=830:-2,tile=3x5:padding=8:color=white`, '-frames:v', '1', join(sheets, 'sheet-830.png'))
-    ff('-framerate', String(FPS), '-i', join(dir, 'f%04d.png'), '-vf', `select='not(mod(n\\,${FPS}))',scale=390:-2,tile=5x3:padding=8:color=white`, '-frames:v', '1', join(sheets, 'sheet-390.png'))
-    cpSync(dir, join(sheets, 'frames'), { recursive: true })
+    // One frame a second at the shown width
+    const [w, tile] = sheet
+    ff('-framerate', String(FPS), '-i', join(dir, 'f%04d.png'), '-vf', `select='not(mod(n\\,${FPS}))',scale=${w}:-2,tile=${tile}:padding=8:color=white`, '-frames:v', '1', join(sheets, `sheet-${id}-${w}.png`))
+    if (id === 'wide') ff('-framerate', String(FPS), '-i', join(dir, 'f%04d.png'), '-vf', `select='not(mod(n\\,${FPS}))',scale=390:-2,tile=5x3:padding=8:color=white`, '-frames:v', '1', join(sheets, 'sheet-wide-390.png'))
+    cpSync(dir, join(sheets, `frames-${id}`), { recursive: true })
   }
-  const kb = (p) => `${(statSync(p).size / 1024).toFixed(0)} KB`
-  console.log(`stage ${W}x${H}, ${frames} frames at ${FPS} fps = ${(frames / FPS).toFixed(2)} s`)
-  console.log(`poster.png ${kb(join(here, 'poster.png'))}, hero.webm ${kb(join(here, 'hero.webm'))}`)
-  console.log(`frames in ${readdirSync(dir).length ? dir : '-'}`)
+  console.log(`${id}: stage ${W}x${H} (${layout}), ${frames} frames at ${FPS} fps = ${(frames / FPS).toFixed(2)} s, ${readdirSync(dir).length} captured`)
+  console.log(`  ${poster} ${kb(join(here, poster))}, ${video} ${kb(join(here, video))}`)
+}
+
+try {
+  for (const shot of SHOTS) await film(shot)
 } finally {
   await browser.close()
   await server.close()
