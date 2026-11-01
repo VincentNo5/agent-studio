@@ -3,6 +3,14 @@
 A live **three-dimensional headquarters** for multi-agent work, with a cinematic command
 HUD and two desktop views of the same read-only state.
 
+<a href="docs/hero/hero.webm"><img src="docs/hero/poster.png" alt="Agent Studio HUD: analytics-engineer completed, counters at 1 working and 1 completed, its log and green desk on the floor plan" width="880"></a>
+
+The hero loop ([`docs/hero/hero.webm`](docs/hero/hero.webm), 14 s, silent) is one task in the
+HUD: picking a working agent opens its detail panel, the log streams in, the chip turns
+`Working → Completed`, the header counters roll and the agent's desk on the floor plan turns
+green. The loop resets when the agent picks up its next task. It is an illustration of the
+HUD, not a screen recording; see [docs/hero/README.md](docs/hero/README.md) to re-render it.
+
 **Command Overview** (`/`) — the complete single-floor office, task lanes, active roles,
 agent inspection, live events, and operational panels. Click a character to show a short
 role-specific line above the floor.
@@ -24,9 +32,7 @@ counts, active agents, rooms. This is the view to open from an iPhone; see
 **System Anatomy** (`/anatomy`) — not another office view. It is an isometric system map of
 where state comes from (Orca, CCGS audit, Paseo, quotas), how `/state` collects it, and how the
 experience views consume it. Use it to understand the data flow; use `/` for operations and
-`/floor` for the spatial campus.
-
-<img src="docs/anatomy.png" alt="Agent Studio system anatomy" width="720">
+`/floor` for the spatial campus. Screenshot: [docs/anatomy.png](docs/anatomy.png).
 
 ## The office
 
@@ -281,6 +287,7 @@ git config core.hooksPath .githooks   # once per clone
 - `tests/` — data, routing and procedural scene regression checks
 - `roster.json` — generated roster: `{ rooms: [...], agents: [{ name, model, desc, room, tier }] }`
 - `docs/*.png` — screenshots (redacted: repository names and local paths replaced)
+- `docs/hero/` — the README hero loop: its source, `poster.png`, `hero.webm` and render script
 
 ## Limits
 
@@ -304,6 +311,7 @@ git config core.hooksPath .githooks   # once per clone
 
 ## Credits
 
+- README hero built with the [Stageshow](https://github.com/benjitaylor/skills) skill by Benji Taylor (MIT); see `docs/hero/README.md`.
 - Studio roster and audit-hook format: [Donchitos/Claude-Code-Game-Studios](https://github.com/donchitos/claude-code-game-studios) (MIT).
 
 ## License
