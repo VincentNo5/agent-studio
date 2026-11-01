@@ -138,9 +138,20 @@ export function routeBetween(fromExit, toExit) {
     return points.filter((p, i) => i === 0 || Math.hypot(p.x - points[i - 1].x, p.z - points[i - 1].z) > .01);
 }
 
-export function phaseForShanghai(value = Date.now()) {
-    const parts = new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Shanghai', hour: '2-digit', hourCycle: 'h23' }).formatToParts(new Date(value));
-    const hour = Number(parts.find(part => part.type === 'hour')?.value || 12);
+/** The studio runs on Los Angeles time; the wall clock and the day phase share it. */
+export const STUDIO_TIME_ZONE = 'America/Los_Angeles';
+
+/** Local hour and minute in the studio's zone, DST included. */
+export function studioClock(value = Date.now(), timeZone = STUDIO_TIME_ZONE) {
+    const parts = new Intl.DateTimeFormat('en-GB', { timeZone, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).formatToParts(new Date(value));
+    const read = type => Number(parts.find(part => part.type === type)?.value);
+    const hour = Number.isFinite(read('hour')) ? read('hour') : 12;
+    const minute = Number.isFinite(read('minute')) ? read('minute') : 0;
+    return { hour, minute, minutes: hour * 60 + minute };
+}
+
+export function phaseForZone(value = Date.now(), timeZone = STUDIO_TIME_ZONE) {
+    const { hour } = studioClock(value, timeZone);
     if (hour >= 7 && hour < 17)
         return 'day';
     if ((hour >= 5 && hour < 7) || (hour >= 17 && hour < 20))
@@ -775,7 +786,7 @@ export class Headquarters {
     }
     setPhase(mode = 'auto') {
         this.phaseMode = ['auto', 'day', 'dusk', 'night'].includes(mode) ? mode : 'auto';
-        const phase = this.phaseMode === 'auto' ? phaseForShanghai() : this.phaseMode;
+        const phase = this.phaseMode === 'auto' ? phaseForZone() : this.phaseMode;
         if (phase === this.currentPhase)
             return;
         const first = !this.currentPhase;
@@ -1366,9 +1377,9 @@ export class Headquarters {
         this.clockMinute = -1;
         this.drawClock();
     }
-    // Shanghai wall time, matching the HUD clock. Checked once a second, redrawn once a minute.
+    // Studio wall time, matching the HUD clock. Checked once a second, redrawn once a minute.
     drawClock() {
-        const minutes = Math.floor(Date.now() / 60000 + 480) % 1440;
+        const minutes = studioClock().minutes;
         if (minutes === this.clockMinute || !this.clockCanvas)
             return;
         this.clockMinute = minutes;

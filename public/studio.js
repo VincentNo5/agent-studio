@@ -182,7 +182,7 @@ dialog.addEventListener('click', e => { if (e.target === dialog) {
 } });
 dialog.addEventListener('close', () => { currentPanel = null; logId = null; logGeneration++; });
 $('connection').onclick = () => poll();
-function connection() { const err = stateError || rosterError; const stale = !demoMode && state && Date.now() - Number(state.ts) > 10000; $('connection').dataset.state = err ? 'error' : stale ? 'loading' : state ? 'ok' : 'loading'; $('connection-label').textContent = demoMode ? 'Demo mode' : err ? 'Link error · retry' : stale ? 'State is stale · retry' : state ? 'State connected' : 'Connecting'; $('connection').title = demoMode ? 'Deterministic simulated studio feed.' : err ? `${err}. Click to retry.${lastSuccess ? ' Last success: ' + date(lastSuccess) : ''}` : state ? `State snapshot: ${date(state.ts)}. Click to refresh.` : 'Connecting to /state and /roster.json'; const shanghai = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date()); $('clock').textContent = `Asia/Shanghai · ${shanghai}`; }
+function connection() { const err = stateError || rosterError; const stale = !demoMode && state && Date.now() - Number(state.ts) > 10000; $('connection').dataset.state = err ? 'error' : stale ? 'loading' : state ? 'ok' : 'loading'; $('connection-label').textContent = demoMode ? 'Demo mode' : err ? 'Link error · retry' : stale ? 'State is stale · retry' : state ? 'State connected' : 'Connecting'; $('connection').title = demoMode ? 'Deterministic simulated studio feed.' : err ? `${err}. Click to retry.${lastSuccess ? ' Last success: ' + date(lastSuccess) : ''}` : state ? `State snapshot: ${date(state.ts)}. Click to refresh.` : 'Connecting to /state and /roster.json'; const studioTime = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Los_Angeles', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date()); $('clock').textContent = `Los Angeles · ${studioTime}`; }
 // Display name for a status-map key: a roster role, or an Orca dispatch on the floor.
 function agentName(id, entry) {
     if (!id.startsWith('worker:'))
@@ -742,7 +742,7 @@ pollMarket();
 clockTimer = setInterval(connection, 1000);
 outputTimer = setInterval(refreshOutput, 2000);
 marketTimer = setInterval(pollMarket, 60_000);
-import('./hq3d.js?v=41').then(({ Headquarters }) => {
+import('./hq3d.js?v=50').then(({ Headquarters }) => {
     if (closed)
         return;
     world = new Headquarters($('world'), { onSelect: id => selectAgent(id, false), onFPS: fps => { $('fps').textContent = `${fps} FPS`; }, onStats: stats => { $('fps').title = `${stats.calls} draw calls · ${stats.triangles.toLocaleString()} triangles · DPR ${stats.dpr.toFixed(2)}`; }, onFloor: floorChanged, phase: $('phase-select').value, view: isFloor ? 'floor' : 'overview' });

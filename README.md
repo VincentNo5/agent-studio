@@ -47,7 +47,7 @@ HUD panels leave free; `/floor`, which has no left panels, keeps a closer view. 
 soffit with a bronze reveal runs along the back walls, linear brass pendants follow the main aisle
 and three globe pendants hang over the lounge table. None of them is over a seat (a test checks
 this). The north wall carries a framed colour-field canvas and felt acoustic panels, and a wall clock
-on Shanghai time with a rooms directory hangs on the mullion between the director's office and the
+on Los Angeles time with a rooms directory hangs on the mullion between the director's office and the
 meeting room. A light grade sits before the output pass. It warms highlights, cools shadows, deepens
 the low end and darkens toward the frame edges, and it leaves saturated pixels alone, so the status
 colours are unchanged.
@@ -81,7 +81,7 @@ lounge, home); the first state after page load places everyone without replaying
 - **Completion.** When a role is *observed* changing to `completed`, it hops and a short confetti
   burst (120 instanced pieces, 1.2 s) fires at its desk. Roles that were already completed when
   the page loaded do not celebrate. Reduced-motion preferences skip the hop and the confetti.
-- **Day and night.** The lighting follows Asia/Shanghai time: day 07–17, dusk 05–07 and 17–20,
+- **Day and night.** The lighting follows Los Angeles time (PST/PDT, DST included): day 07–17, dusk 05–07 and 17–20,
   night otherwise. At night the sky goes dark, warm pools light the rooms, the recessed ceiling
   strips, the glazing and the reception wordmark glow. Nobody leaves the floor: every role stays at its
   own desk, and status still decides the pose. The **Lighting** control
