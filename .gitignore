@@ -26,3 +26,8 @@ logs/
 
 __pycache__/
 *.pyc
+
+# third-party agent skills installed locally (npx skills add …)
+.agents/skills/stageshow/
+.claude/
+skills-lock.json
