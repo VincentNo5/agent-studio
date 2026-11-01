@@ -31,3 +31,6 @@ __pycache__/
 .agents/skills/stageshow/
 .claude/
 skills-lock.json
+
+# locally installed design skill
+.agents/skills/luobo-design/

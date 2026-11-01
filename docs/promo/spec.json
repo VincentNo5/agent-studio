@@ -1,0 +1,107 @@
+{
+ "project": "Agent Studio 开源宣传",
+ "profile": {
+  "industry": "creator",
+  "goal": "让开发者一眼看懂这是个什么项目，愿意去仓库和 demo 看一眼",
+  "confirmed": [
+   "多智能体 3D 办公室",
+   "只读遥测",
+   "Bun + Three.js",
+   "开源"
+  ],
+  "inferred": [
+   "受众是开发者与 AI 从业者",
+   "方向用 dark-premium 更贴合产品本身"
+  ],
+  "defaulted": [
+   "文案用中文，技术名词保留英文"
+  ],
+  "missing": [],
+  "direction_candidates": [
+   "dark-premium",
+   "editorial",
+   "trust-blue"
+  ],
+  "direction_choice": "用 dark-premium，并把强调色换成产品自身的青色 #38D9FF"
+ },
+ "brand": {
+  "name": "Agent Studio",
+  "direction": "dark-premium",
+  "tokens": {
+   "bg": "#0B1118",
+   "surface": "#121A24",
+   "ink": "#EAF4FB",
+   "muted": "#8FA6B8",
+   "accent": "#38D9FF",
+   "accent2": "#FFB547"
+  },
+  "voice": "克制、具体，不喊口号",
+  "fonts": {
+   "display": "sans"
+  }
+ },
+ "facts": {
+  "repo": "github.com/VincentNo5/agent-studio",
+  "stack": "Three.js · Bun",
+  "data": "只读遥测 /state"
+ },
+ "items": [
+  {
+   "id": "wide",
+   "type": "poster",
+   "layout": "editorial",
+   "sizes": [
+    "1600x900",
+    "1200x627"
+   ],
+   "content": {
+    "kicker": "开源 · 多智能体可视化",
+    "headline": "26 个 AI\n在同一间办公室上班",
+    "sub": "工位、任务、日志、配额，全部来自真实遥测。谁在干活，一眼看见。",
+    "details": [
+     {
+      "k": "技术",
+      "v": "{stack}"
+     },
+     {
+      "k": "数据",
+      "v": "{data}"
+     },
+     {
+      "k": "仓库",
+      "v": "{repo}"
+     }
+    ],
+    "cta": "一条命令本地跑起来"
+   }
+  },
+  {
+   "id": "vertical",
+   "type": "poster",
+   "layout": "editorial",
+   "sizes": [
+    "1080x1440"
+   ],
+   "content": {
+    "kicker": "开源项目",
+    "headline": "26 个 AI 的\n一间办公室",
+    "sub": "谁在干活、谁在等任务、谁刚做完，一眼看见。",
+    "details": [
+     {
+      "k": "技术",
+      "v": "{stack}"
+     },
+     {
+      "k": "数据",
+      "v": "{data}"
+     },
+     {
+      "k": "仓库",
+      "v": "{repo}"
+     }
+    ],
+    "cta": "一条命令本地跑起来"
+   }
+  }
+ ]
+}
