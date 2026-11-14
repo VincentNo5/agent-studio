@@ -1,5 +1,5 @@
 import { toolIcon } from './tool-icons.js';
-import { agentStatuses, workerStatus, countStatuses, STATUS_META, STATUS_ORDER, COMPLETED_WINDOW_MS, isWorking, matchesRole, taskBoard, getJSON, outputBlocks, ROOM_COLORS, hash, workKind, workSelection, workLines, workingItems, workingSummary, floorWorkers } from './studio-data.js';
+import { agentStatuses, workerStatus, countStatuses, STATUS_META, STATUS_ORDER, COMPLETED_WINDOW_MS, isWorking, matchesRole, taskBoard, getJSON, outputBlocks, ROOM_COLORS, hash, workKind, workSelection, workLines, workingItems, workingSummary, floorWorkers, roleWork, campusStatuses } from './studio-data.js';
 import { createDemoFeed, DEMO_START } from './demo-state.js';
 const $ = id => document.getElementById(id);
 const el = (tag, cls, text) => { const n = document.createElement(tag); if (cls)
@@ -354,10 +354,10 @@ function renderChildDetail(box, w) {
     const section = el('section', 'detail-section omp-child-detail');
     section.append(el('h3', null, 'Current task'), el('p', null, w.taskTitle || 'The child reported no task.'));
     box.append(section);
-    const facts = el('dl', 'fields'), lines = workLines(w);
+    const facts = el('dl', 'fields');
     for (const [key, value] of [
         ['Agent', w.agent], ['State', w.childState], ['Parent tool', w.toolName], ['Stale', w.stale ? 'yes · no recent evidence' : 'no'],
-        ['Provider', w.provider], ['Model', w.model], ['Remaining', lines.left], ['Project', w.cwd], ['Child', w.dispatchId.slice('omp-child:'.length)],
+        ['Provider', w.provider], ['Model', w.model], ['Remaining', workLines(w).count], ['Project', w.cwd], ['Child', w.dispatchId.slice('omp-child:'.length)],
     ])
         facts.append(el('dt', null, key), el('dd', null, value || '—'));
     const details = el('section', 'detail-section');
@@ -573,7 +573,7 @@ function workCard(w, tasksKnown) {
     card.classList.toggle('selected', selected === id);
     card.title = [WORK_KIND[kind], w.toolName, w.cwd, w.dispatchId].filter(Boolean).join(' · ');
     const top = el('span', 'work-head');
-    top.append(el('span', 'work-task', lines.task), el('em', 'work-kind', w.stale ? `${WORK_KIND[kind]} · stale` : WORK_KIND[kind]));
+    top.append(el('span', 'work-task', lines.task), el('em', 'work-kind', WORK_KIND[kind]));
     card.append(top, el('small', 'work-meta', lines.who), el('small', 'work-meta work-left', lines.left));
     return card;
 }
@@ -626,23 +626,30 @@ function statusRow(id, entry) {
     return b;
 }
 /** A working item in Agent status: opens what its strip card opens. */
-function workStatusRow(id, entry) {
+function workStatusRow(id, entry, roles = []) {
     const w = entry.worker, kind = workKind(w), b = statusRow(id, entry);
     b.dataset.workId = w.dispatchId;
     b.dataset.kind = kind;
     const lines = workLines(w, (state?.orcaTasks || []).length > 0);
     b.querySelector('.status-name').textContent = lines.task;
     b.querySelector('.status-text small').textContent = [WORK_KIND[kind], w.toolName, lines.who].filter(Boolean).join(' · ');
+    // Roster roles this dispatch lights are annotations on its row, not rows of their own.
+    if (roles.length) {
+        const chips = el('span', 'status-roles');
+        for (const role of roles)
+            chips.append(el('span', 'role-chip', agentName(role, statuses.get(role))));
+        b.querySelector('.status-text').append(chips);
+    }
     return b;
 }
-function renderStatusPanel(counts) {
+function renderStatusPanel(counts, items, { byItem, roleOnly }) {
     for (const s of ['working', 'completed', 'idle'])
         $(`count-${s}`).textContent = String(counts[s]);
     $('status-total').textContent = `${counts.total} roles`;
     const box = $('status-groups');
     box.replaceChildren();
     // Same items as the Live work strip, grouped by tool, so the two counts cannot drift.
-    const items = workingItems(state, firstSeen), toolWork = items.filter(w => workKind(w) !== 'dispatch');
+    const toolWork = items.filter(w => workKind(w) !== 'dispatch');
     const perTool = new Map();
     for (const w of toolWork)
         perTool.set(w.toolId, (perTool.get(w.toolId) || 0) + 1);
@@ -682,9 +689,9 @@ function renderStatusPanel(counts) {
         ['completed', 'Recently completed', `No settled worker on the floor and no audit completion in the last ${COMPLETED_WINDOW_MS / 60000} minutes.`]
     ];
     for (const [status, title, empty] of groups) {
-        const rows = [...statuses].filter(([id, e]) => !id.startsWith('worker:') && e.status === status).sort(recent);
-        // Working now leads with the same items as the strip and the header metric; roster roles
-        // follow. Item rows stay out of `statuses`, which the floor uses to pick represented visitors.
+        // Working now leads with the same items as the strip and the header metric; only roles no
+        // item accounts for follow. Item rows stay out of `statuses`, which the floor uses to pick visitors.
+        const rows = status === 'working' ? [...roleOnly].sort(recent) : [...statuses].filter(([id, e]) => !id.startsWith('worker:') && e.status === status).sort(recent);
         const work = status === 'working' ? items.map(w => [workSelection(w), { ...workerStatus(w), worker: w, task: w.taskTitle || w.label || null, since: null, lastEvent: null }]) : [];
         if (!rows.length && !work.length && !empty)
             continue;
@@ -694,6 +701,7 @@ function renderStatusPanel(counts) {
         h.innerHTML = icon(status);
         if (status === 'working') {
             group.dataset.workingItems = String(work.length);
+            group.dataset.workingRoles = String(rows.length);
             h.append(title, el('span', 'count', String(work.length)));
             if (rows.length)
                 h.append(el('span', 'count role-count', `+${rows.length} role${rows.length === 1 ? '' : 's'}`));
@@ -704,7 +712,7 @@ function renderStatusPanel(counts) {
         if (!rows.length && !work.length)
             group.append(el('p', 'group-empty', empty));
         for (const [id, entry] of work)
-            group.append(workStatusRow(id, entry));
+            group.append(workStatusRow(id, entry, byItem.get(entry.worker.dispatchId)));
         for (const [id, entry] of rows)
             group.append(statusRow(id, entry));
         box.append(group);
@@ -798,8 +806,10 @@ function render() {
     for (const id of present)
         if (!firstSeen.has(id))
             firstSeen.set(id, Number(state.ts) || Date.now());
-    // The headline is the Live work strip: dispatches plus tool sessions and omp children.
-    const summary = workingSummary(workingItems(state, firstSeen), roleCounts.working);
+    // The headline is the Live work strip: dispatches plus tool sessions and omp children, plus
+    // roles working outside them. The campus badge and Agent status count the same two lists.
+    const items = workingItems(state, firstSeen), work = roleWork(statuses, items);
+    const summary = workingSummary(items, work.roleOnly.length);
     $('metric-working').textContent = String(summary.count);
     $('metric-working-sub').textContent = summary.sub;
     $('metric-completed').textContent = String(roleCounts.completed);
@@ -810,17 +820,13 @@ function render() {
     $('metric-tasks').textContent = String(board.total);
     $('metric-tasks-sub').textContent = board.total ? `${board.counts[doneLane] || 0}/${board.total} done` : 'none reported';
     $('metric-board-label').textContent = `${board.source} tasks`;
-    const syntheticWorking = (state.workers || [])
-        .filter(w => /^(tool:|omp-child:)/.test(String(w.dispatchId)) && workerStatus(w).status === 'working')
-        .map(() => ({ status: 'working' }));
     for (const f of [0, 1, 2, 3]) {
-        const onFloor = f ? entries.filter(([id]) => floorOf(id) === f) : entries;
-        const values = [...onFloor.map(([, e]) => e), ...(f === 0 ? syntheticWorking : [])], c = countStatuses(values);
+        const values = f ? entries.filter(([id]) => floorOf(id) === f).map(([, e]) => e) : campusStatuses(statuses, items, work.roleOnly), c = countStatuses(values);
         document.querySelectorAll(`[data-floor-badges="${f}"]`).forEach(n => { n.innerHTML = badgesFor(values); });
         if (f)
             document.querySelectorAll(`[data-floor="${f}"]`).forEach(b => { b.dataset.active = String(c.working > 0); b.title = `${c.working} working · ${c.completed} completed · ${c.pending} pending · ${c.failed} failed`; });
     }
-    renderStatusPanel(roleCounts);
+    renderStatusPanel(roleCounts, items, work);
     $('scope').textContent = `${state.terminals?.length || 0} terminals · ${state.worktrees?.length || 0} worktrees · ${state.workerScope?.hidden || 0} historical dispatches`;
     world?.update(state, statuses, board);
     highlightLane();

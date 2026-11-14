@@ -183,7 +183,8 @@ interface WorkerView {
   /** Launch model, falling back to an attributable live session's argv/store model. */
   model: string | null;
   provider: string | null;
-  remainingTasks: string[];
+  /** Open tasks after this one; null when the worker has no handle or role to join tasks on. */
+  remainingTasks: string[] | null;
   /** Terminal exit cause from worker-show, e.g. operator_close. */
   exitCause: string | null;
   host: string | null;
@@ -693,7 +694,8 @@ async function collect(): Promise<StudioState> {
 
     const text = [worker.taskTitle, worker.taskSpec, worker.label, worker.worktreeName].filter(Boolean).join(" ").toLowerCase();
     const workerRoles = roles.filter(role => text.includes(role.toLowerCase()));
-    worker.remainingTasks = orcaTasks.filter(task => {
+    // Nothing to join on is unknown, not zero: `[]` is reserved for a real empty queue.
+    worker.remainingTasks = !worker.terminalHandle && !workerRoles.length ? null : orcaTasks.filter(task => {
       if ((worker.taskId && task.id === worker.taskId) || !remainingStatuses.has(task.status ?? "") || (worker.runId && task.runId !== worker.runId)) return false;
       if (task.assignee) {
         if (task.assignee === worker.terminalHandle) return true;

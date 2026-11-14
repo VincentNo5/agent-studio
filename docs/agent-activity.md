@@ -131,12 +131,26 @@ render their initial so a missing brand asset never blanks a row.
 Live work opens with a **Working now** strip: one card per working item — an Orca dispatch, a
 direct tool session (`tool:<id>[:<pid>]`) or an omp task child (`omp-child:<session>:<child>`).
 Each card shows the task, `agent · provider · model` and `remaining: N · next: <title>`; any
-part the state does not report reads `—`. `remainingTasks: []` counts as zero only when Orca
-reported a task list. WorkerView carries no start time, so "newest first" is the order this
-browser first saw each item. The header's Working metric, the strip and Agent status' "Tools
-working" (sessions + children, grouped by tool) are computed from the same list. An omp child
-opens its own detail (task, agent, state, parent tool, stale flag); synthetic rows never fetch
-Orca logs. On the floor, tool and child visitors carry a `STATE · role` tag.
+part the state does not report reads `—`. WorkerView carries no start time, so "newest first"
+is the order this browser first saw each item. Synthetic rows never fetch Orca logs.
+
+**Remaining** means the same on every card: items still open *after* the current one.
+
+- Orca dispatch: `remainingTasks` lists open tasks (`pending`, `ready`, `dispatched`, `blocked`)
+  in its run, excluding its own task, joined by terminal handle or by a roster role named in its
+  text. `null` means the worker has neither a handle nor a role to join on and reads `—`; `[]` is
+  a real zero and reads `0` only when Orca reported a task list.
+- omp session or child: the todo snapshot's first `in_progress` (else first `pending`) item is
+  `current`; `remaining` counts the other `pending`/`in_progress` items.
+
+The header's Working metric, the strip, the campus working badge and Agent status' **Working
+now** group all count the same item list. Working now lists one row per item, then only the
+roster roles no item accounts for (audit, paseo or tool evidence). A role lit by the same
+dispatch as an item is shown as a chip on that item's row, never as a second row; the group's
+**+N roles** badge and the header's `N roles` count only those role-only rows, and the campus
+badge is items + role-only roles. *Tools working* groups sessions and children by tool. An omp
+child opens its own detail (task, agent, state, parent tool, stale flag, bare remaining count).
+On the floor, tool and child visitors carry a `STATE · role` tag (`STALE` for a stale child).
 
 ## Limits
 

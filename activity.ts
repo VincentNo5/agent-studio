@@ -291,7 +291,9 @@ function ompTodos(details: any): { current: string | null; remaining: number | n
   const tasks = details.phases.flatMap((phase: any) => phase.tasks);
   if (tasks.some((task: any) => typeof task?.content !== "string" || typeof task.status !== "string")) return unknown;
   const open = tasks.filter((task: any) => task.status === "pending" || task.status === "in_progress");
-  return { current: (open.find((task: any) => task.status === "in_progress") ?? open[0])?.content ?? null, remaining: open.length };
+  const current = open.find((task: any) => task.status === "in_progress") ?? open[0];
+  // `remaining` is what is still open after the current task, the same meaning as a dispatch's.
+  return { current: current?.content ?? null, remaining: open.length - (current ? 1 : 0) };
 }
 
 /** Last complete todo result in a JSONL tail; absent or unreadable work stays unknown. */

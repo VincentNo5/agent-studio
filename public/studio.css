@@ -701,6 +701,21 @@ b,time,output,.metric b,.count {
   overflow:hidden;
   text-overflow:ellipsis
 }
+.status-roles {
+  display:flex;
+  flex-wrap:wrap;
+  gap:3px;
+  margin-top:2px
+}
+.role-chip {
+  font-size:9px;
+  line-height:1.4;
+  color:var(--s);
+  padding:0 5px;
+  border-radius:6px;
+  background:color-mix(in srgb,var(--s) 12%,transparent);
+  white-space:nowrap
+}
 .status-row time {
   font:10px var(--mono);
   color:var(--s)

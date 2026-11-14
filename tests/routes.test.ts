@@ -301,6 +301,7 @@ test('state preserves assignees, joins remaining work within the run, and prefer
     { dispatchId: 'task4-argv', terminal: 'handle-b', workspace: '/task4/b', runId: 'run-a' },
     { dispatchId: 'task4-unknown', terminal: 'handle-c', workspace: '/task4/c', runId: 'run-a' },
     { dispatchId: 'task4-no-run', terminal: 'handle-d' },
+    { dispatchId: 'task4-anon', workspace: '/task4/e', runId: 'run-a' },
   ].map(w => ({ ...w, state: 'running', liveness: 'live' }));
   const tasks = [
     { id: 'active', task_title: 'qa-tester: current', status: 'dispatched', assignee: 'handle-a', run_id: 'run-a' },
@@ -336,6 +337,8 @@ test('state preserves assignees, joins remaining work within the run, and prefer
     expect(state.workers.find((w: any) => w.dispatchId === 'task4-argv')).toMatchObject({ model: 'argv/fallback', provider: 'argv', remainingTasks: ['qa-tester: another handle'] });
     expect(state.workers.find((w: any) => w.dispatchId === 'task4-unknown')).toMatchObject({ model: null, provider: 'codex', remainingTasks: [] });
     expect(state.workers.find((w: any) => w.dispatchId === 'task4-no-run')).toMatchObject({ remainingTasks: ['No worker run known'] });
+    // No handle and no role in its text: nothing to join on is unknown, not a real zero.
+    expect(state.workers.find((w: any) => w.dispatchId === 'task4-anon')).toMatchObject({ remainingTasks: null });
     const tool = state.tools.find((t: any) => t.id === 'codex');
     expect(tool.sessions.find((s: any) => s.pid === 950001)).toMatchObject({ model: 'launch/preferred', provider: 'launch' });
     expect(tool.sessions.find((s: any) => s.pid === 950002)).toMatchObject({ model: 'argv/fallback', provider: 'argv' });

@@ -174,15 +174,15 @@ export const workKind = w => { const id = String(w?.dispatchId || ''); return id
 export const workSelection = w => workKind(w) === 'tool' ? `tool:${w.toolId}` : `worker:${w.dispatchId}`;
 /**
  * The three lines of a working-now card. Unknown parts read `—`; nothing is guessed.
- * `remainingTasks` is only a count when the task list was reported (`tasksKnown`): an empty
- * list without one means unknown, not zero.
+ * Remaining means what is still open after the current task. `remainingTasks: null` (nothing to
+ * join tasks on) is unknown; `[]` is zero only when the task list was reported (`tasksKnown`).
  */
 export function workLines(w, tasksKnown = false) {
     const dash = v => v == null || v === '' ? '—' : String(v);
     const task = w.taskTitle || w.label || w.dispatchId || 'Unnamed work';
     const titles = Array.isArray(w.remainingTasks) && (tasksKnown || w.remainingTasks.length) ? w.remainingTasks : null;
     const n = titles ? titles.length : typeof w.remaining === 'number' ? w.remaining : null;
-    return { task, who: [w.agent, w.provider, w.model].map(dash).join(' · '), left: n == null ? '—' : `remaining: ${n} · next: ${titles?.[0] || '—'}` };
+    return { task, who: [w.agent, w.provider, w.model].map(dash).join(' · '), count: dash(n), left: n == null ? '—' : `remaining: ${n} · next: ${titles?.[0] || '—'}` };
 }
 /** Working rows only, newest first by when this browser first saw them; source order breaks ties. */
 export function workingNow(workers, firstSeen = new Map()) {
@@ -197,8 +197,29 @@ export const floorWorkers = state => state?.workers?.length ? state.workers : st
  * metric, the Working now strip and the Agent status group all count this one list.
  */
 export const workingItems = (state, firstSeen) => workingNow(floorWorkers(state), firstSeen);
+/**
+ * Working roster roles split by whether a working item already accounts for them. A role lit by
+ * the same dispatch as an item is that item's annotation (`byItem`, keyed by dispatchId), not a
+ * second row; only `roleOnly` (audit, paseo, tool evidence) adds to the working count.
+ */
+export function roleWork(statuses, items) {
+    const ids = new Set(items.map(w => w.dispatchId).filter(Boolean)), byItem = new Map(), roleOnly = [];
+    for (const [id, e] of statuses || []) {
+        if (id.startsWith('worker:') || e.status !== 'working')
+            continue;
+        const w = e.worker;
+        if (w && (items.includes(w) || (w.dispatchId && ids.has(w.dispatchId))))
+            byItem.set(w.dispatchId, [...(byItem.get(w.dispatchId) || []), id]);
+        else
+            roleOnly.push([id, e]);
+    }
+    return { byItem, roleOnly };
+}
+/** Campus badge input: every settled status, with working replaced by the items plus role-only work. */
+export const campusStatuses = (statuses, items, roleOnly) =>
+    [...[...(statuses?.values() || [])].filter(e => e.status !== 'working'), ...[...items, ...roleOnly].map(() => ({ status: 'working' }))];
 const plural = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
-/** Header metric: the item count, then how many tools and roster roles those items span. */
+/** Header metric: the item count, then how many tools those items span and how many roles work outside them. */
 export function workingSummary(items, rolesWorking = 0) {
     const tools = new Set(items.filter(w => workKind(w) !== 'dispatch').map(w => w.toolId || w.dispatchId)).size;
     return { count: items.length, sub: `${plural(items.length, 'item')} · ${plural(tools, 'tool')} · ${plural(rolesWorking, 'role')}` };

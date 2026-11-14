@@ -462,17 +462,19 @@ test('bare models use the explicit tool provider mapping', () => {
 test('failed todo results preserve the last successful snapshot', () => {
   const failed = JSON.stringify({ message: { role: 'toolResult', toolName: 'todo', isError: true, details: { phases: [] } } });
   expect(activity.parseOmpTodos(todoResult([{ content: 'Continue', status: 'in_progress' }]) + '\n' + failed))
-    .toEqual({ current: 'Continue', remaining: 1 });
+    .toEqual({ current: 'Continue', remaining: 0 });
 });
 
-test('newest todo result counts pending plus in_progress and prefers the first active task', () => {
+test('newest todo result prefers the first active task and counts what stays open after it', () => {
   const text = [todoResult([{ content: 'Old', status: 'pending' }]), 'broken JSON', todoResult([
     { content: 'First pending', status: 'pending' }, { content: 'Done', status: 'completed' },
     { content: 'Current', status: 'in_progress' }, { content: 'Second active', status: 'in_progress' },
     { content: 'Cancelled', status: 'cancelled' },
   ]), JSON.stringify({ message: { role: 'assistant', toolName: 'todo', details: { phases: [] } } }), '{"message":'].join('\n');
-  expect(activity.parseOmpTodos(text)).toEqual({ current: 'Current', remaining: 3 });
-  expect(activity.parseOmpTodos(todoResult([{ content: 'Next', status: 'pending' }]))).toEqual({ current: 'Next', remaining: 1 });
+  expect(activity.parseOmpTodos(text)).toEqual({ current: 'Current', remaining: 2 });
+  expect(activity.parseOmpTodos(todoResult([{ content: 'Next', status: 'pending' }]))).toEqual({ current: 'Next', remaining: 0 });
+  expect(activity.parseOmpTodos(todoResult([{ content: 'Now', status: 'in_progress' }, { content: 'A', status: 'pending' }, { content: 'B', status: 'pending' }])))
+    .toEqual({ current: 'Now', remaining: 2 });
   expect(activity.parseOmpTodos(todoResult([{ content: 'Done', status: 'completed' }]))).toEqual({ current: null, remaining: 0 });
   expect(activity.parseOmpTodos(todoResult([]))).toEqual({ current: null, remaining: 0 });
   expect(activity.parseOmpTodos('not json\n{}')).toEqual({ current: null, remaining: null });
@@ -517,13 +519,13 @@ test('omp collection uses matching session model and todos, argv wins, and child
   try {
     const collect = async () => (await activity.collectToolActivity(now, home)).find(t => t.id === 'omp')!;
     let tool = await collect();
-    expect(tool.sessions.find(s => s.pid === 940001)).toMatchObject({ model: 'store/latest', provider: 'store', current: 'Parent current', remaining: 2 });
+    expect(tool.sessions.find(s => s.pid === 940001)).toMatchObject({ model: 'store/latest', provider: 'store', current: 'Parent current', remaining: 1 });
     expect(tool.sessions.find(s => s.pid === 940002)).toMatchObject({ model: null, provider: 'opencode-go', remaining: null });
     expect(tool).toMatchObject({ model: null, provider: 'opencode-go', remaining: null });
-    expect(tool.subagents).toEqual([expect.objectContaining({ id: 'parent:child', model: 'child/model', provider: 'child', task: 'Child current', remaining: 1 })]);
+    expect(tool.subagents).toEqual([expect.objectContaining({ id: 'parent:child', model: 'child/model', provider: 'child', task: 'Child current', remaining: 0 })]);
     command = '/bin/omp -m argv/model';
     tool = await collect();
-    expect(tool.sessions.find(s => s.pid === 940001)).toMatchObject({ model: 'argv/model', provider: 'argv', remaining: 2 });
+    expect(tool.sessions.find(s => s.pid === 940001)).toMatchObject({ model: 'argv/model', provider: 'argv', remaining: 1 });
     appendFileSync(join(root, 'parent.jsonl'), todoResult([]) + '\n');
     expect((await collect()).sessions.find(s => s.pid === 940001)).toMatchObject({ current: null, remaining: 0 });
   } finally { spawn.mockRestore(); rmSync(home, { recursive: true, force: true }); }
@@ -545,7 +547,7 @@ test('quiet omp sessions retain identity and work, but shared cwd processes cann
   })) as typeof Bun.spawn);
   try {
     const collect = async () => (await activity.collectToolActivity(now, home)).find(t => t.id === 'omp')!;
-    expect(await collect()).toMatchObject({ state: 'idle', model: 'store/quiet', provider: 'store', current: 'Continue', remaining: 1 });
+    expect(await collect()).toMatchObject({ state: 'idle', model: 'store/quiet', provider: 'store', current: 'Continue', remaining: 0 });
     ps += '\n960002 00:00 omp';
     const ambiguous = await collect();
     for (const session of ambiguous.sessions) expect(session).toMatchObject({ model: null, provider: 'opencode-go', current: null, remaining: null });
@@ -569,7 +571,7 @@ test('omp joins private cwd aliases and rejects multiple processes at the canoni
   })) as typeof Bun.spawn);
   try {
     const collect = async () => (await activity.collectToolActivity(Date.now(), home)).find(t => t.id === 'omp')!;
-    expect((await collect()).sessions[0]).toMatchObject({ model: 'local-model', provider: 'opencode-go', current: 'Continue', remaining: 1 });
+    expect((await collect()).sessions[0]).toMatchObject({ model: 'local-model', provider: 'opencode-go', current: 'Continue', remaining: 0 });
     ps += '\n970002 00:00 omp';
     for (const session of (await collect()).sessions) expect(session).toMatchObject({ model: null, remaining: null });
   } finally { spawn.mockRestore(); platform.mockRestore(); rmSync(home, { recursive: true, force: true }); }

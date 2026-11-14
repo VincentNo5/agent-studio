@@ -1,4 +1,6 @@
 import { test, expect } from 'bun:test';
+import { workLines } from '../public/studio-data.js';
+import { visitorTag } from '../public/hq3d.js';
 
 test('desktop controller exposes demo, phase, market and mobile drawer contracts', async () => {
   const [studio, css] = await Promise.all([
@@ -26,8 +28,6 @@ test('desktop controller exposes demo, phase, market and mobile drawer contracts
   expect(studio).toContain('working-now');
   expect(studio).toContain('data-work-id');
   expect(studio).toContain('workLines(');
-  expect(studio).toContain('remainingTasks');
-  expect(studio).toContain('provider');
   expect(studio).toContain('omp-child-detail');
   expect(css).toContain('.working-now');
   expect(css).toContain('.work-card');
@@ -42,4 +42,16 @@ test('standalone mobile view supports simulated data without worker reads', asyn
   expect(mobile).toContain('DEMO MODE · SIMULATED DATA');
   expect(mobile).toContain("import('/assets/demo-state.js')");
   expect(mobile).toContain('Demo mode');
+});
+
+test('a work card renders provider, model and the reported remaining task list', () => {
+  const w = { dispatchId: 'd', taskTitle: 'Ship', agent: 'codex', provider: 'openai', model: 'gpt-6', remainingTasks: ['QA pass', 'Docs'] };
+  expect(workLines(w, true)).toMatchObject({ who: 'codex · openai · gpt-6', left: 'remaining: 2 · next: QA pass', count: '2' });
+});
+
+test('visitor tags always name their state and who they are', () => {
+  expect(visitorTag({ dispatchId: 'omp-child:s:c', agent: 'coder', toolName: 'omp' }, 'WORKING')).toBe('WORKING · coder · omp');
+  expect(visitorTag({ dispatchId: 'tool:codex:7', toolName: 'Codex' }, undefined)).toBe('IDLE · Codex session');
+  expect(visitorTag({ dispatchId: 'omp-child:s:c', agent: 'coder', toolName: 'omp', stale: true }, 'WORKING')).toBe('STALE · coder · omp');
+  expect(visitorTag({ dispatchId: 'd-1', agent: 'claude' }, 'DONE')).toBe('DONE · claude');
 });

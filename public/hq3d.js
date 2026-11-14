@@ -305,7 +305,9 @@ const ROLE_SHORT = {
     'ue-replication-specialist': 'UE REPL', 'ue-umg-specialist': 'UE UMG'
 };
 /** Visitor role word: an omp child names its agent and parent tool, a direct session its tool. */
-const visitorRole = w => { const id = String(w?.dispatchId || ''); const name = w?.agent || w?.toolName || 'dispatch'; return id.startsWith('omp-child:') && w.toolName ? `${name} · ${w.toolName}` : id.startsWith('tool:') ? `${name} session` : name; };
+export const visitorRole = w => { const id = String(w?.dispatchId || ''); const name = w?.agent || w?.toolName || 'dispatch'; return id.startsWith('omp-child:') && w.toolName ? `${name} · ${w.toolName}` : id.startsWith('tool:') ? `${name} session` : name; };
+/** A visitor has no desk name to fall back on: its tag always says its state and who it is. */
+export const visitorTag = (w, word) => `${w?.stale ? 'STALE' : word || 'IDLE'} · ${visitorRole(w)}`;
 const MONO = '"SF Mono", ui-monospace, Menlo, Consolas, monospace', SANS = '"Avenir Next", "Segoe UI", "Helvetica Neue", sans-serif';
 
 export class Headquarters {
@@ -2761,8 +2763,7 @@ export class Headquarters {
             const word = STATUS_WORD[status];
             // A role name stays quiet until you look at it; the status pill is what the floor is for.
             const task = String(this.statuses?.get(id)?.task || '').trim().replace(/\s+/g, ' ');
-            // A visitor has no desk name to fall back on: it always says who it is and what state it is in.
-            const label = a.visitor ? `${a.data?.stale ? 'STALE' : word || 'IDLE'} · ${visitorRole(a.data)}`
+            const label = a.visitor ? visitorTag(a.data, word)
                 : word ? (word === 'WORKING' && task ? `${word} · ${task.slice(0, 24)}${task.length > 24 ? '…' : ''}` : word) : (ROLE_SHORT[id] || id.replace(/-/g, ' '));
             if (tag.dataset.status !== status) {
                 tag.dataset.status = status;
