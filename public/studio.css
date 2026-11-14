@@ -27,6 +27,7 @@
   --bottom-h:140px;
   --ticker:28px;
   --rail-bottom:calc(var(--ticker) + var(--bottom-h) + var(--gap) * 2);
+  --operations-h:80px;
   font-family:var(--font);
   font-size:12px;
   color:var(--ice);
@@ -496,6 +497,7 @@ b,time,output,.metric b,.count {
 }
 .panel-head {
   display:flex;
+  flex-shrink:0;
   align-items:center;
   justify-content:space-between;
   padding:12px 14px 10px;
@@ -541,7 +543,14 @@ b,time,output,.metric b,.count {
 }
 .left-column {
   left:var(--side);
-  width:var(--left-w)
+  width:var(--left-w);
+  bottom:calc(var(--rail-bottom) + var(--operations-h) + var(--gap));
+  min-height:0;
+  overflow:auto;
+  pointer-events:auto!important
+}
+.left-column>* {
+  min-height:0
 }
 .right-column {
   right:var(--side);
@@ -555,14 +564,16 @@ b,time,output,.metric b,.count {
 }
 /* Agent status ---------------------------------------------------------- */
 .agent-status {
-  flex:1 1 auto;
-  min-height:150px;
+  /* Keep room for the header, summary and a readable list; the rail can scroll. */
+  flex:1 0 208px;
+  min-height:0;
   display:flex;
   flex-direction:column;
   overflow:hidden
 }
 .status-strip {
   display:grid;
+  flex-shrink:0;
   grid-template-columns:repeat(3,1fr);
   gap:6px;
   padding:10px 10px 8px
@@ -599,7 +610,7 @@ b,time,output,.metric b,.count {
 }
 .status-groups {
   flex:1;
-  min-height:0;
+  min-height:96px;
   overflow:auto;
   padding:0 8px 8px
 }
@@ -782,7 +793,11 @@ b,time,output,.metric b,.count {
   max-width:100%
 }
 .operations {
-  flex:none;
+  position:absolute;
+  left:var(--side);
+  bottom:var(--rail-bottom);
+  width:var(--left-w);
+  height:var(--operations-h);
   padding:8px;
   display:grid;
   grid-template-columns:1fr 1fr 1fr;
@@ -1011,7 +1026,7 @@ b,time,output,.metric b,.count {
 .tool-row {
   --s:var(--muted);
   display:grid;
-  grid-template-columns:6px minmax(0,1fr) auto auto;
+  grid-template-columns:13px minmax(0,1fr) auto auto;
   cursor:pointer;
   gap:5px;
   align-items:center;
@@ -1403,7 +1418,12 @@ b,time,output,.metric b,.count {
   padding:10px 14px;
   display:flex;
   flex-direction:column;
-  justify-content:center
+  justify-content:safe center;
+  overflow:auto;
+  max-height:var(--bottom-h)
+}
+.preferences>* {
+  flex-shrink:0
 }
 .toggle-row {
   display:flex;
@@ -1749,11 +1769,17 @@ dialog::backdrop {
     display:none
   }
 }
+@media(height < 800px) {
+  .tool-activity {
+    flex:0 0 96px
+  }
+}
 @media(max-height:780px) {
   :root {
     --top:64px;
     --gap:10px;
-    --bottom-h:124px
+    --bottom-h:124px;
+    --operations-h:40px
   }
   .metrics {
     height:42px
@@ -1779,9 +1805,6 @@ dialog::backdrop {
   }
   .lane {
     padding:3px 6px
-  }
-  .agent-status {
-    min-height:120px
   }
   /* Short screens: operations collapse to an icon row; names stay in title/aria-label. */
   .operations {
@@ -1948,6 +1971,7 @@ dialog::backdrop {
 
 /* Floor view is spatial-first: the command dashboard is intentionally only on /. */
 body[data-view="floor"] .left-column,
+body[data-view="floor"] .operations,
 body[data-view="floor"] .events,
 body[data-view="floor"] .world-heading,
 body[data-view="floor"] .view-links,
@@ -1973,7 +1997,7 @@ body[data-view="floor"] .right-column {
   #hud {
     background:linear-gradient(180deg,#020a14b8,transparent 20%,transparent 74%,#020a1466)
   }
-  .metrics,.legend,.floor-switch,.settings-button,.left-column,.events,.navigator,.preferences,.world-heading,.view-links,.scene-hint,.ticker {
+  .metrics,.legend,.floor-switch,.settings-button,.left-column,.operations,.events,.navigator,.preferences,.world-heading,.view-links,.scene-hint,.ticker {
     display:none!important
   }
   .topbar {

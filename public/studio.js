@@ -95,15 +95,15 @@ ${demoMode ? '<div class="demo-banner" role="status">DEMO MODE · SIMULATED DATA
 </header>
 <div class="world-heading"><div class="eyebrow">Headquarters · live spatial view</div><h2 id="world-title">ONE STUDIO. EVERY AGENT.</h2><p id="world-subtitle">One open campus. Every team on the same floor.</p></div>
 <nav class="view-links" aria-label="Studio view"><a href="/${demoSuffix}" ${!isFloor ? 'aria-current="page"' : ''}>Command overview</a><a href="/floor${demoSuffix}" ${isFloor ? 'aria-current="page"' : ''}>Floor view ↗</a><a href="/anatomy">Anatomy ↗</a></nav>
-<aside class="left-column" aria-label="Agent status, task board and operations">
+<aside class="left-column" aria-label="Agent status, task board and tools">
  <section class="panel agent-status" aria-labelledby="agent-status-title"><div class="panel-head"><h2 id="agent-status-title">Agent status</h2><small id="status-total">—</small></div>
   <div class="status-strip">${['working', 'completed', 'idle'].map(s => `<div style="--s:${meta(s).color}" data-status="${s}"><b>${icon(s)}<span id="count-${s}">—</span></b><span>${meta(s).label}</span></div>`).join('')}</div>
   <div class="status-groups" id="status-groups"><p class="empty">Awaiting state.</p></div>
  </section>
  <section class="panel task-board"><div class="panel-head"><h2>Task board</h2><small id="board-total">—</small></div><p class="board-source" id="board-source">Awaiting state</p><div class="board-progress" id="board-progress" hidden><i></i></div><div class="lanes" id="lanes"></div></section>
  <section class="panel tool-activity" aria-labelledby="tool-activity-title"><div class="panel-head"><h2 id="tool-activity-title">Agent tools</h2><small id="tool-total">—</small><button data-panel="tools" class="link-button">Detail ↗</button></div><div class="tool-list" id="tool-list"><p class="empty">Awaiting tool scan.</p></div></section>
- <nav class="panel operations" aria-label="Operations">${[['history', '◷', 'Run history'], ['roster', '◈', 'Roster'], ['audit', '⌁', 'Audit'], ['quotas', '◴', 'Quotas'], ['paseo', '◇', 'Paseo'], ['tasks', '☷', 'All tasks']].map(([k, i, t]) => `<button data-panel="${k}" title="${t}" aria-label="${t}"><span>${i}</span><em>${t}</em></button>`).join('')}</nav>
 </aside>
+<nav class="panel operations" aria-label="Operations">${[['history', '◷', 'Run history'], ['roster', '◈', 'Roster'], ['audit', '⌁', 'Audit'], ['quotas', '◴', 'Quotas'], ['paseo', '◇', 'Paseo'], ['tasks', '☷', 'All tasks']].map(([k, i, t]) => `<button data-panel="${k}" title="${t}" aria-label="${t}"><span>${i}</span><em>${t}</em></button>`).join('')}</nav>
 <aside class="right-column" aria-label="Agent inspection" data-open="false">
  <button class="drawer-handle" id="drawer-handle" type="button" aria-expanded="false" aria-controls="agent-detail live-work"><span></span>Agent details</button>
  <section class="panel detail" id="agent-detail"><div class="panel-head"><h2>Agent detail</h2><button id="clear-selection" class="icon-button" aria-label="Clear agent selection">×</button></div><div id="detail-body" class="detail-body"></div></section>
