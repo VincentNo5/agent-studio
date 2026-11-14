@@ -683,13 +683,14 @@ async function collect(): Promise<StudioState> {
       : [];
     const owners = workers.filter(other => isMovingWorker(other) && other.path === worker.path
       && (!toolId || !workerTools.get(other) || workerTools.get(other) === toolId));
-    worker.provider = providerFor(worker.model, worker.agent);
+    worker.provider = providerFor(worker.model);
     if (matches.length === 1 && owners.length === 1) {
       const session = matches[0];
       worker.model ??= session.model;
-      if (session.model !== worker.model) session.provider = session.modelProvider ?? providerFor(worker.model, worker.agent) ?? session.provider;
+      // Namespace/family first; an explicit store provider is the last resort.
+      if (session.model !== worker.model) session.provider = providerFor(worker.model) ?? session.modelProvider ?? null;
       session.model = worker.model;
-      worker.provider = session.provider ?? providerFor(worker.model, worker.agent);
+      worker.provider = session.provider ?? providerFor(worker.model);
     }
 
     const text = [worker.taskTitle, worker.taskSpec, worker.label, worker.worktreeName].filter(Boolean).join(" ").toLowerCase();
@@ -709,7 +710,7 @@ async function collect(): Promise<StudioState> {
   for (const tool of tools) {
     if (!tool.sessions.length) continue;
     tool.model = tool.sessions[0].model;
-    tool.provider = tool.sessions[0].provider ?? providerFor(tool.model, tool.id);
+    tool.provider = tool.sessions[0].provider ?? providerFor(tool.model);
   }
 
   // Everything the floor left out still has to be inspectable, so group the same dispatches

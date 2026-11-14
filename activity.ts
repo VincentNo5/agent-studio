@@ -139,11 +139,22 @@ export function providerOf(model: string | null): string | null {
   return model?.includes("/") ? model.split("/", 1)[0] || null : null;
 }
 
-/** Known surface providers use the same ids as quotas; model namespaces take precedence. */
-export function providerFor(model: string | null, toolOrAgent: string | null | undefined): string | null {
-  const providers: Record<string, string> = { "claude-code": "claude", codex: "codex", opencode: "opencode-go", omp: "opencode-go", cursor: "cursor" };
-  return providerOf(model) ?? providers[toolForAgent(toolOrAgent) ?? toolOrAgent ?? ""] ?? null;
+/**
+ * Provider policy: the model's namespace, else its family. Never the executable — a bare
+ * model from an unknown family stays null unless a store records `model_provider` explicitly.
+ */
+export function providerFor(model: string | null): string | null {
+  const namespaced = providerOf(model);
+  if (namespaced || !model) return namespaced;
+  const name = model.toLowerCase();
+  if (name.startsWith("claude")) return "claude";
+  if (/^(gpt|o3|o4)/.test(name)) return "codex";
+  if (name.startsWith("gemini")) return "google";
+  return null;
 }
+
+/** Model ids are short slugs; prompt text (spaces, quotes, `;`) is never a model. */
+const MODEL_ID = /^[A-Za-z0-9][A-Za-z0-9._:\/@-]{0,79}$/;
 
 /** ps flattens argv: quotes are literal characters, not shell grouping syntax. */
 export function modelFromArgv(command: string): string | null {
@@ -153,7 +164,8 @@ export function modelFromArgv(command: string): string | null {
     const option = tokens[i].match(/^(?:-m|--model)(?:=(.*))?$/);
     if (!option) continue;
     const model = option[1] ?? tokens[i + 1];
-    return model && !model.startsWith("-") ? model : null;
+    // A flag-looking word inside a prompt yields junk; keep scanning for a real flag.
+    if (model && MODEL_ID.test(model)) return model;
   }
   return null;
 }
@@ -303,6 +315,20 @@ export function parseOmpTodos(text: string): { current: string | null; remaining
   return { current: parsed.current, remaining: parsed.remaining };
 }
 
+/** Ids of `<task-result id=… status=settled>` tags in any string nested in a record value. */
+function settledTaskIds(value: unknown, depth = 0): string[] {
+  if (typeof value === "string") {
+    const ids: string[] = [];
+    for (const match of value.matchAll(/<task-result\b([^>]*)>/g)) {
+      const attrs = new Map([...match[1].matchAll(/([\w-]+)\s*=\s*["']([^"']*)["']/g)].map(m => [m[1], m[2]]));
+      if (SETTLED_CHILD.has(attrs.get("status") ?? "") && attrs.get("id")) ids.push(attrs.get("id")!);
+    }
+    return ids;
+  }
+  if (!value || typeof value !== "object" || depth > 6) return [];
+  return Object.values(value).flatMap(item => settledTaskIds(item, depth + 1));
+}
+
 /** Returns consumed bytes; an incomplete final JSON record is retried on the next append. */
 function consumeOmpRecords(text: string, parsed: OmpParse): number {
   const lines = text.split("\n");
@@ -323,29 +349,27 @@ function consumeOmpRecords(text: string, parsed: OmpParse): number {
     if (record.type === "model_change") {
       parsed.model = typeof record.model === "string" && record.model ? record.model : null;
     }
-    if (record.type === "custom_message" && record.customType === "async-result") {
-      const content = typeof record.content === "string" ? record.content :
-        Array.isArray(record.content) ? record.content.map((part: { text?: string }) => part?.text ?? "").join("\n") : "";
-      for (const match of content.matchAll(/<task-result\b([^>]*)>/g)) {
-        const attrs = new Map([...match[1].matchAll(/([\w-]+)\s*=\s*["']([^"']*)["']/g)].map(m => [m[1], m[2]]));
-        if (SETTLED_CHILD.has(attrs.get("status") ?? "")) parsed.children.delete(attrs.get("id") ?? "");
-      }
-    }
+    // Settlement arrives as an async-result custom message or inside any toolResult (e.g. `wait`).
+    const settled: string[] = [];
+    if (record.type === "custom_message" && record.customType === "async-result") settled.push(...settledTaskIds(record.content));
     const message = record.message;
     if (message?.role === "toolResult" && message.toolName === "todo" && !message.isError) {
       Object.assign(parsed, ompTodos(message.details));
     }
-    if (message?.role !== "toolResult" || message.toolName !== "task" || !Array.isArray(message.details?.progress)) continue;
-    const at = Date.parse(String(record.timestamp ?? "")) || 0;
-    for (const entry of message.details.progress) {
-      if (typeof entry?.id !== "string" || typeof entry.agent !== "string") continue;
-      const state = entry.status === "pending" ? "running" : entry.status ?? "running";
-      if (SETTLED_CHILD.has(state)) { parsed.children.delete(entry.id); continue; }
-      parsed.children.set(entry.id, { id: entry.id, agent: entry.agent, state,
-        task: taskSummary(typeof entry.task === "string" ? entry.task : ""),
-        model: typeof entry.model === "string" && entry.model ? entry.model : null,
-        provider: providerFor(typeof entry.model === "string" ? entry.model : null, "omp"), remaining: null, at });
+    if (message?.role === "toolResult") settled.push(...settledTaskIds(message.content), ...settledTaskIds(message.details));
+    if (message?.role === "toolResult" && message.toolName === "task" && Array.isArray(message.details?.progress)) {
+      const at = Date.parse(String(record.timestamp ?? "")) || 0;
+      for (const entry of message.details.progress) {
+        if (typeof entry?.id !== "string" || typeof entry.agent !== "string") continue;
+        const state = entry.status === "pending" ? "running" : entry.status ?? "running";
+        if (SETTLED_CHILD.has(state)) { parsed.children.delete(entry.id); continue; }
+        parsed.children.set(entry.id, { id: entry.id, agent: entry.agent, state,
+          task: taskSummary(typeof entry.task === "string" ? entry.task : ""),
+          model: typeof entry.model === "string" && entry.model ? entry.model : null,
+          provider: providerFor(typeof entry.model === "string" ? entry.model : null), remaining: null, at });
+      }
     }
+    for (const id of settled) parsed.children.delete(id);
   }
   return consumed;
 }
@@ -426,7 +450,7 @@ async function readOmpActivity(now: number, home: string): Promise<{ subagents: 
         const id = `${sessionId}:${child.id}`;
         const model = child.model ?? detail?.model ?? null;
         merged.set(id, { ...child, id, cwd: parsed.cwd, stale: now - lastEvidence > SUBAGENT_LIVE_MS,
-          model, provider: providerFor(model, "omp"), task: detail?.current ?? child.task, remaining: detail?.remaining ?? null });
+          model, provider: providerFor(model), task: detail?.current ?? child.task, remaining: detail?.remaining ?? null });
       }
     } catch { /* unreadable session: skip it */ }
   }
@@ -558,7 +582,7 @@ export function interpretTools(
       // so multiple sessions must use their own CPU deltas, not shared freshness.
       const working = mine.length === 1 ? state === "working" : cpuActive;
       const model = modelFromArgv(row.command);
-      return { pid: row.pid, command: row.command, cwd: null, model, provider: providerFor(model, def.id), current: null, remaining: null,
+      return { pid: row.pid, command: row.command, cwd: null, model, provider: providerFor(model), current: null, remaining: null,
         cpuActive, state: working ? "working" : "idle" };
     });
     return {
@@ -685,7 +709,7 @@ export async function collectToolActivity(now = Date.now(), home = HOME): Promis
         if (!cwd || tool.sessions.filter(s => normalizePath(s.cwd) === cwd).length !== 1) continue;
         const detail = ompActivity.sessions.find(s => normalizePath(s.cwd) === cwd);
         session.model ??= detail?.model ?? null;
-        session.provider = providerFor(session.model, tool.id);
+        session.provider = providerFor(session.model);
         session.current = detail?.current ?? null;
         session.remaining = detail?.remaining ?? null;
       }
@@ -696,12 +720,13 @@ export async function collectToolActivity(now = Date.now(), home = HOME): Promis
       if (matches.length === 1) {
         matches[0].model ??= identity.model;
         if (identity.provider) matches[0].modelProvider = identity.provider;
-        matches[0].provider = identity.provider ?? providerFor(matches[0].model, tool.id);
+        // An explicit store provider is the last resort after the model namespace and family.
+        matches[0].provider = providerFor(matches[0].model) ?? identity.provider;
       }
     }
     tool.cwd = tool.sessions.length ? tool.sessions[0].cwd : identity?.cwd ?? projectFromSession(tool.lastSession);
     tool.model = tool.sessions.length ? tool.sessions[0].model : identity?.model ?? null;
-    tool.provider = tool.sessions.length ? tool.sessions[0].provider : identity?.provider ?? providerFor(tool.model, tool.id);
+    tool.provider = tool.sessions.length ? tool.sessions[0].provider : providerFor(tool.model) ?? identity?.provider ?? null;
     tool.current = tool.sessions[0]?.current ?? null;
     tool.remaining = tool.sessions[0]?.remaining ?? null;
   }));

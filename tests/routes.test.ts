@@ -1,5 +1,5 @@
 import { beforeAll, test, expect, spyOn } from 'bun:test';
-import { isWorking } from '../public/studio-data.js';
+import { isWorking, floorWorkers, workingItems } from '../public/studio-data.js';
 import * as activity from '../activity.ts';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -176,13 +176,22 @@ test('the floor retains each direct session beside dispatches and session-qualif
   expect(next.workers).toEqual([dispatched]);
 });
 
-test('idle live sessions remain visible and an explicitly empty sessions list invents no worker', () => {
-  const result = withToolWorkers({ workers: [], tools: [
-    { id: 'codex', name: 'Codex CLI', state: 'idle', sessions: [{ pid: 10, cwd: '/one', model: null, command: 'codex' }] },
+test('idle live sessions add no worker and an explicitly empty sessions list invents none', () => {
+  const next = { workers: [], tools: [
+    { id: 'codex', name: 'Codex CLI', state: 'idle', sessions: [{ pid: 10, cwd: '/one', model: null, command: 'codex', state: 'idle' }] },
     { id: 'omp', name: 'omp', state: 'working', sessions: [] },
+  ] };
+  expect(withToolWorkers(next)).toBe(next);
+});
+
+test('an idle claude session does not replace the recorded run on the floor', () => {
+  const recorded = { dispatchId: 'd-rec', agent: 'codex', workerState: 'succeeded', liveness: 'dead' };
+  const result = withToolWorkers({ workers: [], runs: [{ runId: 'r', workers: [recorded] }], tools: [
+    { id: 'claude-code', name: 'Claude Code', state: 'idle', sessions: [{ pid: 1, cwd: '/x', state: 'idle', command: 'claude' }] },
   ] });
-  expect(result.workers).toHaveLength(1);
-  expect(result.workers[0]).toMatchObject({ dispatchId: 'tool:codex:10', workerState: 'idle', liveness: 'unknown' });
+  expect(result.workerScope?.live).toBeUndefined();
+  expect(floorWorkers(result).map((w: any) => w.dispatchId)).toEqual(['d-rec']);
+  expect(workingItems(result)).toHaveLength(0);
 });
 
 test('direct sessions keep individual activity and skip only matching live dispatch paths', () => {
@@ -194,8 +203,7 @@ test('direct sessions keep individual activity and skip only matching live dispa
     { pid: 20, cwd: '/quiet', state: 'idle', cpuActive: false },
     { pid: 30, cwd: '/finished', state: 'working', cpuActive: true },
   ] }] });
-  expect(result.workers.map((w: any) => w.dispatchId)).toEqual(['live', 'finished', 'tool:omp:20', 'tool:omp:30']);
-  expect(result.workers.find((w: any) => w.pid === 20)).toMatchObject({ workerState: 'idle', liveness: 'unknown' });
+  expect(result.workers.map((w: any) => w.dispatchId)).toEqual(['live', 'finished', 'tool:omp:30']);
   expect(result.workers.find((w: any) => w.pid === 30)).toMatchObject({ workerState: 'running' });
 });
 
@@ -335,14 +343,14 @@ test('state preserves assignees, joins remaining work within the run, and prefer
       remainingTasks: ['pending', 'ready', 'dispatched', 'blocked', 'qa-tester: unassigned fallback', 'role assignee'],
     });
     expect(state.workers.find((w: any) => w.dispatchId === 'task4-argv')).toMatchObject({ model: 'argv/fallback', provider: 'argv', remainingTasks: ['qa-tester: another handle'] });
-    expect(state.workers.find((w: any) => w.dispatchId === 'task4-unknown')).toMatchObject({ model: null, provider: 'codex', remainingTasks: [] });
+    expect(state.workers.find((w: any) => w.dispatchId === 'task4-unknown')).toMatchObject({ model: null, provider: null, remainingTasks: [] });
     expect(state.workers.find((w: any) => w.dispatchId === 'task4-no-run')).toMatchObject({ remainingTasks: ['No worker run known'] });
     // No handle and no role in its text: nothing to join on is unknown, not a real zero.
     expect(state.workers.find((w: any) => w.dispatchId === 'task4-anon')).toMatchObject({ remainingTasks: null });
     const tool = state.tools.find((t: any) => t.id === 'codex');
     expect(tool.sessions.find((s: any) => s.pid === 950001)).toMatchObject({ model: 'launch/preferred', provider: 'launch' });
     expect(tool.sessions.find((s: any) => s.pid === 950002)).toMatchObject({ model: 'argv/fallback', provider: 'argv' });
-    expect(tool.sessions.find((s: any) => s.pid === 950004)).toMatchObject({ model: null, provider: 'codex' });
+    expect(tool.sessions.find((s: any) => s.pid === 950004)).toMatchObject({ model: null, provider: null });
   } finally {
     spawn.mockRestore(); fetchSpy.mockRestore(); time.mockRestore();
     if (priorCoordinator === undefined) delete process.env.ORCA_COORDINATOR;
@@ -396,7 +404,7 @@ test('state retains store-only identity and maps bare Claude launch models', asy
       modelProvider: 'custom-provider', current: null, remaining: null, command: 'codex -m argv/gpt-6-astra', state: 'idle', cpuActive: false }];
     time.mockReturnValue(Date.now() + 10_000);
     const live = await (await request('/state')).json();
-    expect(live.workers.find((w: any) => w.dispatchId === 'r1-codex')).toMatchObject({ model: 'launch/gpt-6-astra', provider: 'custom-provider' });
-    expect(live.tools.find((t: any) => t.id === 'codex')).toMatchObject({ model: 'launch/gpt-6-astra', provider: 'custom-provider' });
+    expect(live.workers.find((w: any) => w.dispatchId === 'r1-codex')).toMatchObject({ model: 'launch/gpt-6-astra', provider: 'launch' });
+    expect(live.tools.find((t: any) => t.id === 'codex')).toMatchObject({ model: 'launch/gpt-6-astra', provider: 'launch' });
   } finally { spawn.mockRestore(); collect.mockRestore(); fetchSpy.mockRestore(); time.mockRestore(); }
 });

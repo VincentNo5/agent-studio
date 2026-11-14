@@ -98,16 +98,18 @@ The HUD reads one state:
   the tool's detail.
 - **Agent detail** — `tool:<id>` selection shows state, pids, project, session, evidence and the
   dispatches on that tool; `worker:<dispatch>` adds a `Tool` field with its state.
-- **The floor** — tool work is converted to worker rows (`tool:<id>:<pid>` for a direct session,
+- **The floor** — tool work is converted to worker rows (`tool:<id>:<pid>` for a *working* direct session —
+  idle pids add no row, so they never displace the recorded run —
   `omp-child:<sessionId>:<childId>` for an omp `task` child) and handed to the scene, where the existing visitor
   pass gives it a hot desk or a corridor place. That is the same path Orca workers without a
   roster role already use, so the character matches the work rather than a roster name.
 
 omp is the one tool that names its children on disk: each `task` call's tool result carries
-`details.progress[]` with `id`, `agent`, `status: "pending"` and `task`. Completion arrives in a
-`custom_message` with `customType: "async-result"`, whose content contains a
-`<task-result id="…" status="completed">` tag. Completed, failed, cancelled and other settled
-children are removed immediately when that record is collected.
+`details.progress[]` with `id`, `agent`, `status: "pending"` and `task`. Completion arrives as a
+`<task-result id="…" status="completed">` tag, either in a `custom_message` with
+`customType: "async-result"` or in any `toolResult` (typically `wait`), in its `content` text or
+anywhere in its `details`. Completed, failed, cancelled and other settled children are removed
+immediately when that record is collected.
 
 Each child's identity and cwd come from its parent session header, which can follow a title
 record. Missing headers fall back to a project-qualified filename for identity and null cwd.
@@ -131,7 +133,14 @@ render their initial so a missing brand asset never blanks a row.
 Live work opens with a **Working now** strip: one card per working item — an Orca dispatch, a
 direct tool session (`tool:<id>[:<pid>]`) or an omp task child (`omp-child:<session>:<child>`).
 Each card shows the task, `agent · provider · model` and `remaining: N · next: <title>`; any
-part the state does not report reads `—`. WorkerView carries no start time, so "newest first"
+part the state does not report reads `—`.
+
+**Provider** is never guessed from the executable. It is the model's namespace (the part before
+`/`), else its family (`claude*` → `claude`; `gpt*`, `o3*`, `o4*` → `codex`; `gemini*` →
+`google`), else an explicit store `model_provider` (Codex `session_meta`); otherwise unknown. An
+omp dispatch with no model therefore reads `omp · — · —`. Argv models are accepted only as short
+slugs (`[A-Za-z0-9][A-Za-z0-9._:/@-]{0,79}`), so `-m` inside a flattened prompt is ignored. The
+detail panel's Model field shows only the worker/session model, never the roster role's. WorkerView carries no start time, so "newest first"
 is the order this browser first saw each item. Synthetic rows never fetch Orca logs.
 
 **Remaining** means the same on every card: items still open *after* the current one.

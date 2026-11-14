@@ -308,7 +308,7 @@ function renderDetail() {
     const details = el('section', 'detail-section'), dl = el('dl', 'fields');
     const events = (state?.audit?.events || []).filter(e => role ? e.agent === role.name : e.agent === worker?.agent);
     const lastInvoke = events.filter(e => e.kind === 'invoked').at(-1);
-    const fields = [['Stage', worker?.workerState], ['Dispatch', worker?.dispatchStatus], ['Model', worker?.model || role?.model], ['Provider', worker?.provider], ['Agent', worker?.agent], ['Remaining tasks', worker?.remainingTasks?.length ? worker.remainingTasks.join(' · ') : null], ['Liveness', worker?.liveness], ['Reason', worker?.livenessReason], ['Next action', worker?.nextAction], ['Terminal', worker?.terminalState], ['Host', worker?.host], ['Last invoked', lastInvoke ? date(lastInvoke.ts) : null]];
+    const fields = [['Stage', worker?.workerState], ['Dispatch', worker?.dispatchStatus], ['Model', worker?.model || '—'], ['Provider', worker?.provider], ['Agent', worker?.agent], ['Remaining tasks', worker?.remainingTasks?.length ? worker.remainingTasks.join(' · ') : null], ['Liveness', worker?.liveness], ['Reason', worker?.livenessReason], ['Next action', worker?.nextAction], ['Terminal', worker?.terminalState], ['Host', worker?.host], ['Last invoked', lastInvoke ? date(lastInvoke.ts) : null]];
     for (const [key, value] of fields)
         if (value) {
             dl.append(el('dt', null, key), el('dd', null, value === 'inherit' ? 'Inherited (roster)' : value));
@@ -457,6 +457,7 @@ function workerSource() { return floorWorkers(state); }
 /**
  * Live tool work as worker rows, so the floor's actors, Agent status and Live work all see it.
  * omp task children carry their own agent name; a direct session is one generic worker.
+ * Only working sessions become rows: an idle pid must not displace the recorded run.
  */
 function withToolWorkers(next) {
     if (!next?.tools?.length)
@@ -487,14 +488,14 @@ function withToolWorkers(next) {
         const sessions = Array.isArray(tool.sessions) ? tool.sessions : tool.state === 'working' ? [tool] : [];
         for (const session of sessions) {
             if (session.cwd && dispatchPaths.has(session.cwd)) continue;
+            if ((session.state ?? tool.state) !== 'working') continue;
             const id = session.pid == null ? `tool:${tool.id}` : `tool:${tool.id}:${session.pid}`;
             if (known.has(id)) continue;
             known.add(id);
-            const working = (session.state ?? tool.state) === 'working';
             extra.push({
                 dispatchId: id, agent: tool.name, label: `${tool.name} · direct session`,
-                taskTitle: session.current ?? null, workerState: working ? 'running' : 'idle',
-                dispatchStatus: working ? 'working' : 'idle', liveness: working ? 'live' : 'unknown',
+                taskTitle: session.current ?? null, workerState: 'running',
+                dispatchStatus: 'working', liveness: 'live',
                 toolId: tool.id, toolName: tool.name, cwd: session.cwd, model: session.model ?? null,
                 provider: session.model ? session.provider ?? null : null, remaining: session.remaining ?? null,
                 pid: session.pid, command: session.command, processes: session.pid == null ? tool.processes : 1,
