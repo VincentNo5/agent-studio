@@ -166,8 +166,8 @@ test('collection preserves each live pid, cwd, and argv model', async () => {
   try {
     const tool = (await collectToolActivity()).find(tool => tool.id === 'codex')!;
     expect(tool.sessions).toEqual([
-      expect.objectContaining({ pid: 900002, cwd: '/projects/two', model: 'beta', provider: 'beta', command: commands[1], state: 'idle', cpuActive: false }),
-      expect.objectContaining({ pid: 900001, cwd: '/projects/one', model: 'alpha', provider: 'alpha', command: commands[0], state: 'idle', cpuActive: false }),
+      expect.objectContaining({ pid: 900002, cwd: '/projects/two', model: 'beta', provider: 'codex', command: commands[1], state: 'idle', cpuActive: false }),
+      expect.objectContaining({ pid: 900001, cwd: '/projects/one', model: 'alpha', provider: 'codex', command: commands[0], state: 'idle', cpuActive: false }),
     ]);
     expect(tool.processes).toBe(2);
     expect(tool.pids).toEqual([900001, 900002]);
@@ -416,20 +416,53 @@ const todoResult = (tasks: object[]) => JSON.stringify({ type: 'message', messag
   role: 'toolResult', toolName: 'todo', details: { op: 'update', phases: [{ name: 'Work', tasks }] },
 } });
 
-test('argv model flags supply the literal provider prefix, never an inferred vendor', () => {
+test('argv model flags use flattened ps output and bare models have no namespace', () => {
   for (const command of ['codex exec -m codex/gpt-6-astra', 'omp --model codex/gpt-6-astra',
-    'omp --model="codex/gpt-6-astra"', "omp -m 'codex/gpt-6-astra'"]) {
+    'omp --model=codex/gpt-6-astra', 'node /Users/x/.local/bin/codex exec -m codex/gpt-6-astra fix it']) {
     expect(activity.modelFromArgv(command)).toBe('codex/gpt-6-astra');
   }
   for (const command of ['codex exec', 'omp --model', 'omp -m --resume',
-    'codex exec "explain -m fake/model"', 'codex exec -- -m fake/model']) {
+    'codex exec -- -m fake/model']) {
     expect(activity.modelFromArgv(command)).toBeNull();
   }
   expect(activity.providerOf('codex/gpt-6-astra')).toBe('codex');
   expect(activity.providerOf('proxy/vendor/model')).toBe('proxy');
-  expect(activity.providerOf('local-model')).toBe('local-model');
+  expect(activity.modelFromArgv('/Users/x/.local/bin/claude -p Fix the "quote --model claude-opus-5-5 --tools Bash')).toBe('claude-opus-5-5');
+  expect(activity.modelFromArgv('opencode run -m opencode-go/x fix it')).toBe('opencode-go/x');
+  expect(activity.providerOf('local-model')).toBeNull();
   expect(activity.providerOf(null)).toBeNull();
   expect(activity.providerOf('')).toBeNull();
+});
+
+test('interpreter script extensions retain process identity and model', () => {
+  for (const extension of ['js', 'mjs', 'cjs']) {
+    const command = `node /Users/x/.local/bin/codex.${extension} exec -m codex/gpt-6-astra fix it`;
+    const tool = interpretTools([activity.TOOL_DEFS.find(d => d.id === 'codex')!], [row(1, 0, command)], {}, {}, new Map())[0];
+    expect(tool.sessions).toHaveLength(1);
+    expect(tool.sessions[0]).toMatchObject({ model: 'codex/gpt-6-astra', provider: 'codex' });
+    expect(activity.modelFromArgv(command)).toBe('codex/gpt-6-astra');
+  }
+});
+
+test('bare models use the explicit tool provider mapping', () => {
+  for (const [id, command, provider] of [
+    ['claude-code', '/Users/x/bin/claude -p fix it --model claude-opus-5-5 --tools Bash', 'claude'],
+    ['codex', 'codex -m gpt-6-astra', 'codex'], ['opencode', 'opencode run -m local-model', 'opencode-go'],
+    ['omp', 'omp -m local-model', 'opencode-go'], ['cursor', 'cursor-agent --model local-model', 'cursor'],
+  ]) {
+    const tool = interpretTools([activity.TOOL_DEFS.find(d => d.id === id)!], [row(1, 0, command)], {}, {}, new Map())[0];
+    expect(tool.provider).toBe(provider);
+    expect(tool.sessions[0].provider).toBe(provider);
+  }
+  expect(parseOmpSubagents(JSON.stringify({ message: { role: 'toolResult', toolName: 'task', details: {
+    progress: [{ id: 'child', agent: 'coder', status: 'pending', model: 'local-model' }],
+  } } }))[0].provider).toBe('opencode-go');
+});
+
+test('failed todo results preserve the last successful snapshot', () => {
+  const failed = JSON.stringify({ message: { role: 'toolResult', toolName: 'todo', isError: true, details: { phases: [] } } });
+  expect(activity.parseOmpTodos(todoResult([{ content: 'Continue', status: 'in_progress' }]) + '\n' + failed))
+    .toEqual({ current: 'Continue', remaining: 1 });
 });
 
 test('newest todo result counts pending plus in_progress and prefers the first active task', () => {
@@ -485,8 +518,8 @@ test('omp collection uses matching session model and todos, argv wins, and child
     const collect = async () => (await activity.collectToolActivity(now, home)).find(t => t.id === 'omp')!;
     let tool = await collect();
     expect(tool.sessions.find(s => s.pid === 940001)).toMatchObject({ model: 'store/latest', provider: 'store', current: 'Parent current', remaining: 2 });
-    expect(tool.sessions.find(s => s.pid === 940002)).toMatchObject({ model: null, provider: null, remaining: null });
-    expect(tool).toMatchObject({ model: null, provider: null, remaining: null });
+    expect(tool.sessions.find(s => s.pid === 940002)).toMatchObject({ model: null, provider: 'opencode-go', remaining: null });
+    expect(tool).toMatchObject({ model: null, provider: 'opencode-go', remaining: null });
     expect(tool.subagents).toEqual([expect.objectContaining({ id: 'parent:child', model: 'child/model', provider: 'child', task: 'Child current', remaining: 1 })]);
     command = '/bin/omp -m argv/model';
     tool = await collect();
@@ -515,6 +548,61 @@ test('quiet omp sessions retain identity and work, but shared cwd processes cann
     expect(await collect()).toMatchObject({ state: 'idle', model: 'store/quiet', provider: 'store', current: 'Continue', remaining: 1 });
     ps += '\n960002 00:00 omp';
     const ambiguous = await collect();
-    for (const session of ambiguous.sessions) expect(session).toMatchObject({ model: null, provider: null, current: null, remaining: null });
+    for (const session of ambiguous.sessions) expect(session).toMatchObject({ model: null, provider: 'opencode-go', current: null, remaining: null });
+  } finally { spawn.mockRestore(); rmSync(home, { recursive: true, force: true }); }
+});
+
+test('omp joins private cwd aliases and rejects multiple processes at the canonical cwd', async () => {
+  const home = mkdtempSync(join(tmpdir(), 'studio-private-omp-'));
+  const root = join(home, '.omp/agent/sessions/project');
+  mkdirSync(root, { recursive: true });
+  writeFileSync(join(root, 'parent.jsonl'), [
+    JSON.stringify({ type: 'session', id: 'parent', cwd: '/x' }),
+    JSON.stringify({ type: 'model_change', model: 'local-model' }),
+    todoResult([{ content: 'Continue', status: 'pending' }]),
+  ].join('\n'));
+  const platform = spyOn(process, 'platform', 'get').mockReturnValue('darwin');
+  let ps = '970001 00:00 omp';
+  const spawn = spyOn(Bun, 'spawn').mockImplementation(((args: string[]) => ({
+    stdout: new Response(args[0] === 'ps' ? ps : args[3] === '970001' ? 'n/private/x\n' : 'n/x\n').body,
+    exited: Promise.resolve(0), kill() {},
+  })) as typeof Bun.spawn);
+  try {
+    const collect = async () => (await activity.collectToolActivity(Date.now(), home)).find(t => t.id === 'omp')!;
+    expect((await collect()).sessions[0]).toMatchObject({ model: 'local-model', provider: 'opencode-go', current: 'Continue', remaining: 1 });
+    ps += '\n970002 00:00 omp';
+    for (const session of (await collect()).sessions) expect(session).toMatchObject({ model: null, remaining: null });
+  } finally { spawn.mockRestore(); platform.mockRestore(); rmSync(home, { recursive: true, force: true }); }
+});
+
+test('store-only codex and claude identities come from transcript records', async () => {
+  const home = mkdtempSync(join(tmpdir(), 'studio-store-identity-'));
+  const codex = join(home, '.codex/sessions/2026/11/13');
+  const claude = join(home, '.claude/projects/project');
+  mkdirSync(codex, { recursive: true }); mkdirSync(claude, { recursive: true });
+  const rollout = join(codex, 'rollout.jsonl');
+  writeFileSync(rollout, JSON.stringify({ type: 'session_meta', payload: {
+    cwd: '/store/project', model_provider: 'custom-provider', model: 'gpt-6-astra',
+  } }) + '\n');
+  writeFileSync(join(claude, 'session.jsonl'), JSON.stringify({ type: 'assistant', cwd: '/claude/project', message: { role: 'assistant', model: 'claude-opus-5-5' } }) + '\n');
+  // History may be newer than the rollout, but does not carry session identity.
+  writeFileSync(join(home, '.codex/history.jsonl'), '{}\n');
+  let ps = '';
+  const spawn = spyOn(Bun, 'spawn').mockImplementation(((args: string[]) => ({
+    stdout: new Response(args[0] === 'ps' ? ps : 'n/store/project\n').body,
+    exited: Promise.resolve(0), kill() {},
+  })) as typeof Bun.spawn);
+  try {
+    const collect = () => activity.collectToolActivity(Date.now(), home);
+    let tools = await collect();
+    expect(tools.find(t => t.id === 'codex')).toMatchObject({ processes: 0, provider: 'custom-provider', model: 'gpt-6-astra' });
+    expect(tools.find(t => t.id === 'claude-code')).toMatchObject({ processes: 0, provider: 'claude', model: 'claude-opus-5-5' });
+    ps = '980001 00:00 node /Users/x/bin/codex.js exec -m argv/model';
+    expect((await collect()).find(t => t.id === 'codex')!.sessions[0]).toMatchObject({ provider: 'custom-provider', model: 'argv/model' });
+    ps = '';
+    writeFileSync(rollout, JSON.stringify({ type: 'session_meta', payload: { model_provider: 'custom-provider' } }) + '\n');
+    expect((await collect()).find(t => t.id === 'codex')).toMatchObject({ provider: 'custom-provider', model: null });
+    writeFileSync(rollout, '{}\n');
+    expect((await collect()).find(t => t.id === 'codex')!.model).toBeNull();
   } finally { spawn.mockRestore(); rmSync(home, { recursive: true, force: true }); }
 });

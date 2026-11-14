@@ -52,7 +52,7 @@ interface QuotaView {
 
 
 import { resolve, sep } from "node:path";
-import { collectToolActivity, joinToolAgents, projectFromKnownPaths, providerOf, toolForAgent, type ToolDispatch, type ToolActivity } from "./activity.ts";
+import { collectToolActivity, joinToolAgents, projectFromKnownPaths, providerFor, toolForAgent, type ToolDispatch, type ToolActivity } from "./activity.ts";
 import { isPresent as isMovingWorker } from "./public/studio-data.js";
 import { realpath } from "node:fs/promises";
 import { hostname as systemHostname } from "node:os";
@@ -671,28 +671,30 @@ async function collect(): Promise<StudioState> {
 
   const roles = await roleNames();
   const remainingStatuses = new Set(["pending", "ready", "dispatched", "blocked"]);
+  const workerTools = new Map(workers.map(worker => [worker, toolForAgent(worker.agent)]));
   for (const worker of workers) {
     // Only a uniquely attributable live process can fill missing launch metadata.
     // A settled dispatch must not borrow the model of a newer session in its worktree.
-    const toolId = toolForAgent(worker.agent);
+    const toolId = workerTools.get(worker);
     const matches = isMovingWorker(worker) && worker.path
       ? tools.filter(tool => !toolId || tool.id === toolId).flatMap(tool => tool.sessions)
         .filter(session => session.cwd === worker.path)
       : [];
     const owners = workers.filter(other => isMovingWorker(other) && other.path === worker.path
-      && (!toolId || !toolForAgent(other.agent) || toolForAgent(other.agent) === toolId));
+      && (!toolId || !workerTools.get(other) || workerTools.get(other) === toolId));
+    worker.provider = providerFor(worker.model, worker.agent);
     if (matches.length === 1 && owners.length === 1) {
       const session = matches[0];
       worker.model ??= session.model;
+      if (session.model !== worker.model) session.provider = session.modelProvider ?? providerFor(worker.model, worker.agent) ?? session.provider;
       session.model = worker.model;
-      session.provider = providerOf(session.model);
+      worker.provider = session.provider ?? providerFor(worker.model, worker.agent);
     }
-    worker.provider = providerOf(worker.model);
 
     const text = [worker.taskTitle, worker.taskSpec, worker.label, worker.worktreeName].filter(Boolean).join(" ").toLowerCase();
     const workerRoles = roles.filter(role => text.includes(role.toLowerCase()));
     worker.remainingTasks = orcaTasks.filter(task => {
-      if (!remainingStatuses.has(task.status ?? "") || (worker.runId && task.runId !== worker.runId)) return false;
+      if ((worker.taskId && task.id === worker.taskId) || !remainingStatuses.has(task.status ?? "") || (worker.runId && task.runId !== worker.runId)) return false;
       if (task.assignee) {
         if (task.assignee === worker.terminalHandle) return true;
         // Explicit assignment to another handle always wins over text mentioning our role.
@@ -703,8 +705,9 @@ async function collect(): Promise<StudioState> {
     }).map(task => task.title ?? task.spec ?? "—");
   }
   for (const tool of tools) {
-    tool.model = tool.sessions[0]?.model ?? null;
-    tool.provider = providerOf(tool.model);
+    if (!tool.sessions.length) continue;
+    tool.model = tool.sessions[0].model;
+    tool.provider = tool.sessions[0].provider ?? providerFor(tool.model, tool.id);
   }
 
   // Everything the floor left out still has to be inspectable, so group the same dispatches

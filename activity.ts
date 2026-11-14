@@ -8,7 +8,7 @@
 //
 // Boundary: every field below is derived, never reported; a tool that adds or
 // moves a store simply reads `available`/`offline` until its row is updated.
-import { existsSync, readdirSync, statSync } from "node:fs";
+import { existsSync, readdirSync, realpathSync, statSync } from "node:fs";
 import type { Dirent } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
@@ -50,7 +50,12 @@ const SUBAGENT_SESSION_WINDOW_MS = 10 * 60_000;
 
 export interface OmpSubagent { id: string; agent: string; state: string; task: string | null; model: string | null; provider: string | null; remaining: number | null; stale?: boolean; cwd?: string | null }
 
-export interface ToolSession { pid: number; cwd: string | null; model: string | null; provider: string | null; current: string | null; remaining: number | null; command: string; state: "working" | "idle"; cpuActive: boolean }
+export interface ToolSession {
+  pid: number; cwd: string | null; model: string | null; provider: string | null;
+  /** Explicit rollout provider, retained when worker-show overrides the model. */
+  modelProvider?: string | null;
+  current: string | null; remaining: number | null; command: string; state: "working" | "idle"; cpuActive: boolean;
+}
 
 export interface ToolActivity {
   /** Stable slug, unique across the table. */
@@ -131,14 +136,18 @@ export function toolForAgent(agent: string | null | undefined, defs: ToolDef[] =
 
 /** Literal model namespace; never infer a vendor from an executable or role. */
 export function providerOf(model: string | null): string | null {
-  return model?.split("/", 1)[0] || null;
+  return model?.includes("/") ? model.split("/", 1)[0] || null : null;
 }
 
-/** Read model options without executing the command or treating quoted prompts as flags. */
+/** Known surface providers use the same ids as quotas; model namespaces take precedence. */
+export function providerFor(model: string | null, toolOrAgent: string | null | undefined): string | null {
+  const providers: Record<string, string> = { "claude-code": "claude", codex: "codex", opencode: "opencode-go", omp: "opencode-go", cursor: "cursor" };
+  return providerOf(model) ?? providers[toolForAgent(toolOrAgent) ?? toolOrAgent ?? ""] ?? null;
+}
+
+/** ps flattens argv: quotes are literal characters, not shell grouping syntax. */
 export function modelFromArgv(command: string): string | null {
-  const tokens = (command.match(/(?:[^\s"'\\]|\\.|"(?:[^"\\]|\\.)*"|'[^']*')+/g) ?? [])
-    .map(token => token.replace(/"((?:[^"\\]|\\.)*)"|'([^']*)'|\\(.)/g,
-      (_, double, single, escaped) => double !== undefined ? double.replace(/\\(.)/g, "$1") : single ?? escaped));
+  const tokens = command.trim().split(/\s+/);
   for (let i = 1; i < tokens.length; i++) {
     if (tokens[i] === "--") break;
     const option = tokens[i].match(/^(?:-m|--model)(?:=(.*))?$/);
@@ -183,7 +192,7 @@ export function runsTool(command: string, bins: string[]): boolean {
   if (bins.includes(exe)) return true;
   if (!INTERPRETERS.has(exe)) return false;
   const script = tokens.slice(1).find((token) => !token.startsWith("-"));
-  return script !== undefined && bins.includes(basename(script.replace(/[),;]+$/, "")));
+  return script !== undefined && bins.includes(basename(script.replace(/[),;]+$/, "")).replace(/\.(?:js|mjs|cjs)$/, ""));
 }
 
 /** Newest non-churn entry under a directory tree; bounded so a huge store stays cheap. */
@@ -321,8 +330,8 @@ function consumeOmpRecords(text: string, parsed: OmpParse): number {
       }
     }
     const message = record.message;
-    if (message?.role === "toolResult" && message.toolName === "todo") {
-      Object.assign(parsed, ompTodos(message.isError ? null : message.details));
+    if (message?.role === "toolResult" && message.toolName === "todo" && !message.isError) {
+      Object.assign(parsed, ompTodos(message.details));
     }
     if (message?.role !== "toolResult" || message.toolName !== "task" || !Array.isArray(message.details?.progress)) continue;
     const at = Date.parse(String(record.timestamp ?? "")) || 0;
@@ -333,7 +342,7 @@ function consumeOmpRecords(text: string, parsed: OmpParse): number {
       parsed.children.set(entry.id, { id: entry.id, agent: entry.agent, state,
         task: taskSummary(typeof entry.task === "string" ? entry.task : ""),
         model: typeof entry.model === "string" && entry.model ? entry.model : null,
-        provider: providerOf(typeof entry.model === "string" ? entry.model : null), remaining: null, at });
+        provider: providerFor(typeof entry.model === "string" ? entry.model : null, "omp"), remaining: null, at });
     }
   }
   return consumed;
@@ -363,7 +372,7 @@ async function readOmpSession(path: string): Promise<OmpParse> {
   return parsed;
 }
 
-/** Eight newest sessions for identity/work; child liveness still expires after ten minutes. */
+/** Identity/work is count-bounded to eight newest sessions, not time-bounded; children expire after ten minutes. */
 async function readOmpActivity(now: number, home: string): Promise<{ subagents: OmpSubagent[]; sessions: OmpParse[] }> {
   const roots = join(home, ".omp/agent/sessions");
   const files: { path: string; mtime: number }[] = [];
@@ -415,7 +424,7 @@ async function readOmpActivity(now: number, home: string): Promise<{ subagents: 
         const id = `${sessionId}:${child.id}`;
         const model = child.model ?? detail?.model ?? null;
         merged.set(id, { ...child, id, cwd: parsed.cwd, stale: now - lastEvidence > SUBAGENT_LIVE_MS,
-          model, provider: providerOf(model), task: detail?.current ?? child.task, remaining: detail?.remaining ?? null });
+          model, provider: providerFor(model, "omp"), task: detail?.current ?? child.task, remaining: detail?.remaining ?? null });
       }
     } catch { /* unreadable session: skip it */ }
   }
@@ -447,6 +456,50 @@ export function scanStores(def: ToolDef, home = HOME): StoreMap {
     map[relative] = newestEntry(full);
   }
   return map;
+}
+
+interface StoreIdentity { cwd: string | null; model: string | null; provider: string | null }
+
+/** Bounded reads of the transcript already selected by the store scan; no model defaults. */
+async function readStoreIdentity(toolId: string, stores: StoreMap): Promise<StoreIdentity | null> {
+  const stamp = stores[toolId === "codex" ? ".codex/sessions" : ".claude/projects"];
+  if (!stamp?.path.endsWith(".jsonl")) return null;
+  try {
+    const file = Bun.file(stamp.path);
+    // Codex metadata is at the front (and can contain long instructions); Claude models
+    // are in assistant messages, so inspect its recent output instead.
+    const text = await (toolId === "codex" ? file.slice(0, 1024 * 1024) : file.slice(Math.max(0, file.size - 128 * 1024))).text();
+    const identity: StoreIdentity = { cwd: null, model: null, provider: null };
+    const string = (value: unknown) => typeof value === "string" && value ? value : null;
+    for (const line of text.split("\n")) {
+      let record;
+      try { record = JSON.parse(line); } catch { continue; }
+      if (toolId === "codex") {
+        if (record?.type !== "session_meta") continue;
+        return { cwd: string(record.payload?.cwd), model: string(record.payload?.model), provider: string(record.payload?.model_provider) };
+      }
+      identity.cwd = string(record?.cwd) ?? identity.cwd;
+      if (record?.type === "assistant" && record.message?.role === "assistant") {
+        identity.model = string(record.message.model) ?? identity.model;
+      }
+    }
+    return identity;
+  } catch { return null; }
+}
+
+/** Cache path resolution within a sample, including macOS /private aliases that no longer exist. */
+function pathNormalizer(): (path: string | null) => string | null {
+  const cache = new Map<string, string>();
+  return path => {
+    if (!path) return null;
+    if (cache.has(path)) return cache.get(path)!;
+    let normalized = path;
+    try { normalized = realpathSync(path); } catch { /* session directories may have been removed */ }
+    if (process.platform === "darwin") normalized = normalized.replace(/^\/private(?=\/)/, "");
+    normalized = normalized.replace(/\/$/, "") || "/";
+    cache.set(path, normalized);
+    return normalized;
+  };
 }
 
 /** A store this recent means the tool produced work in the last two minutes. */
@@ -503,7 +556,7 @@ export function interpretTools(
       // so multiple sessions must use their own CPU deltas, not shared freshness.
       const working = mine.length === 1 ? state === "working" : cpuActive;
       const model = modelFromArgv(row.command);
-      return { pid: row.pid, command: row.command, cwd: null, model, provider: providerOf(model), current: null, remaining: null,
+      return { pid: row.pid, command: row.command, cwd: null, model, provider: providerFor(model, def.id), current: null, remaining: null,
         cpuActive, state: working ? "working" : "idle" };
     });
     return {
@@ -620,22 +673,33 @@ export async function collectToolActivity(now = Date.now(), home = HOME): Promis
   const omp = tools.find((tool) => tool.id === "omp");
   const ompActivity = omp ? await readOmpActivity(now, home) : null;
   if (omp && ompActivity) omp.subagents = ompActivity.subagents;
+  const normalizePath = pathNormalizer();
   // Each live pid names its own project; never borrow another session's cwd.
   await Promise.all(tools.map(async (tool) => {
     await Promise.all(tool.sessions.map(async (session) => { session.cwd = await cwdFor(session.pid); }));
     if (tool.id === "omp" && ompActivity) {
       for (const session of tool.sessions) {
-        if (!session.cwd || tool.sessions.filter(s => s.cwd === session.cwd).length !== 1) continue;
-        const detail = ompActivity.sessions.find(s => s.cwd === session.cwd);
+        const cwd = normalizePath(session.cwd);
+        if (!cwd || tool.sessions.filter(s => normalizePath(s.cwd) === cwd).length !== 1) continue;
+        const detail = ompActivity.sessions.find(s => normalizePath(s.cwd) === cwd);
         session.model ??= detail?.model ?? null;
-        session.provider = providerOf(session.model);
+        session.provider = providerFor(session.model, tool.id);
         session.current = detail?.current ?? null;
         session.remaining = detail?.remaining ?? null;
       }
     }
-    tool.cwd = tool.sessions.length ? tool.sessions[0].cwd : projectFromSession(tool.lastSession);
-    tool.model = tool.sessions[0]?.model ?? null;
-    tool.provider = providerOf(tool.model);
+    const identity = tool.id === "codex" || tool.id === "claude-code" ? await readStoreIdentity(tool.id, stores[tool.id]) : null;
+    if (identity?.cwd) {
+      const matches = tool.sessions.filter(session => normalizePath(session.cwd) === normalizePath(identity.cwd));
+      if (matches.length === 1) {
+        matches[0].model ??= identity.model;
+        if (identity.provider) matches[0].modelProvider = identity.provider;
+        matches[0].provider = identity.provider ?? providerFor(matches[0].model, tool.id);
+      }
+    }
+    tool.cwd = tool.sessions.length ? tool.sessions[0].cwd : identity?.cwd ?? projectFromSession(tool.lastSession);
+    tool.model = tool.sessions.length ? tool.sessions[0].model : identity?.model ?? null;
+    tool.provider = tool.sessions.length ? tool.sessions[0].provider : identity?.provider ?? providerFor(tool.model, tool.id);
     tool.current = tool.sessions[0]?.current ?? null;
     tool.remaining = tool.sessions[0]?.remaining ?? null;
   }));

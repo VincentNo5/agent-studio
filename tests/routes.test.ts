@@ -1,5 +1,6 @@
 import { beforeAll, test, expect, spyOn } from 'bun:test';
 import { isWorking } from '../public/studio-data.js';
+import * as activity from '../activity.ts';
 let handler: (request: Request, server: unknown) => Promise<Response>;
 let createMarketService: typeof import('../server.ts').createMarketService;
 let readDispatchAgent: typeof import('../server.ts').readDispatchAgent;
@@ -287,7 +288,7 @@ test('state preserves assignees, joins remaining work within the run, and prefer
     { dispatchId: 'task4-no-run', terminal: 'handle-d' },
   ].map(w => ({ ...w, state: 'running', liveness: 'live' }));
   const tasks = [
-    { id: 'active', task_title: 'qa-tester: current', status: 'running', assignee: 'handle-a', run_id: 'run-a' },
+    { id: 'active', task_title: 'qa-tester: current', status: 'dispatched', assignee: 'handle-a', run_id: 'run-a' },
     ...['pending', 'ready', 'dispatched', 'blocked'].map(status => ({ id: status, task_title: status, status, assignee: 'handle-a', run_id: 'run-a' })),
     { task_title: 'qa-tester: unassigned fallback', status: 'pending', run_id: 'run-a' },
     { task_title: 'role assignee', status: 'pending', assignee: 'qa-tester', run_id: 'run-a' },
@@ -318,12 +319,12 @@ test('state preserves assignees, joins remaining work within the run, and prefer
       remainingTasks: ['pending', 'ready', 'dispatched', 'blocked', 'qa-tester: unassigned fallback', 'role assignee'],
     });
     expect(state.workers.find((w: any) => w.dispatchId === 'task4-argv')).toMatchObject({ model: 'argv/fallback', provider: 'argv', remainingTasks: ['qa-tester: another handle'] });
-    expect(state.workers.find((w: any) => w.dispatchId === 'task4-unknown')).toMatchObject({ model: null, provider: null, remainingTasks: [] });
+    expect(state.workers.find((w: any) => w.dispatchId === 'task4-unknown')).toMatchObject({ model: null, provider: 'codex', remainingTasks: [] });
     expect(state.workers.find((w: any) => w.dispatchId === 'task4-no-run')).toMatchObject({ remainingTasks: ['No worker run known'] });
     const tool = state.tools.find((t: any) => t.id === 'codex');
     expect(tool.sessions.find((s: any) => s.pid === 950001)).toMatchObject({ model: 'launch/preferred', provider: 'launch' });
     expect(tool.sessions.find((s: any) => s.pid === 950002)).toMatchObject({ model: 'argv/fallback', provider: 'argv' });
-    expect(tool.sessions.find((s: any) => s.pid === 950004)).toMatchObject({ model: null, provider: null });
+    expect(tool.sessions.find((s: any) => s.pid === 950004)).toMatchObject({ model: null, provider: 'codex' });
   } finally {
     spawn.mockRestore(); fetchSpy.mockRestore(); time.mockRestore();
     if (priorCoordinator === undefined) delete process.env.ORCA_COORDINATOR;
@@ -339,4 +340,45 @@ test('direct UI data preserves model/provider/work and keeps unknown provider nu
   expect(state.workers.find((w: any) => w.pid === 1)).toMatchObject({ provider: 'codex', model: 'codex/gpt-6-astra', taskTitle: 'Implement', remaining: 2 });
   expect(state.workers.find((w: any) => w.pid === 2)).toMatchObject({ provider: null, model: null, taskTitle: null, remaining: null });
   expect(state.workers.find((w: any) => w.dispatchId === 'omp-child:parent:child')).toMatchObject({ provider: 'child', model: 'child/model', remaining: 1 });
+});
+
+test('state retains store-only identity and maps bare Claude launch models', async () => {
+  const time = spyOn(Date, 'now').mockReturnValue(Date.now() + 3_000_000);
+  const fetchSpy = spyOn(globalThis, 'fetch').mockResolvedValue(Response.json({}));
+  const toolFixtures: activity.ToolActivity[] = [
+    { id: 'codex', name: 'Codex CLI', kind: 'cli', installed: true, state: 'working', processes: 0, pids: [], sessions: [],
+      cwd: '/store', model: 'gpt-6-astra', provider: 'custom-provider', current: null, remaining: null, cpuActive: false,
+      lastSession: '.codex/sessions/rollout.jsonl', lastActivity: null, evidence: 'store' },
+    { id: 'claude-code', name: 'Claude Code', kind: 'cli', installed: true, state: 'idle', processes: 1, pids: [990001],
+      sessions: [{ pid: 990001, cwd: '/bare-claude', model: 'old/claude-sonnet', provider: 'old', current: null, remaining: null,
+        command: 'claude --model old/claude-sonnet', state: 'idle', cpuActive: false }],
+      cwd: '/bare-claude', model: 'old/claude-sonnet', provider: 'old', current: null, remaining: null, cpuActive: false,
+      lastSession: null, lastActivity: null, evidence: 'process' },
+  ];
+  const collect = spyOn(activity, 'collectToolActivity').mockImplementation(async () => structuredClone(toolFixtures));
+  const spawn = spyOn(Bun, 'spawn').mockImplementation(((args: string[]) => {
+    let output = '';
+    if (args.includes('worker-list')) output = JSON.stringify({ result: { workers: [
+      { dispatchId: 'r1-claude', workspace: '/bare-claude', state: 'running', liveness: 'live' },
+      { dispatchId: 'r1-codex', workspace: '/store', state: 'running', liveness: 'live' },
+    ] } });
+    if (args.includes('worker-show')) output = JSON.stringify({ ok: true, result: { worker: { startOptions: { launch: {
+      effective: args.includes('r1-codex') ? { agent: 'codex', model: 'launch/gpt-6-astra' } : { agent: 'claude-code', model: 'claude-opus-5-5' },
+    } } } } });
+    return { stdout: new Response(output).body, exited: Promise.resolve(0), kill() {} };
+  }) as typeof Bun.spawn);
+  try {
+    const state = await (await request('/state')).json();
+    expect(state.tools.find((t: any) => t.id === 'codex')).toMatchObject({ model: 'gpt-6-astra', provider: 'custom-provider' });
+    expect(state.workers.find((w: any) => w.dispatchId === 'r1-claude')).toMatchObject({ model: 'claude-opus-5-5', provider: 'claude' });
+    const claude = state.tools.find((t: any) => t.id === 'claude-code');
+    expect(claude).toMatchObject({ model: 'claude-opus-5-5', provider: 'claude' });
+    expect(claude.sessions[0]).toMatchObject({ model: 'claude-opus-5-5', provider: 'claude' });
+    toolFixtures[0].sessions = [{ pid: 990002, cwd: '/store', model: 'argv/gpt-6-astra', provider: 'custom-provider',
+      modelProvider: 'custom-provider', current: null, remaining: null, command: 'codex -m argv/gpt-6-astra', state: 'idle', cpuActive: false }];
+    time.mockReturnValue(Date.now() + 10_000);
+    const live = await (await request('/state')).json();
+    expect(live.workers.find((w: any) => w.dispatchId === 'r1-codex')).toMatchObject({ model: 'launch/gpt-6-astra', provider: 'custom-provider' });
+    expect(live.tools.find((t: any) => t.id === 'codex')).toMatchObject({ model: 'launch/gpt-6-astra', provider: 'custom-provider' });
+  } finally { spawn.mockRestore(); collect.mockRestore(); fetchSpy.mockRestore(); time.mockRestore(); }
 });
