@@ -1,4 +1,5 @@
 import { beforeAll, test, expect, spyOn } from 'bun:test';
+import { isWorking } from '../public/studio-data.js';
 let handler: (request: Request, server: unknown) => Promise<Response>;
 let createMarketService: typeof import('../server.ts').createMarketService;
 let readDispatchAgent: typeof import('../server.ts').readDispatchAgent;
@@ -66,7 +67,7 @@ test('activity route answers the normalized tool rows', async () => {
   }
 });
 
-test.each(['', 'not json', '{"ok":false,"error":"temporarily unavailable"}', '{"ok":true,"result":{}}'])(
+test.each(['', 'not json', '{"ok":false,"error":"temporarily unavailable"}'])(
   'state retries failed worker-show metadata (%s) on the next collect and caches success', async failure => {
     const id = `retry-${failure}`;
     let lookups = 0;
@@ -100,9 +101,42 @@ test.each(['', 'not json', '{"ok":false,"error":"temporarily unavailable"}', '{"
   },
 );
 
+test('valid empty worker-show results back off across collects, then accept late metadata', async () => {
+  const id = 'empty-with-backoff';
+  let now = Date.now() + 120_000;
+  let lookups = 0;
+  const time = spyOn(Date, 'now').mockImplementation(() => now);
+  const fetchSpy = spyOn(globalThis, 'fetch').mockResolvedValue(Response.json({}));
+  const spawn = spyOn(Bun, 'spawn').mockImplementation(((args: string[]) => {
+    let output = '';
+    if (args.includes('worker-list')) output = JSON.stringify({ ok: true, result: { workers: [{ dispatchId: id, state: 'running', liveness: 'live' }] } });
+    if (args.includes('worker-show')) output = ++lookups < 3 ? '{"ok":true,"result":{}}'
+      : JSON.stringify({ ok: true, result: { startOptions: { agent: 'codex' } } });
+    return { stdout: new Response(output).body, exited: Promise.resolve(0), kill() {} };
+  }) as typeof Bun.spawn);
+  const collect = async () => (await (await request('/state')).json()).workers.find((w: any) => w.dispatchId === id);
+  try {
+    expect(await collect()).toMatchObject({ agent: null });
+    for (let i = 0; i < 3; i++) { now += 2000; await collect(); }
+    expect(lookups).toBe(1);
+    now += 30_000;
+    expect(await collect()).toMatchObject({ agent: null });
+    expect(lookups).toBe(2);
+    now += 30_000;
+    await collect();
+    expect(lookups).toBe(2); // The second empty answer backs off longer.
+    now += 30_000;
+    expect(await collect()).toMatchObject({ agent: 'codex' });
+    expect(lookups).toBe(3);
+    now += 600_000;
+    expect(await collect()).toMatchObject({ agent: 'codex' });
+    expect(lookups).toBe(3);
+  } finally { spawn.mockRestore(); fetchSpy.mockRestore(); time.mockRestore(); }
+});
+
 // Execute the actual page adapter without starting its DOM, WebGL or polling loop.
 const studioSource = await Bun.file(new URL('../public/studio.js', import.meta.url)).text();
-const withToolWorkers = new Function(`${studioSource.slice(studioSource.indexOf('function withToolWorkers('), studioSource.indexOf('function renderWorkers('))}\nreturn withToolWorkers;`)();
+const withToolWorkers = new Function('isWorking', `${studioSource.slice(studioSource.indexOf('function withToolWorkers('), studioSource.indexOf('function renderWorkers('))}\nreturn withToolWorkers;`)(isWorking);
 
 test('the floor retains each direct session beside dispatches and session-qualified omp children', () => {
   const dispatched = { dispatchId: 'orca-1', agent: 'codex', workerState: 'running' };
@@ -133,6 +167,31 @@ test('idle live sessions remain visible and an explicitly empty sessions list in
   ] });
   expect(result.workers).toHaveLength(1);
   expect(result.workers[0]).toMatchObject({ dispatchId: 'tool:codex:10', workerState: 'idle', liveness: 'unknown' });
+});
+
+test('direct sessions keep individual activity and skip only matching live dispatch paths', () => {
+  const result = withToolWorkers({ workers: [
+    { dispatchId: 'live', path: '/dispatched', workerState: 'running', liveness: 'live' },
+    { dispatchId: 'finished', path: '/finished', workerState: 'succeeded', liveness: 'dead' },
+  ], tools: [{ id: 'omp', name: 'omp', state: 'working', cwd: '/wrong', sessions: [
+    { pid: 10, cwd: '/dispatched', state: 'working', cpuActive: true },
+    { pid: 20, cwd: '/quiet', state: 'idle', cpuActive: false },
+    { pid: 30, cwd: '/finished', state: 'working', cpuActive: true },
+  ] }] });
+  expect(result.workers.map((w: any) => w.dispatchId)).toEqual(['live', 'finished', 'tool:omp:20', 'tool:omp:30']);
+  expect(result.workers.find((w: any) => w.pid === 20)).toMatchObject({ workerState: 'idle', liveness: 'unknown' });
+  expect(result.workers.find((w: any) => w.pid === 30)).toMatchObject({ workerState: 'running' });
+});
+
+test('child rows carry parent cwd and settled children never reach the floor', () => {
+  const result = withToolWorkers({ workers: [], tools: [{ id: 'omp', name: 'omp', cwd: '/wrong', sessions: [], subagents: [
+    { id: 'a:child', agent: 'coder', state: 'running', cwd: '/project-a' },
+    { id: 'b:child', agent: 'coder', state: 'running', cwd: '/project-b' },
+    { id: 'c:child', agent: 'coder', state: 'completed', cwd: '/project-c' },
+  ] }] });
+  expect(result.workers.map((w: any) => [w.dispatchId, w.cwd])).toEqual([
+    ['omp-child:a:child', '/project-a'], ['omp-child:b:child', '/project-b'],
+  ]);
 });
 
 test('older state payloads without sessions retain their direct tool fallback', () => {

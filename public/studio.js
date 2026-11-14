@@ -416,9 +416,14 @@ function withToolWorkers(next) {
     if (!next?.tools?.length)
         return next;
     const known = new Set((next.workers || []).map(w => w.dispatchId).filter(Boolean));
+    const dispatchPaths = new Set((next.workers || [])
+        .filter(w => w.dispatchId && !/^(tool:|omp-child:)/.test(w.dispatchId) && isWorking(w) && w.path)
+        .map(w => w.path));
+    const settledChildren = new Set(['completed', 'complete', 'succeeded', 'failed', 'cancelled', 'aborted', 'error']);
     const extra = [];
     for (const tool of next.tools) {
         for (const child of tool.subagents || []) {
+            if (settledChildren.has(child.state)) continue;
             const id = `omp-child:${child.id}`;
             if (known.has(id)) continue;
             known.add(id);
@@ -427,16 +432,17 @@ function withToolWorkers(next) {
                 taskTitle: child.task || `${child.agent} · ${tool.name}`,
                 workerState: child.stale ? 'idle' : child.state === 'pending' ? 'pending' : 'running',
                 dispatchStatus: child.stale ? 'idle' : child.state, liveness: child.stale ? 'unknown' : 'live',
-                stale: child.stale === true, toolId: tool.id, toolName: tool.name, cwd: tool.cwd,
+                stale: child.stale === true, toolId: tool.id, toolName: tool.name, cwd: child.cwd ?? null,
             });
         }
         // Older payloads have one tool row; an explicit empty sessions list has no live pid.
         const sessions = Array.isArray(tool.sessions) ? tool.sessions : tool.state === 'working' ? [tool] : [];
         for (const session of sessions) {
+            if (session.cwd && dispatchPaths.has(session.cwd)) continue;
             const id = session.pid == null ? `tool:${tool.id}` : `tool:${tool.id}:${session.pid}`;
             if (known.has(id)) continue;
             known.add(id);
-            const working = tool.state === 'working';
+            const working = (session.state ?? tool.state) === 'working';
             extra.push({
                 dispatchId: id, agent: tool.name, label: `${tool.name} · direct session`,
                 taskTitle: `${tool.name} · direct session`, workerState: working ? 'running' : 'idle',

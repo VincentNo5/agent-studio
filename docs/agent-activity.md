@@ -46,10 +46,17 @@ then `interpretTools()` maps the evidence to a state:
 | installed, nothing running | `available` |
 | no binary and no store | `offline` |
 
+These are tool-wide summary states. Each live session carries its own `cpuActive` and
+`state`, derived from that pid's CPU delta; another session's fresh output cannot make it
+working. A first CPU sample is idle until a later sample establishes activity.
+
 Only the **executable position** is matched (`argv[0]`, or the first script argument after
 `node`/`bun`/`python`), never arbitrary arguments — otherwise a prompt that mentions `Cursor`
 makes Cursor look busy. That bug was caught live: `claude -p "… Cursor …"` registered as a
 Cursor process.
+
+omp commands containing an internal `__omp_worker_` argument (daemon broker, JS evaluator,
+text predictor) are excluded before building session lists, process counts, CPU activity or cwd.
 
 Why mtime instead of parsing each format: the stores are documented for two tools out of eight,
 and opencode already replaced its format once. mtime + process liveness is the only signal every
@@ -66,9 +73,12 @@ dispatch whose agent Orca cannot name still lands on the tool that is writing in
 Orca's concise `worker-show` payload drops `startOptions` (the only place the launched agent
 appears), so the lookup passes `--full` and accepts both the wrapped and the flat result shape;
 without that, every dispatch reads agent-less and the join silently produces nothing.
+Valid empty results such as `{"ok":true,"result":{}}` are cached, with retries after 30 seconds,
+then 60, 120, 240 and at most 300 seconds. Failed or malformed responses retry on the next
+collect; successful agent/model metadata remains cached.
 
-Why not `lsof` for every process: it costs 20–50 ms per pid, so it runs once per tool per collect
-and only while that tool has a live process.
+`lsof` costs 20–50 ms per pid, so each matching live session is resolved once and cached until
+the pid disappears. Aggregate cwd/model comes from the newest session (descending pid).
 
 ## Surfaces
 
@@ -79,21 +89,36 @@ The HUD reads one state:
   lists every row with `State`, `Project` (cwd), `Processes`, newest session output and `Agents`.
 - **Agent status** — a working tool lights the roster role named by its dispatch and a *Tools
   working* group names the tool + project; role rows and tool rows share the same status colours.
-- **Live work** — Orca workers plus direct tool sessions (no dispatch), each row naming the tool,
-  the project leaf and the process count. A tool row without a dispatch opens the tool's detail.
+- **Live work** — Orca workers plus direct tool sessions, including sessions using a tool that
+  also has dispatched work. A session whose cwd equals a live dispatch's worktree path is
+  represented by that dispatch alone. Each direct row names its own tool and project and opens
+  the tool's detail.
 - **Agent detail** — `tool:<id>` selection shows state, pids, project, session, evidence and the
   dispatches on that tool; `worker:<dispatch>` adds a `Tool` field with its state.
-- **The floor** — tool work is converted to worker rows (`tool:<id>` for a direct session,
-  `omp-child:<id>` for an omp `task` child) and handed to the scene, where the existing visitor
+- **The floor** — tool work is converted to worker rows (`tool:<id>:<pid>` for a direct session,
+  `omp-child:<sessionId>:<childId>` for an omp `task` child) and handed to the scene, where the existing visitor
   pass gives it a hot desk or a corridor place. That is the same path Orca workers without a
   roster role already use, so the character matches the work rather than a roster name.
 
 omp is the one tool that names its children on disk: each `task` call's tool result carries
-`details.progress[]` with `id`, `agent`, `status` and `task`. The parser keeps the newest record
-per child, maps `pending` (the spawn record) to `running`, and drops settled statuses. Because a
-child never writes a completion record, a child ages out after 60 s of silence — a finished child
-can read as running for up to a minute, and a child that runs longer than a minute while writing
-nothing new would drop early.
+`details.progress[]` with `id`, `agent`, `status: "pending"` and `task`. Completion arrives in a
+`custom_message` with `customType: "async-result"`, whose content contains a
+`<task-result id="…" status="completed">` tag. Completed, failed, cancelled and other settled
+children are removed immediately when that record is collected.
+
+Each child's identity and cwd come from its parent session header, which can follow a title
+record. Missing headers fall back to a project-qualified filename for identity and null cwd.
+Freshness uses the child's transcript mtime at `<parent-session-dir>/<childId>.jsonl` (the
+parent filename without `.jsonl` names that directory). Without a child transcript, the spawn
+timestamp supplies the last evidence. After one minute without child evidence a child is
+marked stale and idle; after ten minutes it expires. Parent output cannot refresh that clock.
+A recently updated child transcript keeps a quiet parent eligible for discovery.
+
+The eight sessions with the newest parent or child evidence in the ten-minute window are
+parsed. Parses are cached by path, mtime, size and inode; unchanged files are not reread, and
+growing transcripts are read from the previous byte offset. Partial final records are retried
+on the next append; truncation, replacement or same-size edits reset the parse. This preserves
+early spawns without rereading multi-megabyte transcripts on every collect.
 
 Icons come from `public/tool-icons.js` (Simple Icons, CC0) for tools with a public mark; the rest
 render their initial so a missing brand asset never blanks a row.

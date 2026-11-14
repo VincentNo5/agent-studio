@@ -1,7 +1,7 @@
 import { describe, test, expect, spyOn } from 'bun:test';
 import { collectToolActivity, readOmpSubagents } from '../activity.ts';
 import { interpretTools, joinToolAgents, parseCpuTime, parseLsofCwd, parseOmpSubagents, taskSummary, parsePs, projectFromKnownPaths, projectFromSession, runsTool, newestEntry, humanAge, toolForAgent, WORKING_WINDOW_MS, type PsRow, type StoreMap, type ToolActivity, type ToolDef } from '../activity.ts';
-import { mkdtempSync, mkdirSync, writeFileSync, utimesSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, appendFileSync, utimesSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { agentStatuses } from '../public/studio-data.js';
@@ -96,6 +96,15 @@ describe('state derivation', () => {
     expect(derive([row(10, 42.4, '/bin/demo run')], { demo: {} }, true).cpuActive).toBe(false);
   });
 
+  test('each session uses only its own CPU delta even when the tool store is fresh', () => {
+    const tool = derive([row(10, 42.4, '/bin/demo'), row(20, 10, '/bin/demo')],
+      { demo: store(now) }, true, new Map([[10, 42], [20, 10]]));
+    expect(tool.sessions).toEqual([
+      expect.objectContaining({ pid: 20, state: 'idle', cpuActive: false }),
+      expect.objectContaining({ pid: 10, state: 'working', cpuActive: true }),
+    ]);
+  });
+
   test('another tool\'s process is not counted', () => {
     const tool = derive([row(11, 1, '/bin/other run')], { demo: store(at(600_000, now)) }, true);
     expect(tool.processes).toBe(0);
@@ -142,8 +151,8 @@ test('collection preserves each live pid and its own cwd, with nullable models u
   try {
     const tool = (await collectToolActivity()).find(tool => tool.id === 'codex')!;
     expect(tool.sessions).toEqual([
-      { pid: 900002, cwd: '/projects/two', model: null, command: commands[1] },
-      { pid: 900001, cwd: '/projects/one', model: null, command: commands[0] },
+      { pid: 900002, cwd: '/projects/two', model: null, command: commands[1], state: 'idle', cpuActive: false },
+      { pid: 900001, cwd: '/projects/one', model: null, command: commands[0], state: 'idle', cpuActive: false },
     ]);
     expect(tool.processes).toBe(2);
     expect(tool.pids).toEqual([900001, 900002]);
@@ -154,32 +163,119 @@ test('collection preserves each live pid and its own cwd, with nullable models u
   } finally { spawn.mockRestore(); }
 });
 
-test('omp children keep session identity and survive old spawn records with recent parent output', async () => {
+test('omp helpers do not become sessions, count as activity, or supply the aggregate cwd', async () => {
+  const ps = ['910001 00:01 /bin/omp',
+    '910002 00:40 /bin/omp __omp_worker_daemon_broker',
+    '910003 00:50 bun /bin/omp __omp_worker_js_eval_process',
+    '910004 00:60 /bin/omp __omp_worker_text_predict'].join('\n');
+  const lookedUp: string[] = [];
+  const spawn = spyOn(Bun, 'spawn').mockImplementation(((args: string[]) => {
+    if (args[0] === 'lsof') lookedUp.push(args[3]);
+    const output = args[0] === 'ps' ? ps : `p${args[3]}\nfcwd\nn/${args[3] === '910001' ? 'project' : 'helper'}\n`;
+    return { stdout: new Response(output).body, exited: Promise.resolve(0), kill() {} };
+  }) as typeof Bun.spawn);
+  try {
+    const tool = (await collectToolActivity()).find(tool => tool.id === 'omp')!;
+    expect(tool.pids).toEqual([910001]);
+    expect(tool.processes).toBe(1);
+    expect(tool.sessions).toHaveLength(1);
+    expect(tool.cwd).toBe('/project');
+    expect(lookedUp).toEqual(['910001']);
+  } finally { spawn.mockRestore(); }
+});
+
+const asyncResult = (id: string, status = 'completed') => JSON.stringify({
+  type: 'custom_message', customType: 'async-result',
+  content: `<system-notice>\n<task-result id="${id}" agent="coder" status="${status}" duration="3.2s">\n<output>done</output>\n</task-result>\n</system-notice>`,
+  display: true, details: { jobs: [{ jobId: id, type: 'task', status, agentId: id }] },
+});
+
+test('omp children use their own transcripts for freshness, expire without evidence, and settle via async results', async () => {
   const home = mkdtempSync(join(tmpdir(), 'studio-omp-'));
   const root = join(home, '.omp/agent/sessions/project');
   mkdirSync(root, { recursive: true });
   const now = Date.parse('2026-11-13T12:00:00Z');
-  const progress = (status: string, msAgo: number) => JSON.stringify({
+  const progress = (msAgo: number) => JSON.stringify({
     timestamp: new Date(now - msAgo).toISOString(),
-    message: { role: 'toolResult', toolName: 'task', details: { progress: [{ id: 'child', agent: 'coder', status, task: 'Build it' }] } },
+    message: { role: 'toolResult', toolName: 'task', details: { progress: [{ id: 'child', agent: 'coder', status: 'pending', task: 'Build it' }] } },
   });
   const writeSession = (id: string, records: string[], msAgo = 1000) => {
     const path = join(root, `file-${id}.jsonl`);
-    writeFileSync(path, [JSON.stringify({ type: 'session', id }), ...records].join('\n'));
+    writeFileSync(path, [JSON.stringify({ type: 'title', title: 'Example' }), JSON.stringify({ type: 'session', id, cwd: `/projects/${id}` }), ...records].join('\n'));
     utimesSync(path, new Date(now - msAgo), new Date(now - msAgo));
   };
   try {
     // The spawn must survive even after more than the former 400 KB tail of parent output.
-    writeSession('parent-a', [progress('pending', 120_000), JSON.stringify({ message: { role: 'assistant', content: 'x'.repeat(410_000) } })]);
-    writeSession('parent-b', [progress('pending', 120_000), progress('running', 1000)]);
-    writeSession('parent-c', [progress('pending', 120_000), progress('completed', 1000)]);
-    writeSession('parent-d', [progress('pending', 90_000)], 70_000);
+    writeSession('parent-a', [progress(120_000), JSON.stringify({ message: { role: 'assistant', content: 'x'.repeat(410_000) } })]);
+    writeSession('parent-b', [progress(1_200_000)], 1_200_000);
+    const childDir = join(root, 'file-parent-b');
+    mkdirSync(childDir);
+    const childFile = join(childDir, 'child.jsonl');
+    writeFileSync(childFile, '{}\n');
+    utimesSync(childFile, new Date(now - 1000), new Date(now - 1000));
+    writeSession('parent-c', [progress(120_000), asyncResult('child')]);
+    writeSession('parent-d', [progress(90_000)], 70_000);
+    writeSession('parent-e', [progress(1_200_000)]); // Parent output must not keep an orphan alive.
     const children = await readOmpSubagents(now, home);
     expect(children.map(child => child.id).sort()).toEqual(['parent-a:child', 'parent-b:child', 'parent-d:child']);
     expect(children.find(child => child.id === 'parent-a:child')).toMatchObject({ stale: true, task: 'Build it' });
-    expect(children.find(child => child.id === 'parent-b:child')).toMatchObject({ stale: false });
+    expect(children.find(child => child.id === 'parent-b:child')).toMatchObject({ stale: false, cwd: '/projects/parent-b' });
     expect(children.find(child => child.id === 'parent-d:child')).toMatchObject({ stale: true });
+    appendFileSync(join(root, 'file-parent-b.jsonl'), '\n' + asyncResult('child'));
+    expect((await readOmpSubagents(now, home)).map(child => child.id)).not.toContain('parent-b:child');
   } finally { rmSync(home, { recursive: true, force: true }); }
+});
+
+test('unchanged omp sessions are not reread; size or mtime changes refresh cached parses', async () => {
+  const home = mkdtempSync(join(tmpdir(), 'studio-omp-cache-'));
+  const root = join(home, '.omp/agent/sessions/project');
+  mkdirSync(root, { recursive: true });
+  const path = join(root, 'parent.jsonl');
+  const now = Date.now();
+  const contents = [JSON.stringify({ type: 'session', id: 'cached', cwd: '/project' }), JSON.stringify({
+    timestamp: new Date(now).toISOString(), message: { role: 'toolResult', toolName: 'task',
+      details: { progress: [{ id: 'A', agent: 'coder', status: 'pending' }] } },
+  })].join('\n');
+  writeFileSync(path, contents);
+  utimesSync(path, new Date(now), new Date(now));
+  const originalFile = Bun.file;
+  let reads = 0;
+  let bytesRead = 0;
+  const file = spyOn(Bun, 'file').mockImplementation(((...args: Parameters<typeof Bun.file>) => {
+    const actual = originalFile(...args);
+    if (String(args[0]) !== path) return actual;
+    reads++;
+    const measured = (blob: Blob) => ({ text: async () => {
+      const text = await blob.text(); bytesRead += Buffer.byteLength(text); return text;
+    } });
+    return { ...measured(actual), slice: (start: number, end?: number) => measured(actual.slice(start, end)) };
+  }) as typeof Bun.file);
+  try {
+    expect(await readOmpSubagents(now, home)).toHaveLength(1);
+    expect(await readOmpSubagents(now + 70_000, home)).toEqual([expect.objectContaining({ stale: true })]);
+    expect(reads).toBe(1);
+    const initialBytes = bytesRead;
+    // Changed size must invalidate even if a writer preserves mtime.
+    appendFileSync(path, '\n' + asyncResult('A'));
+    utimesSync(path, new Date(now), new Date(now));
+    expect(await readOmpSubagents(now, home)).toEqual([]);
+    expect(reads).toBe(2);
+    expect(bytesRead - initialBytes).toBe(Buffer.byteLength('\n' + asyncResult('A')));
+    // Same size, changed mtime must also invalidate (settlement for A -> B).
+    writeFileSync(path, contents + '\n' + asyncResult('B'));
+    utimesSync(path, new Date(now + 1000), new Date(now + 1000));
+    expect(await readOmpSubagents(now + 1000, home)).toHaveLength(1);
+    expect(reads).toBe(3);
+    // A result split across writes must settle on completion, including after a cached read.
+    const result = asyncResult('A');
+    appendFileSync(path, '\n' + result.slice(0, 50));
+    expect(await readOmpSubagents(now + 1000, home)).toHaveLength(1);
+    appendFileSync(path, result.slice(50));
+    expect(await readOmpSubagents(now + 1000, home)).toEqual([]);
+    // A truncated transcript is a new parse, not a continuation of the prior settlement.
+    writeFileSync(path, contents);
+    expect(await readOmpSubagents(now + 1000, home)).toHaveLength(1);
+  } finally { file.mockRestore(); rmSync(home, { recursive: true, force: true }); }
 });
 
 describe('agent to tool join', () => {
@@ -285,10 +381,10 @@ describe('omp subagents', () => {
     expect(child).toHaveLength(1);
     expect(child[0]).toMatchObject({ id: 'TmpCount', agent: 'task', state: 'running', task: '/tmp on this workstation.' });
   });
-  test('settled children are dropped, and the newest record wins', () => {
+  test.each(['completed', 'failed', 'cancelled', 'aborted'])('async-result %s removes the child', status => {
     const text = [
       record([{ id: 'A', agent: 'coder', status: 'pending', task: 'first' }]),
-      record([{ id: 'A', agent: 'coder', status: 'completed', task: 'first' }]),
+      asyncResult('A', status),
       record([{ id: 'B', agent: 'tester', status: 'pending', task: 'second' }]),
     ].join('\n');
     expect(parseOmpSubagents(text).map((c) => c.id)).toEqual(['B']);

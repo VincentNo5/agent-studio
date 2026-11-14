@@ -73,7 +73,8 @@ export interface DispatchAgent {
   model: string | null;
   exitCause: string | null;
 }
-const agentByDispatch = new Map<string, DispatchAgent>();
+interface DispatchAgentCache { info: DispatchAgent; checkedAt: number; retryAfter: number; emptyCount: number }
+const agentByDispatch = new Map<string, DispatchAgentCache>();
 
 /**
  * Parse either `worker-show` shape: `--full` wraps the record in `result.worker`, the
@@ -619,7 +620,8 @@ async function collect(): Promise<StudioState> {
 
   // `worker-list` reports a null projection.agent, so the AI a dispatch launched is only in
   // `worker-show` — successful launch metadata is cached for the life of the server.
-  // Missing metadata is retried on later collects. The floor's dispatches and the newest run's
+  // Failed queries retry next collect; valid empty answers back off from 30 seconds to 5 minutes.
+  // The floor's dispatches and the newest run's
   // are filled first; misses are capped per collect, so a fresh run of 22 fills in over a few
   // polls instead of stalling one.
   const targets: WorkerView[] = [];
@@ -635,8 +637,9 @@ async function collect(): Promise<StudioState> {
   await Promise.all(targets.map(async (worker) => {
     const id = worker.dispatchId as string;
     const cached = agentByDispatch.get(id);
-    if (cached) {
-      applyDispatchAgent(worker, cached);
+    const now = Date.now();
+    if (cached && (cached.retryAfter === Infinity || (now >= cached.checkedAt && now < cached.retryAfter))) {
+      applyDispatchAgent(worker, cached.info);
       return;
     }
     if (misses++ >= AGENT_LOOKUP_LIMIT) return;
@@ -644,7 +647,16 @@ async function collect(): Promise<StudioState> {
     // launched agent is recorded. Without it every worker reads as agent-less.
     const raw = await run(["orca", "orchestration", "worker-show", "--dispatch", id, "--json", "--full"]);
     const info = readDispatchAgent(raw);
-    if (info.agent !== null || info.model !== null) agentByDispatch.set(id, info);
+    if (info.agent !== null || info.model !== null) {
+      agentByDispatch.set(id, { info, checkedAt: now, retryAfter: Infinity, emptyCount: 0 });
+    } else {
+      const response = readJson(raw) as { ok?: boolean; result?: unknown } | null;
+      if (response?.ok === true && response.result && typeof response.result === "object" && !Array.isArray(response.result)) {
+        const emptyCount = (cached?.emptyCount ?? 0) + 1;
+        const delay = Math.min(300_000, 30_000 * 2 ** Math.min(emptyCount - 1, 4));
+        agentByDispatch.set(id, { info, checkedAt: now, retryAfter: now + delay, emptyCount });
+      }
+    }
     applyDispatchAgent(worker, info);
   }));
   if (agentByDispatch.size > 2000) {

@@ -48,9 +48,9 @@ export interface WorkerLite {
 const SUBAGENT_LIVE_MS = 60_000;
 const SUBAGENT_SESSION_WINDOW_MS = 10 * 60_000;
 
-export interface OmpSubagent { id: string; agent: string; state: string; task: string | null; stale?: boolean }
+export interface OmpSubagent { id: string; agent: string; state: string; task: string | null; stale?: boolean; cwd?: string | null }
 
-export interface ToolSession { pid: number; cwd: string | null; model: string | null; command: string }
+export interface ToolSession { pid: number; cwd: string | null; model: string | null; command: string; state: "working" | "idle"; cpuActive: boolean }
 
 export interface ToolActivity {
   /** Stable slug, unique across the table. */
@@ -240,40 +240,79 @@ export function taskSummary(task: string): string | null {
   return ordered.find((line) => !line.startsWith("#")) ?? null;
 }
 
-/**
- * omp records each `task` call's children in the tool result (`details.progress[]`) with the
- * agent name and status. The newest record per child wins; settled children are dropped.
- */
-export function parseOmpSubagents(text: string): Array<OmpSubagent & { at: number }> {
-  const latest = new Map<string, OmpSubagent & { at: number }>();
-  for (const line of text.split("\n")) {
-    if (!line.includes('"toolName":"task"') || !line.includes('"progress"')) continue;
-    let record: unknown;
-    try { record = JSON.parse(line); } catch { continue; }
-    const at = Date.parse(String((record as { timestamp?: string })?.timestamp ?? "")) || 0;
-    const message = (record as { message?: { role?: string; details?: { progress?: unknown[] } } })?.message;
-    if (message?.role !== "toolResult") continue;
-    const progress = message.details?.progress;
-    if (!Array.isArray(progress)) continue;
-    for (const item of progress) {
-      const entry = item as { id?: string; agent?: string; status?: string; task?: string };
-      if (!entry.id || !entry.agent) continue;
-      // `pending` is the spawn record: the child is already running, its result has not landed.
+const SETTLED_CHILD = new Set(["completed", "complete", "succeeded", "failed", "cancelled", "aborted", "error"]);
+type OmpChildRecord = OmpSubagent & { at: number };
+interface OmpParse {
+  sessionId: string | null;
+  cwd: string | null;
+  children: Map<string, OmpChildRecord>;
+}
+const emptyOmpParse = (): OmpParse => ({ sessionId: null, cwd: null, children: new Map() });
+
+/** Returns consumed bytes; an incomplete final JSON record is retried on the next append. */
+function consumeOmpRecords(text: string, parsed: OmpParse): number {
+  const lines = text.split("\n");
+  let consumed = Buffer.byteLength(text);
+  for (let index = 0; index < lines.length; index++) {
+    const line = lines[index];
+    if (!line.trim()) continue;
+    let record;
+    try { record = JSON.parse(line); } catch {
+      if (index === lines.length - 1) consumed -= Buffer.byteLength(line);
+      continue;
+    }
+    if (!record || typeof record !== "object") continue;
+    if (record.type === "session") {
+      if (typeof record.id === "string" && record.id) parsed.sessionId = record.id;
+      if (typeof record.cwd === "string" && record.cwd) parsed.cwd = record.cwd;
+    }
+    if (record.type === "custom_message" && record.customType === "async-result") {
+      const content = typeof record.content === "string" ? record.content :
+        Array.isArray(record.content) ? record.content.map((part: { text?: string }) => part?.text ?? "").join("\n") : "";
+      for (const match of content.matchAll(/<task-result\b([^>]*)>/g)) {
+        const attrs = new Map([...match[1].matchAll(/([\w-]+)\s*=\s*["']([^"']*)["']/g)].map(m => [m[1], m[2]]));
+        if (SETTLED_CHILD.has(attrs.get("status") ?? "")) parsed.children.delete(attrs.get("id") ?? "");
+      }
+    }
+    const message = record.message;
+    if (message?.role !== "toolResult" || message.toolName !== "task" || !Array.isArray(message.details?.progress)) continue;
+    const at = Date.parse(String(record.timestamp ?? "")) || 0;
+    for (const entry of message.details.progress) {
+      if (typeof entry?.id !== "string" || typeof entry.agent !== "string") continue;
       const state = entry.status === "pending" ? "running" : entry.status ?? "running";
-      latest.set(entry.id, {
-        id: entry.id,
-        agent: entry.agent,
-        state,
-        task: taskSummary(entry.task ?? ""),
-        at,
-      });
+      if (SETTLED_CHILD.has(state)) { parsed.children.delete(entry.id); continue; }
+      parsed.children.set(entry.id, { id: entry.id, agent: entry.agent, state,
+        task: taskSummary(typeof entry.task === "string" ? entry.task : ""), at });
     }
   }
-  const settled = new Set(["completed", "complete", "succeeded", "failed", "cancelled", "aborted", "error"]);
-  return [...latest.values()].filter((child) => !settled.has(child.state));
+  return consumed;
 }
 
-/** Children from the eight newest sessions touched in the last ten minutes. */
+/** Real omp lifecycle: pending task spawn, then custom_message async-result settlement. */
+export function parseOmpSubagents(text: string): OmpChildRecord[] {
+  const parsed = emptyOmpParse();
+  consumeOmpRecords(text, parsed);
+  return [...parsed.children.values()];
+}
+
+interface OmpCache { mtime: number; size: number; ino: number; offset: number; parsed: OmpParse }
+const ompParses = new Map<string, OmpCache>();
+
+async function readOmpSession(path: string): Promise<OmpParse> {
+  const stat = statSync(path);
+  const cached = ompParses.get(path);
+  if (cached && cached.ino === stat.ino && cached.mtime === stat.mtimeMs && cached.size === stat.size) return cached.parsed;
+  // Rewrites/truncations reset the parse; ordinary appends preserve early spawn records.
+  const append = cached && cached.ino === stat.ino && stat.size > cached.size;
+  const offset = append ? cached.offset : 0;
+  const parsed = append ? cached.parsed : emptyOmpParse();
+  const text = await Bun.file(path).slice(offset, stat.size).text();
+  const consumed = consumeOmpRecords(text, parsed);
+  ompParses.set(path, { mtime: stat.mtimeMs, size: stat.size, ino: stat.ino, offset: offset + consumed, parsed });
+  return parsed;
+}
+
+/** Children from eight sessions with parent or child evidence in the last ten minutes. */
 export async function readOmpSubagents(now = Date.now(), home = HOME): Promise<OmpSubagent[]> {
   const roots = join(home, ".omp/agent/sessions");
   const files: { path: string; mtime: number }[] = [];
@@ -286,25 +325,37 @@ export async function readOmpSubagents(now = Date.now(), home = HOME): Promise<O
       if (!entry.isFile() || !entry.name.endsWith(".jsonl")) continue;
       const path = join(roots, dir.name, entry.name);
       try {
-        const mtime = statSync(path).mtimeMs;
+        let mtime = statSync(path).mtimeMs;
+        // A long-running child can still write while its parent transcript is quiet.
+        const childDir = path.slice(0, -".jsonl".length);
+        try {
+          for (const child of readdirSync(childDir)) {
+            if (!child.endsWith(".jsonl")) continue;
+            try { mtime = Math.max(mtime, statSync(join(childDir, child)).mtimeMs); } catch { /* raced */ }
+          }
+        } catch { /* no child transcripts */ }
         if (now - mtime <= SUBAGENT_SESSION_WINDOW_MS) files.push({ path, mtime });
       } catch { /* raced with a writer */ }
     }
   }
   // Child ids are local to a parent session, so qualify before merging.
   const merged = new Map<string, OmpSubagent>();
-  for (const file of files.sort((a, b) => a.mtime - b.mtime).slice(-8)) {
+  const selected = files.sort((a, b) => a.mtime - b.mtime).slice(-8);
+  const selectedPaths = new Set(selected.map(file => file.path));
+  for (const path of ompParses.keys()) if (!selectedPaths.has(path)) ompParses.delete(path);
+  for (const file of selected) {
     try {
-      const text = await Bun.file(file.path).text();
-      let sessionId = file.path.slice(roots.length + 1);
-      try {
-        const header = JSON.parse(text.split("\n", 1)[0]);
-        if (header.type === "session" && typeof header.id === "string" && header.id) sessionId = header.id;
-      } catch { /* A missing header still has a stable, project-qualified file identity. */ }
-      // Keep early spawn records even when later parent output exceeds the former tail limit.
-      for (const { at, ...child } of parseOmpSubagents(text)) {
+      const parsed = await readOmpSession(file.path);
+      const sessionId = parsed.sessionId ?? file.path.slice(roots.length + 1);
+      for (const { at, ...child } of parsed.children.values()) {
+        let lastEvidence = at;
+        // Child ids name files, never arbitrary paths from session content.
+        if (basename(child.id) === child.id && child.id !== "." && child.id !== "..") {
+          try { lastEvidence = statSync(join(file.path.slice(0, -6), `${child.id}.jsonl`)).mtimeMs; } catch { /* spawn evidence only */ }
+        }
+        if (!lastEvidence || now - lastEvidence > SUBAGENT_SESSION_WINDOW_MS) continue;
         const id = `${sessionId}:${child.id}`;
-        merged.set(id, { ...child, id, stale: now - at > SUBAGENT_LIVE_MS });
+        merged.set(id, { ...child, id, cwd: parsed.cwd, stale: now - lastEvidence > SUBAGENT_LIVE_MS });
       }
     } catch { /* unreadable session: skip it */ }
   }
@@ -348,11 +399,13 @@ export function interpretTools(
   now = Date.now(),
 ): ToolActivity[] {
   return defs.map((def) => {
-    const mine = procs.filter((row) => runsTool(row.command, def.bins));
-    const cpuActive = mine.some((row) => {
+    const mine = procs.filter((row) => runsTool(row.command, def.bins)
+      && !(def.id === "omp" && /(?:^|\s)__omp_worker_\S*/.test(row.command)));
+    const active = (row: PsRow) => {
       const before = prevCpu.get(row.pid);
       return before !== undefined && row.cpu - before >= 0.15;
-    });
+    };
+    const cpuActive = mine.some(active);
 
     const stamps = Object.values(stores[def.id] ?? {}).filter((stamp): stamp is StoreStamp => stamp !== null);
     const newest = stamps.sort((a, b) => b.mtime - a.mtime)[0] ?? null;
@@ -369,7 +422,7 @@ export function interpretTools(
       evidence = `${newest!.path.startsWith(HOME) ? newest!.path.slice(HOME.length + 1) : newest!.path} · ${humanAge(now - newest!.mtime)} ago`;
     } else if (cpuActive) {
       state = "working";
-      evidence = `pid ${mine.find((row) => (prevCpu.get(row.pid) ?? row.cpu) < row.cpu - 0.15)!.pid} · cpu advancing`;
+      evidence = `pid ${mine.find(active)!.pid} · cpu advancing`;
     } else if (mine.length > 0) {
       state = "idle";
       evidence = `${mine.length} process${mine.length === 1 ? "" : "es"} · no output for ${newest ? humanAge(now - newest.mtime) : "the session"}`;
@@ -387,7 +440,8 @@ export function interpretTools(
       processes: mine.length,
       pids: mine.map((row) => row.pid),
       sessions: [...mine].sort((a, b) => b.pid - a.pid)
-        .map(({ pid, command }) => ({ pid, command, cwd: null, model: null })),
+        .map(row => ({ pid: row.pid, command: row.command, cwd: null, model: null,
+          cpuActive: active(row), state: active(row) ? "working" as const : "idle" as const })),
       cwd: null,
       model: null,
       cpuActive,
