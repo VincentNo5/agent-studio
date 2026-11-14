@@ -304,6 +304,8 @@ const ROLE_SHORT = {
     'ue-blueprint-specialist': 'UE BLUEPRINT', 'ue-gas-specialist': 'UE GAS',
     'ue-replication-specialist': 'UE REPL', 'ue-umg-specialist': 'UE UMG'
 };
+/** Visitor role word: an omp child names its agent and parent tool, a direct session its tool. */
+const visitorRole = w => { const id = String(w?.dispatchId || ''); const name = w?.agent || w?.toolName || 'dispatch'; return id.startsWith('omp-child:') && w.toolName ? `${name} · ${w.toolName}` : id.startsWith('tool:') ? `${name} session` : name; };
 const MONO = '"SF Mono", ui-monospace, Menlo, Consolas, monospace', SANS = '"Avenir Next", "Segoe UI", "Helvetica Neue", sans-serif';
 
 export class Headquarters {
@@ -1793,10 +1795,12 @@ export class Headquarters {
             home: new THREE.Vector3(spot.x, 0, spot.z), target: new THREE.Vector3(spot.x, 0, spot.z), path: [], pathIndex: 0, spot, mode: spot.seated ? 'desk' : 'waiting',
             heading: spot.heading, goalHeading: spot.heading, walkDir: spot.heading, sit: spot.seated ? 1 : 0, lookYaw: spot.look || 0, badgeY: spot.seated ? 1.58 : 2.02, deskIndex: null,
         };
-        if (!visitor && pickable && this.tagLayer) {
-            const tag = document.createElement('div');
-            tag.className = 'role-tag';
-            tag.textContent = ROLE_SHORT[id] || id.replace(/-/g, ' ');
+        // Visitors arrive after construction, so take the layer's own document rather than the global.
+        const doc = this.tagLayer?.ownerDocument || globalThis.document;
+        if (pickable && this.tagLayer && doc) {
+            const tag = doc.createElement('div');
+            tag.className = visitor ? 'role-tag visitor-tag' : 'role-tag';
+            tag.textContent = visitor ? visitorRole(data) : ROLE_SHORT[id] || id.replace(/-/g, ' ');
             tag.style.setProperty('--tag', `#${top.toString(16).padStart(6, '0')}`);
             this.tagLayer.append(tag);
             actor.roleTag = tag;
@@ -2757,15 +2761,17 @@ export class Headquarters {
             const word = STATUS_WORD[status];
             // A role name stays quiet until you look at it; the status pill is what the floor is for.
             const task = String(this.statuses?.get(id)?.task || '').trim().replace(/\s+/g, ' ');
-            const label = word ? (word === 'WORKING' && task ? `${word} · ${task.slice(0, 24)}${task.length > 24 ? '…' : ''}` : word) : (ROLE_SHORT[id] || id.replace(/-/g, ' '));
+            // A visitor has no desk name to fall back on: it always says who it is and what state it is in.
+            const label = a.visitor ? `${a.data?.stale ? 'STALE' : word || 'IDLE'} · ${visitorRole(a.data)}`
+                : word ? (word === 'WORKING' && task ? `${word} · ${task.slice(0, 24)}${task.length > 24 ? '…' : ''}` : word) : (ROLE_SHORT[id] || id.replace(/-/g, ' '));
             if (tag.dataset.status !== status) {
                 tag.dataset.status = status;
-                tag.dataset.word = word ? '1' : '0';
+                tag.dataset.word = word || a.visitor ? '1' : '0';
             }
             if (tag.textContent !== label)
                 tag.textContent = label;
             const near = a.group.position.distanceTo(eye) < 70;
-            const show = on && near && (word || focus);
+            const show = on && near && (word || focus || a.visitor);
             tag.style.display = show ? 'block' : 'none';
             if (!show)
                 continue;

@@ -168,3 +168,38 @@ export const floorForRoom = room => ['directors', 'leads', 'engineering', 'desig
 export const ROOM_COLORS = { directors: 0xf6c884, leads: 0xc7b6ff, engineering: 0x42cafa, design: 0x7aa3ff, art: 0xcc8aff, audio: 0xfaaf6e, narrative: 0x81c8ff, qa: 0x56e6c1, engines: 0x8199ff, community: 0xf3bf75, lobby: 0x42dcff };
 export const hash = str => { let h = 2166136261; for (const c of str)
     h = Math.imul(h ^ c.charCodeAt(0), 16777619); return h >>> 0; };
+// Live work rows: a synthetic id marks a direct tool session (`tool:`) or an omp task child.
+export const workKind = w => { const id = String(w?.dispatchId || ''); return id.startsWith('omp-child:') ? 'omp-child' : id.startsWith('tool:') ? 'tool' : 'dispatch'; };
+/** A dispatch or omp child opens its own detail; a direct session opens the tool it runs in. */
+export const workSelection = w => workKind(w) === 'tool' ? `tool:${w.toolId}` : `worker:${w.dispatchId}`;
+/**
+ * The three lines of a working-now card. Unknown parts read `—`; nothing is guessed.
+ * `remainingTasks` is only a count when the task list was reported (`tasksKnown`): an empty
+ * list without one means unknown, not zero.
+ */
+export function workLines(w, tasksKnown = false) {
+    const dash = v => v == null || v === '' ? '—' : String(v);
+    const task = w.taskTitle || w.label || w.dispatchId || 'Unnamed work';
+    const titles = Array.isArray(w.remainingTasks) && (tasksKnown || w.remainingTasks.length) ? w.remainingTasks : null;
+    const n = titles ? titles.length : typeof w.remaining === 'number' ? w.remaining : null;
+    return { task, who: [w.agent, w.provider, w.model].map(dash).join(' · '), left: n == null ? '—' : `remaining: ${n} · next: ${titles?.[0] || '—'}` };
+}
+/** Working rows only, newest first by when this browser first saw them; source order breaks ties. */
+export function workingNow(workers, firstSeen = new Map()) {
+    return (workers || []).map((w, i) => ({ w, i, at: firstSeen.get(w.dispatchId) ?? 0 }))
+        .filter(({ w }) => workerStatus(w).status === 'working')
+        .sort((a, b) => b.at - a.at || a.i - b.i).map(({ w }) => w);
+}
+/** The floor's workers: live ones, else the latest recorded run's. */
+export const floorWorkers = state => state?.workers?.length ? state.workers : state?.runs?.[0]?.workers || [];
+/**
+ * Every working item (Orca dispatch, direct tool session, omp child), newest first. The header
+ * metric, the Working now strip and the Agent status group all count this one list.
+ */
+export const workingItems = (state, firstSeen) => workingNow(floorWorkers(state), firstSeen);
+const plural = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
+/** Header metric: the item count, then how many tools and roster roles those items span. */
+export function workingSummary(items, rolesWorking = 0) {
+    const tools = new Set(items.filter(w => workKind(w) !== 'dispatch').map(w => w.toolId || w.dispatchId)).size;
+    return { count: items.length, sub: `${plural(items.length, 'item')} · ${plural(tools, 'tool')} · ${plural(rolesWorking, 'role')}` };
+}

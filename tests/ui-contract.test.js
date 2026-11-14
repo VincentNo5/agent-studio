@@ -23,6 +23,15 @@ test('desktop controller exposes demo, phase, market and mobile drawer contracts
   expect(studio).toContain("startsWith('omp-child:')");
   expect(studio).toContain('__studio');
   expect(css).toContain('.tool-row[data-state=working]');
+  expect(studio).toContain('working-now');
+  expect(studio).toContain('data-work-id');
+  expect(studio).toContain('workLines(');
+  expect(studio).toContain('remainingTasks');
+  expect(studio).toContain('provider');
+  expect(studio).toContain('omp-child-detail');
+  expect(css).toContain('.working-now');
+  expect(css).toContain('.work-card');
+  expect(css).toContain('.work-meta');
   expect(studio).toContain('3D assets are missing. Run `bun install` in the repository root, then reload.');
   expect(css).toContain('@media(max-width:820px)');
   expect(css).toContain('.right-column[data-open=true]');

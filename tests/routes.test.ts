@@ -1,6 +1,9 @@
 import { beforeAll, test, expect, spyOn } from 'bun:test';
 import { isWorking } from '../public/studio-data.js';
 import * as activity from '../activity.ts';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 let handler: (request: Request, server: unknown) => Promise<Response>;
 let createMarketService: typeof import('../server.ts').createMarketService;
 let readDispatchAgent: typeof import('../server.ts').readDispatchAgent;
@@ -51,7 +54,19 @@ test('read-only routes reject methods and oversized request bodies before dispat
 });
 
 test('activity route answers the normalized tool rows', async () => {
-  const res = await request('/activity');
+  // Hermetic: empty temp HOME for store/omp scans, no CLI or HTTP side effects.
+  const home = mkdtempSync(join(tmpdir(), 'studio-activity-'));
+  const real = activity.collectToolActivity;
+  const collect = spyOn(activity, 'collectToolActivity').mockImplementation((now?: number) => real(now, home));
+  const fetchSpy = spyOn(globalThis, 'fetch').mockResolvedValue(Response.json({}));
+  const spawn = spyOn(Bun, 'spawn').mockImplementation((() => ({ stdout: new Response('').body, exited: Promise.resolve(0), kill() {} })) as unknown as typeof Bun.spawn);
+  let res: Response;
+  let calls = 0;
+  const started = performance.now();
+  try { res = await request('/activity'); calls = collect.mock.calls.length; }
+  finally { spawn.mockRestore(); fetchSpy.mockRestore(); collect.mockRestore(); rmSync(home, { recursive: true, force: true }); }
+  expect(performance.now() - started).toBeLessThan(1000);
+  expect(calls).toBe(1);
   expect(res.status).toBe(200);
   const body = await res.json() as { ts: number; tools: { id: string; name: string; state: string; installed: boolean; agents: unknown[] }[] };
   expect(Number.isFinite(body.ts)).toBe(true);

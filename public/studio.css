@@ -1185,6 +1185,80 @@ b,time,output,.metric b,.count {
   text-overflow:ellipsis;
   white-space:nowrap
 }
+/* Working now: one card per live item, above the rest of Live work. */
+.working-now {
+  display:grid;
+  gap:4px
+}
+.working-now h3 {
+  display:flex;
+  justify-content:space-between;
+  font-size:9.5px;
+  font-weight:500;
+  letter-spacing:1.1px;
+  text-transform:uppercase;
+  color:#8fe9ff;
+  margin:2px 2px 0
+}
+.work-card {
+  --s:var(--muted);
+  display:flex;
+  flex-direction:column;
+  gap:1px;
+  min-width:0;
+  text-align:left;
+  width:100%;
+  border:1px solid var(--hair);
+  border-left:3px solid var(--s);
+  border-radius:6px;
+  background:linear-gradient(90deg,color-mix(in srgb,var(--s) 12%,transparent),transparent 75%);
+  box-shadow:inset 3px 0 12px -6px var(--s);
+  padding:6px 8px
+}
+.work-card.selected {
+  border-color:var(--s)
+}
+.work-head {
+  display:flex;
+  gap:6px;
+  align-items:baseline;
+  min-width:0
+}
+.work-task {
+  flex:1;
+  min-width:0;
+  font-size:11px;
+  color:#e7f4fc;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap
+}
+.work-kind {
+  flex:none;
+  font-size:8.5px;
+  font-style:normal;
+  letter-spacing:.6px;
+  text-transform:uppercase;
+  color:var(--s)
+}
+.work-card[data-kind=omp-child] .work-kind,.work-card[data-kind=tool] .work-kind {
+  color:#9fb6c6
+}
+.work-meta {
+  font-size:9.5px;
+  color:#9fb6c6;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap
+}
+.work-left {
+  color:#7c9bb1
+}
+.work-divider {
+  border:0;
+  border-top:1px solid var(--hair);
+  margin:4px 2px
+}
 .live-tail {
   margin:0 12px 12px;
   font:9.5px/1.65 var(--mono);

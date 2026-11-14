@@ -1,5 +1,5 @@
 import { toolIcon } from './tool-icons.js';
-import { agentStatuses, workerStatus, countStatuses, STATUS_META, STATUS_ORDER, COMPLETED_WINDOW_MS, isWorking, matchesRole, taskBoard, getJSON, outputBlocks, ROOM_COLORS, hash } from './studio-data.js';
+import { agentStatuses, workerStatus, countStatuses, STATUS_META, STATUS_ORDER, COMPLETED_WINDOW_MS, isWorking, matchesRole, taskBoard, getJSON, outputBlocks, ROOM_COLORS, hash, workKind, workSelection, workLines, workingItems, workingSummary, floorWorkers } from './studio-data.js';
 import { createDemoFeed, DEMO_START } from './demo-state.js';
 const $ = id => document.getElementById(id);
 const el = (tag, cls, text) => { const n = document.createElement(tag); if (cls)
@@ -121,6 +121,8 @@ document.body.append(dialog);
 // `?debug` exposes the scene for inspector use (no effect without the flag).
 if (urlParams.has('debug'))
     Object.defineProperty(window, '__studio', { get: () => ({ world, state, statuses }) });
+// First time this browser saw each work id: the strip's newest-first order (no reported start time exists).
+const firstSeen = new Map();
 let world = null, state = null, roster = { rooms: [], agents: [] }, rosterLoaded = false, selected = null, statuses = new Map(), board = null, pickedWorker = null, follow = true, currentPanel = null, selectedLane = null;
 let demoFeed = null, market = null;
 let pollTimer = null, outputTimer = null, clockTimer = null, marketTimer = null, loading = false, closed = false, logId = null, logGeneration = 0, outputBusy = false, outputCache = null, previous = null, transitions = [];
@@ -262,6 +264,10 @@ function renderDetail() {
         box.append(dispatches);
         return;
     }
+    if (selected.startsWith('worker:omp-child:')) {
+        renderChildDetail(box, findWorker(selected.slice(7)));
+        return;
+    }
     const role = roster.agents.find(a => a.name === selected), entry = state ? statusOf(selected) : null;
     const worker = selected.startsWith('worker:') ? findWorker(selected.slice(7)) : entry?.worker || ((state?.workers || []).find(w => isWorking(w) && role && matchesRole(w, role)) || (state?.workers || []).find(w => role && matchesRole(w, role)));
     if (!role && !worker) {
@@ -302,7 +308,7 @@ function renderDetail() {
     const details = el('section', 'detail-section'), dl = el('dl', 'fields');
     const events = (state?.audit?.events || []).filter(e => role ? e.agent === role.name : e.agent === worker?.agent);
     const lastInvoke = events.filter(e => e.kind === 'invoked').at(-1);
-    const fields = [['Stage', worker?.workerState], ['Dispatch', worker?.dispatchStatus], ['Model', worker?.model || role?.model], ['Agent', worker?.agent], ['Liveness', worker?.liveness], ['Reason', worker?.livenessReason], ['Next action', worker?.nextAction], ['Terminal', worker?.terminalState], ['Host', worker?.host], ['Last invoked', lastInvoke ? date(lastInvoke.ts) : null]];
+    const fields = [['Stage', worker?.workerState], ['Dispatch', worker?.dispatchStatus], ['Model', worker?.model || role?.model], ['Provider', worker?.provider], ['Agent', worker?.agent], ['Remaining tasks', worker?.remainingTasks?.length ? worker.remainingTasks.join(' · ') : null], ['Liveness', worker?.liveness], ['Reason', worker?.livenessReason], ['Next action', worker?.nextAction], ['Terminal', worker?.terminalState], ['Host', worker?.host], ['Last invoked', lastInvoke ? date(lastInvoke.ts) : null]];
     for (const [key, value] of fields)
         if (value) {
             dl.append(el('dt', null, key), el('dd', null, value === 'inherit' ? 'Inherited (roster)' : value));
@@ -328,8 +334,48 @@ function renderDetail() {
     else
         box.append(el('p', 'department', 'No dispatch is associated with this role.'));
 }
+/** An omp task child is its own agent: its task, state and parent tool, never the tool's detail. */
+function renderChildDetail(box, w) {
+    if (!w) {
+        box.append(el('p', 'empty', 'This omp child is no longer reported. It may have settled.'));
+        return;
+    }
+    const status = workerStatus(w).status;
+    box.append(chip(status, meta(status).label, 'status-pill'));
+    const head = el('div', 'detail-head');
+    const avatar = el('div', 'detail-avatar');
+    avatar.innerHTML = portrait(w.agent || 'omp-child', 'lobby', true);
+    avatar.style.setProperty('--s', meta(status).color);
+    avatar.dataset.status = status;
+    const who = el('div');
+    who.append(el('h3', 'agent-name', w.agent || 'omp child'), el('div', 'department', `omp task child · ${w.toolName || '—'}`));
+    head.append(avatar, who);
+    box.append(head);
+    const section = el('section', 'detail-section omp-child-detail');
+    section.append(el('h3', null, 'Current task'), el('p', null, w.taskTitle || 'The child reported no task.'));
+    box.append(section);
+    const facts = el('dl', 'fields'), lines = workLines(w);
+    for (const [key, value] of [
+        ['Agent', w.agent], ['State', w.childState], ['Parent tool', w.toolName], ['Stale', w.stale ? 'yes · no recent evidence' : 'no'],
+        ['Provider', w.provider], ['Model', w.model], ['Remaining', lines.left], ['Project', w.cwd], ['Child', w.dispatchId.slice('omp-child:'.length)],
+    ])
+        facts.append(el('dt', null, key), el('dd', null, value || '—'));
+    const details = el('section', 'detail-section');
+    details.append(el('h3', null, 'Reported fields'), facts);
+    box.append(details);
+    if (w.toolId)
+        box.append(button(`Open parent tool · ${w.toolName || w.toolId} ↗`, () => selectAgent(`tool:${w.toolId}`), 'wide'));
+    box.append(el('p', 'department', 'Child output stays in its omp session; no log stream is available here.'));
+}
 function findWorker(id) { return state?.workers?.find(w => w.dispatchId === id) || state?.runs?.flatMap(r => r.workers || []).find(w => w.dispatchId === id); }
-function selectAgent(id, focus = true) { selected = id; world?.select(id, focus); if (id.startsWith('worker:')) {
+function selectAgent(id, focus = true) { world?.select(id, focus);
+// A direct session visitor on the floor opens its tool; synthetic rows have no Orca log to fetch.
+if (id.startsWith('worker:tool:')) {
+    const w = findWorker(id.slice(7));
+    if (w?.toolId)
+        id = `tool:${w.toolId}`;
+}
+selected = id; if (id.startsWith('worker:') && workKind({ dispatchId: id.slice(7) }) === 'dispatch') {
     pickedWorker = id.slice(7);
     follow = false;
     outputCache = null;
@@ -407,7 +453,7 @@ function renderEvents() {
     }
     box.scrollTop = box.scrollHeight;
 }
-function workerSource() { return state?.workers?.length ? state.workers : state?.runs?.[0]?.workers || []; }
+function workerSource() { return floorWorkers(state); }
 /**
  * Live tool work as worker rows, so the floor's actors, Agent status and Live work all see it.
  * omp task children carry their own agent name; a direct session is one generic worker.
@@ -432,7 +478,7 @@ function withToolWorkers(next) {
                 taskTitle: child.task ?? null,
                 workerState: child.stale ? 'idle' : child.state === 'pending' ? 'pending' : 'running',
                 dispatchStatus: child.stale ? 'idle' : child.state, liveness: child.stale ? 'unknown' : 'live',
-                stale: child.stale === true, toolId: tool.id, toolName: tool.name, cwd: child.cwd ?? null,
+                stale: child.stale === true, childState: child.state ?? null, toolId: tool.id, toolName: tool.name, cwd: child.cwd ?? null,
                 model: child.model ?? null, provider: child.model ? child.provider ?? null : null,
                 remaining: child.remaining ?? null,
             });
@@ -480,11 +526,25 @@ function renderWorkers() {
     box.replaceChildren();
     if (!source.length)
         box.append(el('p', 'empty', 'No workers reported.'));
+    // Working items lead as cards; everything else follows below a divider.
+    const working = workingItems(state, firstSeen), tasksKnown = (state.orcaTasks || []).length > 0;
+    if (working.length) {
+        const strip = el('section', 'working-now');
+        const h = el('h3');
+        h.append('Working now', el('span', 'count', String(working.length)));
+        strip.append(h);
+        for (const w of working)
+            strip.append(workCard(w, tasksKnown));
+        box.append(strip);
+        if (source.length > working.length)
+            box.append(el('hr', 'work-divider'));
+    }
     for (const w of source) {
-        const synthetic = String(w.dispatchId || '');
-        const toolOnly = synthetic.startsWith('tool:');
+        if (working.includes(w))
+            continue;
+        const toolOnly = workKind(w) === 'tool';
         const s = w.dispatchId ? statuses.get(`worker:${w.dispatchId}`) || workerStatus(w) : { status: w.workerState === 'working' ? 'working' : 'pending' };
-        const id = toolOnly || synthetic.startsWith('omp-child:') ? `tool:${w.toolId}` : `worker:${w.dispatchId}`;
+        const id = workSelection(w);
         const b = button('', () => selectAgent(id), 'worker-row');
         b.dataset.status = s.status;
         b.style.setProperty('--s', meta(s.status).color);
@@ -501,6 +561,21 @@ function renderWorkers() {
         box.append(b);
     }
     $('live-tail').hidden = !isFloor || !pickedWorker;
+}
+const WORK_KIND = { dispatch: 'Orca dispatch', tool: 'direct session', 'omp-child': 'omp child' };
+/** One working item: task; agent · provider · model; remaining work. */
+function workCard(w, tasksKnown) {
+    const id = workSelection(w), kind = workKind(w), lines = workLines(w, tasksKnown);
+    const card = button('', () => selectAgent(id), 'work-card');
+    card.setAttribute('data-work-id', w.dispatchId);
+    card.dataset.kind = kind;
+    card.style.setProperty('--s', meta('working').color);
+    card.classList.toggle('selected', selected === id);
+    card.title = [WORK_KIND[kind], w.toolName, w.cwd, w.dispatchId].filter(Boolean).join(' · ');
+    const top = el('span', 'work-head');
+    top.append(el('span', 'work-task', lines.task), el('em', 'work-kind', w.stale ? `${WORK_KIND[kind]} · stale` : WORK_KIND[kind]));
+    card.append(top, el('small', 'work-meta', lines.who), el('small', 'work-meta work-left', lines.left));
+    return card;
 }
 function diffActivity(next) {
     if (previous) {
@@ -550,19 +625,35 @@ function statusRow(id, entry) {
     b.append(text, el('time', null, entry.since ? clock(entry.since) : ''));
     return b;
 }
+/** A working item in Agent status: opens what its strip card opens. */
+function workStatusRow(id, entry) {
+    const w = entry.worker, kind = workKind(w), b = statusRow(id, entry);
+    b.dataset.workId = w.dispatchId;
+    b.dataset.kind = kind;
+    const lines = workLines(w, (state?.orcaTasks || []).length > 0);
+    b.querySelector('.status-name').textContent = lines.task;
+    b.querySelector('.status-text small').textContent = [WORK_KIND[kind], w.toolName, lines.who].filter(Boolean).join(' · ');
+    return b;
+}
 function renderStatusPanel(counts) {
     for (const s of ['working', 'completed', 'idle'])
         $(`count-${s}`).textContent = String(counts[s]);
     $('status-total').textContent = `${counts.total} roles`;
     const box = $('status-groups');
     box.replaceChildren();
-    const workingTools = (state?.tools || []).filter(t => t.state === 'working');
+    // Same items as the Live work strip, grouped by tool, so the two counts cannot drift.
+    const items = workingItems(state, firstSeen), toolWork = items.filter(w => workKind(w) !== 'dispatch');
+    const perTool = new Map();
+    for (const w of toolWork)
+        perTool.set(w.toolId, (perTool.get(w.toolId) || 0) + 1);
+    const workingTools = (state?.tools || []).filter(t => perTool.has(t.id));
     if (workingTools.length) {
         const group = el('section', 'status-group');
         group.style.setProperty('--s', meta('working').color);
         const head = el('h3');
         head.innerHTML = icon('working');
-        head.append('Tools working', el('span', 'count', String(workingTools.length)));
+        // A per-tool count, labelled as such: the item count lives on the Working now group.
+        head.append('Tools working', el('span', 'count', `${workingTools.length} tool${workingTools.length === 1 ? '' : 's'}`));
         group.append(head);
         for (const tool of workingTools) {
             const row = button('', () => selectAgent(`tool:${tool.id}`), 'status-row');
@@ -570,7 +661,9 @@ function renderStatusPanel(counts) {
             row.style.setProperty('--s', TOOL_COLOR.working);
             row.classList.toggle('selected', selected === `tool:${tool.id}`);
             const text = el('span', 'status-text');
+            const n = perTool.get(tool.id);
             const metaBits = [
+                `${n} working`,
                 tool.processes ? `${tool.processes} proc` : null,
                 tool.cwd ? tool.cwd.split('/').filter(Boolean).slice(-1)[0] : null,
                 tool.agents?.length ? `${tool.agents.length} dispatch${tool.agents.length === 1 ? '' : 'es'}` : null,
@@ -583,23 +676,35 @@ function renderStatusPanel(counts) {
     }
     const recent = (a, b) => String(b[1].since || '').localeCompare(String(a[1].since || '')) || a[0].localeCompare(b[0]);
     const groups = [
-        ['working', 'Working now', 'No roster role is working right now.'],
+        ['working', 'Working now', 'Nothing is working right now: no dispatch, tool session, omp child or roster role.'],
         ['pending', 'Waiting to start', null],
         ['failed', 'Failed', null],
         ['completed', 'Recently completed', `No settled worker on the floor and no audit completion in the last ${COMPLETED_WINDOW_MS / 60000} minutes.`]
     ];
     for (const [status, title, empty] of groups) {
         const rows = [...statuses].filter(([id, e]) => !id.startsWith('worker:') && e.status === status).sort(recent);
-        if (!rows.length && !empty)
+        // Working now leads with the same items as the strip and the header metric; roster roles
+        // follow. Item rows stay out of `statuses`, which the floor uses to pick represented visitors.
+        const work = status === 'working' ? items.map(w => [workSelection(w), { ...workerStatus(w), worker: w, task: w.taskTitle || w.label || null, since: null, lastEvent: null }]) : [];
+        if (!rows.length && !work.length && !empty)
             continue;
         const group = el('section', 'status-group');
         group.style.setProperty('--s', meta(status).color);
         const h = el('h3');
         h.innerHTML = icon(status);
-        h.append(title, el('span', 'count', String(rows.length)));
+        if (status === 'working') {
+            group.dataset.workingItems = String(work.length);
+            h.append(title, el('span', 'count', String(work.length)));
+            if (rows.length)
+                h.append(el('span', 'count role-count', `+${rows.length} role${rows.length === 1 ? '' : 's'}`));
+        }
+        else
+            h.append(title, el('span', 'count', String(rows.length)));
         group.append(h);
-        if (!rows.length)
+        if (!rows.length && !work.length)
             group.append(el('p', 'group-empty', empty));
+        for (const [id, entry] of work)
+            group.append(workStatusRow(id, entry));
         for (const [id, entry] of rows)
             group.append(statusRow(id, entry));
         box.append(group);
@@ -686,9 +791,17 @@ function render() {
     const working = list => list.filter(([, e]) => e.status === 'working').length;
     const completed = list => list.filter(([, e]) => e.status === 'completed').length;
     const doneLane = board.source === 'Orca' ? 'completed' : 'done';
-    $('metric-working').textContent = String(roleCounts.working);
-    const movingWorkers = (state.workers || []).filter(w => workerStatus(w).status === 'working').length;
-    $('metric-working-sub').textContent = `${roleCounts.working} role${roleCounts.working === 1 ? '' : 's'} · ${movingWorkers} dispatch${movingWorkers === 1 ? '' : 'es'}`;
+    const present = new Set(workerSource().map(w => w.dispatchId).filter(Boolean));
+    for (const id of firstSeen.keys())
+        if (!present.has(id))
+            firstSeen.delete(id);
+    for (const id of present)
+        if (!firstSeen.has(id))
+            firstSeen.set(id, Number(state.ts) || Date.now());
+    // The headline is the Live work strip: dispatches plus tool sessions and omp children.
+    const summary = workingSummary(workingItems(state, firstSeen), roleCounts.working);
+    $('metric-working').textContent = String(summary.count);
+    $('metric-working-sub').textContent = summary.sub;
     $('metric-completed').textContent = String(roleCounts.completed);
     $('metric-completed-sub').textContent = `${roleCounts.completed} role${roleCounts.completed === 1 ? '' : 's'} · ${completed(dispatches)} dispatch${completed(dispatches) === 1 ? '' : 'es'}`;
     $('metric-pending').textContent = `${roleCounts.pending} / ${board.counts.blocked || 0}`;
@@ -856,6 +969,17 @@ function renderPanel() {
             }
             if (t.lastSession)
                 card.append(el('p', null, `Session: ${t.lastSession}`));
+            content.append(card);
+        }
+        const children = workerSource().filter(w => workKind(w) === 'omp-child');
+        if (children.length) {
+            const card = el('article', 'data-card');
+            card.append(el('h3', null, `omp task children · ${children.length}`));
+            for (const w of children) {
+                const row = button(`${w.agent || 'child'} · ${w.taskTitle || '—'} · ${w.stale ? 'stale' : w.childState || 'unknown'} ↗`, () => { dialog.close(); selectAgent(workSelection(w)); }, 'wide history-row');
+                row.prepend(chip(workerStatus(w).status));
+                card.append(row);
+            }
             content.append(card);
         }
         return;

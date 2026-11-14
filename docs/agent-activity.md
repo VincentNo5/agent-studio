@@ -126,6 +126,18 @@ early spawns without rereading multi-megabyte transcripts on every collect.
 Icons come from `public/tool-icons.js` (Simple Icons, CC0) for tools with a public mark; the rest
 render their initial so a missing brand asset never blanks a row.
 
+## On the homepage
+
+Live work opens with a **Working now** strip: one card per working item — an Orca dispatch, a
+direct tool session (`tool:<id>[:<pid>]`) or an omp task child (`omp-child:<session>:<child>`).
+Each card shows the task, `agent · provider · model` and `remaining: N · next: <title>`; any
+part the state does not report reads `—`. `remainingTasks: []` counts as zero only when Orca
+reported a task list. WorkerView carries no start time, so "newest first" is the order this
+browser first saw each item. The header's Working metric, the strip and Agent status' "Tools
+working" (sessions + children, grouped by tool) are computed from the same list. An omp child
+opens its own detail (task, agent, state, parent tool, stale flag); synthetic rows never fetch
+Orca logs. On the floor, tool and child visitors carry a `STATE · role` tag.
+
 ## Limits
 
 - Undocumented paths (Codex rollouts, opencode schema, Cursor chats) change without notice.
