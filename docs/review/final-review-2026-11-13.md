@@ -1,4 +1,3 @@
-⚠ claude.ai connectors are disabled because ANTHROPIC_API_KEY or another auth source is set and takes precedence over your claude.ai login · Unset it to load your organization's connectors
 The branch is **not ready to merge**. Tests and the layout audit both pass, but I found five Important problems. The two worst I reproduced with probes: an idle CLI process hides the recorded run, and finished omp children still read as `running`. Two of the others break the plan's "no fabricated data" rule, and two of the deferred items you asked me to triage turn out to show wrong data now.
 
 ## Test and audit output
