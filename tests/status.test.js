@@ -44,11 +44,17 @@ describe('agent status model', () => {
         expect(activeRoles({ workers: [w] }, roster).has('qa-tester')).toBe(true);
     });
     test.each([
-        ['starting', 'working'], ['pending', 'pending'], ['dispatched', 'working'], ['queued', 'working'],
+        ['starting', 'working'], ['pending', 'pending'], ['dispatched', 'working'], ['queued', 'pending'],
     ])('a %s worker without liveness reads %s and is present', (workerState, expected) => {
         const w = worker('ctx_1', { workerState });
         expect(workerStatus(w).status).toBe(expected);
         expect(isPresent(w)).toBe(true);
+    });
+    test('a queued worker stays pending even with liveness and a busy tool', () => {
+        const w = worker('ctx_1', { workerState: 'queued', liveness: 'live' });
+        const tools = [{ name: 'Claude Code', state: 'working', agents: [{ role: 'qa-tester' }] }];
+        expect(workerStatus(w).status).toBe('pending');
+        expect(status({ workers: [w], tools }).status).toBe('pending');
     });
     test('every status has label, colour, icon and description', () => {
         for (const key of STATUS_ORDER)

@@ -3,6 +3,7 @@ import { interpretTools, joinToolAgents, parseCpuTime, parseLsofCwd, parseOmpSub
 import { mkdtempSync, mkdirSync, writeFileSync, utimesSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { agentStatuses } from '../public/studio-data.js';
 
 const def = (over: Partial<ToolDef> = {}): ToolDef => ({ id: 'demo', name: 'Demo', kind: 'cli', bins: ['demo'], stores: [], ...over });
 const row = (pid: number, cpu: number, command: string): PsRow => ({ pid, cpu, command });
@@ -130,6 +131,23 @@ const base = (id: string): ToolActivity => ({
 });
 
 describe('agent to tool join', () => {
+  test.each(['dispatched', 'queued'])('a %s dispatch without worker state cannot gain working tool evidence', dispatchStatus => {
+    const tool = { ...base('claude-code'), state: 'working' as const, cwd: '/Users/me/proj' };
+    const workers = [
+      { dispatchId: 'named', agent: 'claude', dispatchStatus, taskTitle: 'qa-tester' },
+      { dispatchId: 'path', agent: 'mystery', dispatchStatus, taskTitle: 'qa-tester', path: '/Users/me/proj' },
+    ];
+    const tools = joinToolAgents([tool], workers, ['qa-tester']);
+    expect(tools[0].agents).toEqual([]);
+    expect(agentStatuses({ workers, tools }, { agents: [{ name: 'qa-tester' }] }).get('qa-tester')?.status).toBe('idle');
+  });
+
+  test.each(['claude', 'mystery'])('a pending dispatch with another worker state still joins via %s', agent => {
+    const tool = { ...base('claude-code'), state: 'working' as const, cwd: '/Users/me/proj' };
+    const tools = joinToolAgents([tool], [{ dispatchId: 'pending', agent, workerState: 'idle', dispatchStatus: 'pending', path: '/Users/me/proj' }], []);
+    expect(tools[0].agents.map(agent => agent.dispatchId)).toEqual(['pending']);
+  });
+
   test('Orca agent names map onto the row that owns them', () => {
     expect(toolForAgent('claude')).toBe('claude-code');
     expect(toolForAgent('claude-code')).toBe('claude-code');

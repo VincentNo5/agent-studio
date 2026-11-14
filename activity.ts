@@ -13,6 +13,7 @@ import type { Dirent } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import { basename } from "node:path";
+import { isPresent } from "./public/studio-data.js";
 
 export type ToolState = "working" | "idle" | "available" | "offline";
 
@@ -407,20 +408,14 @@ async function cwdFor(pid: number): Promise<string | null> {
   return cwd;
 }
 
-/** Attach each dispatch to the tool its agent names, and the roster role its task text names. */
-/** A dispatch still on its feet; settled ones need a named agent, not a shared project. */
-function isMoving(worker: WorkerLite): boolean {
-  const state = worker.workerState ?? worker.dispatchStatus ?? "";
-  return ["starting", "running", "pending", "dispatched", "queued"].includes(state) || worker.liveness === "live";
-}
-
 /** Same project, and only while both sides are live: a settled run is not working there now. */
 function matchByPath(views: Array<ToolActivity & { agents: ToolDispatch[] }>, worker: WorkerLite): (ToolActivity & { agents: ToolDispatch[] }) | undefined {
   const path = worker.path?.replace(/\/$/, "");
-  if (!path || !isMoving(worker)) return undefined;
+  if (!path || !isPresent(worker)) return undefined;
   return views.find((view) => view.state === "working" && view.cwd && (view.cwd === path || view.cwd.startsWith(`${path}/`)));
 }
 
+/** Attach each present dispatch to the tool its agent names and the role its task names. */
 export function joinToolAgents(
   tools: ToolActivity[],
   workers: WorkerLite[],
@@ -429,8 +424,8 @@ export function joinToolAgents(
   const views = tools.map((tool) => ({ ...tool, agents: [] as ToolDispatch[] }));
   const byId = new Map(views.map((view) => [view.id, view]));
   for (const worker of workers) {
-    // Only a dispatch still on its feet is *working*; settled history belongs to run history.
-    if (!isMoving(worker)) continue;
+    // Pending dispatches remain visible; settled history belongs to run history.
+    if (!isPresent(worker)) continue;
     const view = byId.get(toolForAgent(worker.agent) ?? "") ?? matchByPath(views, worker);
     if (!view) continue;
     const text = [worker.taskTitle, worker.taskSpec, worker.label, worker.worktreeName, worker.agent]

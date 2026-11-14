@@ -51,7 +51,7 @@ export function workerStatus(w) {
     if (ws === 'failed' || ds === 'failed')
         return { status: 'failed', evidence: evidence('failed') };
     // A queued dispatch counts as present for following, but it has not started work.
-    if (ws === 'pending' || ds === 'pending')
+    if (ws === 'pending' || ws === 'queued' || ds === 'pending')
         return { status: 'pending', evidence: evidence('pending') };
     if (isWorking(w))
         return { status: 'working', evidence: evidence(ws || w.liveness || 'live') };

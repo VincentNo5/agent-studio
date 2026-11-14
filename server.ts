@@ -53,7 +53,7 @@ interface QuotaView {
 
 import { resolve, sep } from "node:path";
 import { collectToolActivity, joinToolAgents, projectFromKnownPaths, type ToolDispatch, type ToolActivity } from "./activity.ts";
-import { MOVING_STATES as MOVING_WORKER_STATES } from "./public/studio-data.js";
+import { isPresent as isMovingWorker } from "./public/studio-data.js";
 import { realpath } from "node:fs/promises";
 import { hostname as systemHostname } from "node:os";
 
@@ -66,11 +66,6 @@ const FLOOR_GRACE_MS = Number(process.env.AGENT_STUDIO_FLOOR_GRACE_MS ?? 30 * 60
 const RUN_HISTORY_LIMIT = Number(process.env.AGENT_STUDIO_RUN_HISTORY ?? 10);
 /** How many worker-show lookups one collect may spawn, to fill in the launched agent. */
 const AGENT_LOOKUP_LIMIT = Number(process.env.AGENT_STUDIO_AGENT_LOOKUPS ?? 12);
-
-/** A worker still moving: its terminal is live, or its dispatch has not settled. */
-const MOVING_STATES = new Set(MOVING_WORKER_STATES);
-const isMovingWorker = (w: WorkerView) =>
-  w.liveness === "live" || w.dispatchStatus === "pending" || MOVING_STATES.has(w.workerState ?? "");
 
 /** What `worker-show` reports about a dispatch's launch, cached because it never changes. */
 export interface DispatchAgent {
