@@ -1,5 +1,5 @@
 import { describe, test, expect } from 'bun:test';
-import { agentStatuses, workerStatus, countStatuses, STATUS_META, STATUS_ORDER, COMPLETED_WINDOW_MS } from '../public/studio-data.js';
+import { agentStatuses, workerStatus, isPresent, activeRoles, countStatuses, STATUS_META, STATUS_ORDER, COMPLETED_WINDOW_MS } from '../public/studio-data.js';
 const roster = { agents: [{ name: 'qa-tester' }, { name: 'engine-programmer' }, { name: 'sound-designer' }] };
 const now = Date.parse('2026-10-19T14:30:00Z');
 const at = minutesAgo => new Date(now - minutesAgo * 60000).toISOString();
@@ -16,8 +16,40 @@ describe('tool activity feeds role status', () => {
         const idle = [{ ...tools[0], state: 'available' }];
         expect(status({ tools: idle }, 'qa-tester').status).toBe('idle');
     });
+    test('a pending dispatch stays pending with a busy tool', () => {
+        const s = status({ tools, workers: [worker('ctx_1', { dispatchStatus: 'pending' })] });
+        expect(s.status).toBe('pending');
+        expect(s.evidence).toBe('worker ctx_1 · pending');
+    });
+    test.each(['failed', 'completed'])('a %s dispatch is not upgraded by a busy tool', dispatchStatus => {
+        const s = status({ tools, workers: [worker('ctx_1', { dispatchStatus })] });
+        expect(s.status).toBe(dispatchStatus);
+    });
+    test('a tool upgrade keeps its agent entry task', () => {
+        const task = 'qa-tester: harden the replay buffer';
+        const busy = [{ ...tools[0], agents: [{ ...tools[0].agents[0], task }] }];
+        const s = status({ tools: busy });
+        expect(s.status).toBe('working');
+        expect(s.task).toBe(task);
+        expect(s.evidence).toBe('tool Claude Code · 4s ago');
+        expect(s.since).toBe(at(0));
+    });
 });
 describe('agent status model', () => {
+    test('a running worker without liveness is working and present', () => {
+        const w = worker('ctx_1', { workerState: 'running' });
+        expect(workerStatus(w)).toEqual({ status: 'working', evidence: 'worker ctx_1 · running' });
+        expect(status({ workers: [w] }).status).toBe('working');
+        expect(isPresent(w)).toBe(true);
+        expect(activeRoles({ workers: [w] }, roster).has('qa-tester')).toBe(true);
+    });
+    test.each([
+        ['starting', 'working'], ['pending', 'pending'], ['dispatched', 'working'], ['queued', 'working'],
+    ])('a %s worker without liveness reads %s and is present', (workerState, expected) => {
+        const w = worker('ctx_1', { workerState });
+        expect(workerStatus(w).status).toBe(expected);
+        expect(isPresent(w)).toBe(true);
+    });
     test('every status has label, colour, icon and description', () => {
         for (const key of STATUS_ORDER)
             expect(Object.keys(STATUS_META[key]).sort()).toEqual(['color', 'description', 'icon', 'label']);

@@ -1,6 +1,7 @@
 // Shared interpretation of the read-only StudioState contract.
 export const SETTLED = ['succeeded', 'failed', 'stopped', 'cancelled'];
-export const isPresent = w => w.liveness === 'live' || w.dispatchStatus === 'pending';
+export const MOVING_STATES = ['starting', 'running', 'pending', 'dispatched', 'queued'];
+export const isPresent = w => w.liveness === 'live' || w.dispatchStatus === 'pending' || MOVING_STATES.includes(w.workerState || '');
 export const isWorking = w => isPresent(w) && !SETTLED.includes(w.workerState || '');
 export const workerText = w => [w.taskTitle, w.taskSpec, w.label, w.worktreeName, w.agent].filter(Boolean).join(' ').toLowerCase();
 export const matchesRole = (w, role) => workerText(w).includes(role.name.toLowerCase());
@@ -27,7 +28,8 @@ export function activeRoles(state, roster) {
     return hits;
 }
 // One status per agent, derived only from reported fields. Order is precedence:
-// any working evidence beats pending, pending beats failed, failed beats completed.
+// Worker/audit/session working evidence beats pending, pending beats failed,
+// failed beats completed. Tool evidence only upgrades idle roles.
 export const STATUS_ORDER = ['working', 'pending', 'failed', 'completed', 'idle'];
 export const STATUS_META = {
     working: { label: 'Working', color: '#38d9ff', icon: '▶', description: 'A live worker or an open subagent invocation is doing this work now. On the floor: lit, pulsing monitor and a WORKING pill above the agent.' },
@@ -77,13 +79,6 @@ export function agentStatuses(state, roster, now = Date.now()) {
             entry('working', working, working.evidence, lastInvoked.get(name)?.ts || null);
             continue;
         }
-        // A tool writing now is direct evidence for the role behind its dispatch, even when the
-        // Orca floor has no run to scope the worker to.
-        const live = (state?.tools || []).find(t => t.state === 'working' && (t.agents || []).some(a => a.role === name));
-        if (live) {
-            entry('working', null, `tool ${live.name} · ${live.evidence || 'writing now'}`, live.lastActivity || null);
-            continue;
-        }
         if (activity?.active > 0) {
             const invoked = lastInvoked.get(name);
             entry('working', null, invoked ? `audit invoked ${clock(invoked.ts)}` : `audit · ${activity.active} open invocation${activity.active > 1 ? 's' : ''}`, invoked?.ts || null);
@@ -106,6 +101,17 @@ export function agentStatuses(state, roster, now = Date.now()) {
             continue;
         }
         out.set(name, { status: 'idle', worker: null, task: null, evidence: null, since: null, lastEvent });
+    }
+    // Tool activity fills gaps when the Orca floor has no run to scope the worker to.
+    // It must not replace a status already established by workers, audit, or sessions.
+    for (const tool of state?.tools || []) {
+        if (tool.state !== 'working')
+            continue;
+        for (const entry of tool.agents || []) {
+            const current = out.get(entry.role);
+            if (current?.status === 'idle')
+                out.set(entry.role, { ...current, status: 'working', task: entry.task || current.task, evidence: `tool ${tool.name} · ${tool.evidence || 'writing now'}`, since: tool.lastActivity || null });
+        }
     }
     return out;
 }
