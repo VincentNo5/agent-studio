@@ -52,6 +52,8 @@ interface QuotaView {
 
 
 import { resolve, sep } from "node:path";
+import { collectToolActivity, joinToolAgents, projectFromKnownPaths, providerFor, toolForAgent, type ToolDispatch, type ToolActivity } from "./activity.ts";
+import { isPresent as isMovingWorker } from "./public/studio-data.js";
 import { realpath } from "node:fs/promises";
 import { hostname as systemHostname } from "node:os";
 
@@ -65,16 +67,30 @@ const RUN_HISTORY_LIMIT = Number(process.env.AGENT_STUDIO_RUN_HISTORY ?? 10);
 /** How many worker-show lookups one collect may spawn, to fill in the launched agent. */
 const AGENT_LOOKUP_LIMIT = Number(process.env.AGENT_STUDIO_AGENT_LOOKUPS ?? 12);
 
-/** A worker still moving: its terminal is live, or its dispatch has not settled. */
-const isMovingWorker = (w: WorkerView) => w.liveness === "live" || w.dispatchStatus === "pending";
-
 /** What `worker-show` reports about a dispatch's launch, cached because it never changes. */
-interface DispatchAgent {
+export interface DispatchAgent {
   agent: string | null;
   model: string | null;
   exitCause: string | null;
 }
-const agentByDispatch = new Map<string, DispatchAgent>();
+interface DispatchAgentCache { info: DispatchAgent; checkedAt: number; retryAfter: number; emptyCount: number }
+const agentByDispatch = new Map<string, DispatchAgentCache>();
+
+/**
+ * Parse either `worker-show` shape: `--full` wraps the record in `result.worker`, the
+ * concise view puts the dispatch at `result` and has no `startOptions` at all.
+ */
+export function readDispatchAgent(raw: string): DispatchAgent {
+  const detail = readJson(raw) as { ok?: boolean; result?: OrcaDispatchDetail } | null;
+  if (detail?.ok === false) return { agent: null, model: null, exitCause: null };
+  const record = detail?.result?.worker ?? detail?.result;
+  const launch = record?.startOptions?.launch;
+  return {
+    agent: launch?.effective?.agent ?? launch?.requested?.agent ?? record?.startOptions?.agent ?? null,
+    model: launch?.effective?.model ?? launch?.requested?.model ?? null,
+    exitCause: detail?.result?.terminal?.exitCause?.kind ?? null,
+  };
+}
 
 function applyDispatchAgent(worker: WorkerView, info: DispatchAgent): void {
   worker.agent = info.agent ?? worker.agent;
@@ -86,10 +102,16 @@ interface OrcaWorkerRow {
   dispatchId?: string;
   taskId?: string;
   runId?: string;
+  /** Current CLI emits `state`/`terminal`/`workspace`; the older projection shape stays supported. */
+  state?: string;
   workerState?: string;
   dispatchStatus?: string;
   terminalState?: string;
+  terminal?: string;
   agentTerminalHandle?: string;
+  workspace?: string;
+  host?: string;
+  liveness?: string;
   resource?: { worktreeId?: string };
   projection?: {
     agent?: string;
@@ -121,14 +143,21 @@ interface OrcaRunRow {
   updated_at?: string;
 }
 /** `orca orchestration worker-show` — the only place Orca records the launched agent. */
+/**
+ * `worker-show --json --full` wraps the record in `worker`; the concise view puts the
+ * dispatch itself at `result` and omits `startOptions`. Both shapes are accepted.
+ */
 interface OrcaDispatchDetail {
-  worker?: {
-    startOptions?: {
-      agent?: string;
-      launch?: { requested?: { agent?: string; model?: string }; effective?: { agent?: string; model?: string } };
-    };
-  };
+  worker?: OrcaWorkerRecord;
+  startOptions?: OrcaWorkerRecord["startOptions"];
   terminal?: { exitCause?: { kind?: string } };
+}
+
+interface OrcaWorkerRecord {
+  startOptions?: {
+    agent?: string;
+    launch?: { requested?: { agent?: string; model?: string }; effective?: { agent?: string; model?: string } };
+  };
 }
 
 interface WorkerView {
@@ -151,11 +180,16 @@ interface WorkerView {
   nextAction: string | null;
   /** Which AI the dispatch launched: worker-show only — worker-list reports a null agent. */
   agent: string | null;
-  /** Launched model, when worker-show reports one. */
+  /** Launch model, falling back to an attributable live session's argv/store model. */
   model: string | null;
+  provider: string | null;
+  /** Open tasks after this one; null when the worker has no handle or role to join tasks on. */
+  remainingTasks: string[] | null;
   /** Terminal exit cause from worker-show, e.g. operator_close. */
   exitCause: string | null;
   host: string | null;
+  /** Worktree path, used to match a tool's working directory when the agent name is unknown. */
+  path: string | null;
 }
 
 interface TerminalView { handle: string | null; title: string | null; status: string | null }
@@ -195,6 +229,7 @@ interface OrcaTaskView {
   spec: string | null;
   status: string | null;
   runId: string | null;
+  assignee: string | null;
 }
 
 interface StudioState {
@@ -211,6 +246,8 @@ interface StudioState {
   /** Orca tasks for the coordinator; when non-empty the task board shows these instead of `kanban`. */
   orcaTasks: OrcaTaskView[];
   audit: { source: string | null; events: AuditEvent[]; agents: AgentActivity[] };
+  /** One row per installed agent surface, with the dispatches Orca launched on it. */
+  tools: Array<ToolActivity & { agents: ToolDispatch[] }>;
 }
 
 export interface MarketSnapshot {
@@ -435,11 +472,21 @@ function selectFloor(
   };
 }
 
+/** Roster role names, read once: task text is matched against them like the UI does. */
+let rosterRoles: Promise<string[]> | null = null;
+
+function roleNames(): Promise<string[]> {
+  rosterRoles ??= Bun.file(`${DIR}/roster.json`).json()
+    .then((data: { agents?: { name?: string }[] }) => (data.agents ?? []).map((a) => a.name ?? "").filter(Boolean))
+    .catch(() => [] as string[]);
+  return rosterRoles;
+}
+
 async function collect(): Promise<StudioState> {
   const coordinator = process.env.ORCA_COORDINATOR;
   // `hermes kanban stats` is deliberately not spawned: lane counts are derived from `list`.
   // Magpie quotas use local HTTP and do not add a CLI spawn.
-  const [workersRaw, runsRaw, terminalsRaw, worktreesRaw, kanbanRaw, tasksRaw, paseoRaw, quotasRaw] = await Promise.all([
+  const [workersRaw, runsRaw, terminalsRaw, worktreesRaw, kanbanRaw, tasksRaw, paseoRaw, quotasRaw, tools] = await Promise.all([
     run(["orca", "orchestration", "worker-list", "--include-remote", "--json"]),
     run(["orca", "orchestration", "run-list", "--json"]),
     run(["orca", "terminal", "list", "--json"]),
@@ -450,6 +497,7 @@ async function collect(): Promise<StudioState> {
     fetch("http://127.0.0.1:3425/v1/magpie/quotas", { signal: AbortSignal.timeout(3000) })
       .then((response) => response.ok ? response.text() : "")
       .catch(() => ""),
+    collectToolActivity(),
   ]);
 
 
@@ -509,15 +557,15 @@ async function collect(): Promise<StudioState> {
   for (const t of taskRows) if (t.id) taskById[t.id] = t;
 
   const workers: WorkerView[] = workerRows.map((row) => {
-    const worktreeId = row.resource?.worktreeId ?? null;
+    const worktreeId = row.workspace ?? row.resource?.worktreeId ?? null;
     const path = worktreeId?.includes("::") ? worktreeId.slice(worktreeId.indexOf("::") + 2) : worktreeId;
-    const handle = row.agentTerminalHandle ?? null;
+    const handle = row.terminal ?? row.agentTerminalHandle ?? null;
     const task = row.taskId ? taskById[row.taskId] : undefined;
     return {
       dispatchId: row.dispatchId ?? null,
       taskId: row.taskId ?? null,
       runId: row.runId ?? null,
-      workerState: row.workerState ?? null,
+      workerState: row.state ?? row.workerState ?? null,
       dispatchStatus: row.dispatchStatus ?? null,
       terminalState: row.terminalState ?? null,
       terminalHandle: handle,
@@ -526,15 +574,30 @@ async function collect(): Promise<StudioState> {
       worktreeName: (path ? nameByPath[path] : undefined) ?? worktreeLeaf(worktreeId),
       taskTitle: task?.task_title ?? task?.title ?? task?.display_name ?? null,
       taskSpec: task?.spec ?? null,
-      liveness: row.projection?.liveness?.verdict ?? null,
+      liveness: row.liveness ?? row.projection?.liveness?.verdict ?? null,
       livenessReason: row.projection?.liveness?.reason ?? null,
       nextAction: row.projection?.nextAction?.kind ?? null,
       agent: row.projection?.agent ?? null,
       model: null,
+      provider: null,
+      remainingTasks: [],
       exitCause: null,
-      host: row.projection?.host?.id ?? null,
+      host: row.host ?? row.projection?.host?.id ?? null,
+      path,
     };
   });
+
+  // A finished run leaves no process to ask, but its session path still names the project:
+  // resolve that slug against the worktree paths Orca reports.
+  const knownPaths = workers.map((w) => w.path).filter((path): path is string => !!path);
+  for (const tool of tools) {
+    tool.cwd ??= projectFromKnownPaths(tool.lastSession, knownPaths);
+  }
+  const workingPaths = tools.filter((tool) => tool.state === "working" && tool.cwd).map((tool) => tool.cwd as string);
+  const onWorkingTool = (worker: WorkerView): boolean => {
+    if (!worker.path) return false;
+    return workingPaths.some((path) => worker.path === path || worker.path!.startsWith(`${path}/`) || path.startsWith(`${worker.path}/`));
+  };
 
   const orcaTasks: OrcaTaskView[] = taskRows.map((t) => ({
     id: t.id ?? null,
@@ -542,6 +605,7 @@ async function collect(): Promise<StudioState> {
     spec: t.spec ?? null,
     status: t.status ?? null,
     runId: t.run_id ?? null,
+    assignee: t.assignee ?? null,
   }));
 
   const kanbanStats: Record<string, number> = {};
@@ -562,14 +626,16 @@ async function collect(): Promise<StudioState> {
   const { workers: onFloor, scope: workerScope } = selectFloor(workers, runRows);
 
   // `worker-list` reports a null projection.agent, so the AI a dispatch launched is only in
-  // `worker-show` — and it never changes, so one lookup per dispatch is cached for the life of
-  // the server. The floor's dispatches and the newest run's are filled first; misses are capped
-  // per collect, so a fresh run of 22 fills in over a few polls instead of stalling one.
+  // `worker-show` — successful launch metadata is cached for the life of the server.
+  // Failed queries retry next collect; valid empty answers back off from 30 seconds to 5 minutes.
+  // The floor's dispatches and the newest run's
+  // are filled first; misses are capped per collect, so a fresh run of 22 fills in over a few
+  // polls instead of stalling one.
   const targets: WorkerView[] = [];
   const seen = new Set<string>();
   for (const worker of workers) {
     if (!worker.dispatchId || seen.has(worker.dispatchId)) continue;
-    if (!isMovingWorker(worker) && (workerScope.runId === null || worker.runId !== workerScope.runId)) continue;
+    if (!isMovingWorker(worker) && !onWorkingTool(worker) && (workerScope.runId === null || worker.runId !== workerScope.runId)) continue;
     seen.add(worker.dispatchId);
     targets.push(worker);
   }
@@ -578,24 +644,74 @@ async function collect(): Promise<StudioState> {
   await Promise.all(targets.map(async (worker) => {
     const id = worker.dispatchId as string;
     const cached = agentByDispatch.get(id);
-    if (cached) {
-      applyDispatchAgent(worker, cached);
+    const now = Date.now();
+    if (cached && (cached.retryAfter === Infinity || (now >= cached.checkedAt && now < cached.retryAfter))) {
+      applyDispatchAgent(worker, cached.info);
       return;
     }
     if (misses++ >= AGENT_LOOKUP_LIMIT) return;
-    const raw = await run(["orca", "orchestration", "worker-show", "--dispatch", id, "--json"]);
-    const detail = readJson(raw) as { result?: OrcaDispatchDetail } | null;
-    const launch = detail?.result?.worker?.startOptions?.launch;
-    const info: DispatchAgent = {
-      agent: launch?.effective?.agent ?? detail?.result?.worker?.startOptions?.agent ?? null,
-      model: launch?.effective?.model ?? launch?.requested?.model ?? null,
-      exitCause: detail?.result?.terminal?.exitCause?.kind ?? null,
-    };
-    agentByDispatch.set(id, info);
+    // `--full` is mandatory: the concise view drops startOptions, which is the only place the
+    // launched agent is recorded. Without it every worker reads as agent-less.
+    const raw = await run(["orca", "orchestration", "worker-show", "--dispatch", id, "--json", "--full"]);
+    const info = readDispatchAgent(raw);
+    if (info.agent !== null || info.model !== null) {
+      agentByDispatch.set(id, { info, checkedAt: now, retryAfter: Infinity, emptyCount: 0 });
+    } else {
+      const response = readJson(raw) as { ok?: boolean; result?: unknown } | null;
+      if (response?.ok === true && response.result && typeof response.result === "object" && !Array.isArray(response.result)) {
+        const emptyCount = (cached?.emptyCount ?? 0) + 1;
+        const delay = Math.min(300_000, 30_000 * 2 ** Math.min(emptyCount - 1, 4));
+        agentByDispatch.set(id, { info, checkedAt: now, retryAfter: now + delay, emptyCount });
+      }
+    }
     applyDispatchAgent(worker, info);
   }));
   if (agentByDispatch.size > 2000) {
     for (const key of [...agentByDispatch.keys()].slice(0, 1000)) agentByDispatch.delete(key);
+  }
+
+  const roles = await roleNames();
+  const remainingStatuses = new Set(["pending", "ready", "dispatched", "blocked"]);
+  const workerTools = new Map(workers.map(worker => [worker, toolForAgent(worker.agent)]));
+  for (const worker of workers) {
+    // Only a uniquely attributable live process can fill missing launch metadata.
+    // A settled dispatch must not borrow the model of a newer session in its worktree.
+    const toolId = workerTools.get(worker);
+    const matches = isMovingWorker(worker) && worker.path
+      ? tools.filter(tool => !toolId || tool.id === toolId).flatMap(tool => tool.sessions)
+        .filter(session => session.cwd === worker.path)
+      : [];
+    const owners = workers.filter(other => isMovingWorker(other) && other.path === worker.path
+      && (!toolId || !workerTools.get(other) || workerTools.get(other) === toolId));
+    worker.provider = providerFor(worker.model);
+    if (matches.length === 1 && owners.length === 1) {
+      const session = matches[0];
+      worker.model ??= session.model;
+      // Namespace/family first; an explicit store provider is the last resort.
+      if (session.model !== worker.model) session.provider = providerFor(worker.model) ?? session.modelProvider ?? null;
+      session.model = worker.model;
+      worker.provider = session.provider ?? providerFor(worker.model);
+    }
+
+    const text = [worker.taskTitle, worker.taskSpec, worker.label, worker.worktreeName].filter(Boolean).join(" ").toLowerCase();
+    const workerRoles = roles.filter(role => text.includes(role.toLowerCase()));
+    // Nothing to join on is unknown, not zero: `[]` is reserved for a real empty queue.
+    worker.remainingTasks = !worker.terminalHandle && !workerRoles.length ? null : orcaTasks.filter(task => {
+      if ((worker.taskId && task.id === worker.taskId) || !remainingStatuses.has(task.status ?? "") || (worker.runId && task.runId !== worker.runId)) return false;
+      if (task.assignee) {
+        if (task.assignee === worker.terminalHandle) return true;
+        // Explicit assignment to another handle always wins over text mentioning our role.
+        return workerRoles.some(role => role.toLowerCase() === task.assignee!.toLowerCase());
+      }
+      const taskText = [task.title, task.spec].filter(Boolean).join(" ").toLowerCase();
+      return workerRoles.some(role => taskText.includes(role.toLowerCase()));
+    }).map(task => task.title ?? task.spec ?? "—");
+  }
+  for (const tool of tools) {
+    // Store-only identity: namespace/family first, the store's explicit provider last.
+    if (!tool.sessions.length) { tool.provider = providerFor(tool.model) ?? tool.provider; continue; }
+    tool.model = tool.sessions[0].model;
+    tool.provider = tool.sessions[0].provider ?? providerFor(tool.model);
   }
 
   // Everything the floor left out still has to be inspectable, so group the same dispatches
@@ -632,7 +748,10 @@ async function collect(): Promise<StudioState> {
     .sort((a, b) => (b.createdAt ?? "").localeCompare(a.createdAt ?? ""))
     .slice(0, RUN_HISTORY_LIMIT);
 
-  return { ts: Date.now(), workers: onFloor, workerScope, runs, terminals, worktrees, paseo, quotas, kanban, kanbanStats, orcaTasks, audit };
+  // Agents are only known after `worker-show` fills them in, so the join runs at the end.
+  const toolViews = joinToolAgents(tools, workers, roles);
+
+  return { ts: Date.now(), workers: onFloor, workerScope, runs, terminals, worktrees, paseo, quotas, kanban, kanbanStats, orcaTasks, audit, tools: toolViews };
 }
 
 // One collect (six CLI spawns plus local HTTP) per TTL, shared by every client; concurrent callers join the in-flight promise.
@@ -640,7 +759,9 @@ let cached: { at: number; data: StudioState } | null = null;
 let inflight: Promise<StudioState> | null = null;
 
 function stateForClients(): Promise<StudioState> {
-  if (cached && Date.now() - cached.at < TTL_MS) return Promise.resolve(cached.data);
+  // A wall-clock rollback invalidates the sample instead of extending its TTL.
+  const age = cached ? Date.now() - cached.at : null;
+  if (cached && age !== null && age >= 0 && age < TTL_MS) return Promise.resolve(cached.data);
   if (inflight) return inflight;
   inflight = collect()
     .then((data) => { cached = { at: Date.now(), data }; return data; })
@@ -780,6 +901,11 @@ Bun.serve({
     }
     if (path === "/state") {
       return Response.json(await stateForClients(), { headers: { "cache-control": "no-store" } });
+    }
+    // Standalone tool-activity feed: the same rows /state carries (join included), one cached collect.
+    if (path === "/activity") {
+      const state = await stateForClients();
+      return Response.json({ ts: state.ts, tools: state.tools }, { headers: { "cache-control": "no-store" } });
     }
     if (path === "/market") {
       return Response.json(await marketService.get(), { headers: { "cache-control": "no-store" } });

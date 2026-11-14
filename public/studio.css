@@ -27,6 +27,7 @@
   --bottom-h:140px;
   --ticker:28px;
   --rail-bottom:calc(var(--ticker) + var(--bottom-h) + var(--gap) * 2);
+  --operations-h:80px;
   font-family:var(--font);
   font-size:12px;
   color:var(--ice);
@@ -496,6 +497,7 @@ b,time,output,.metric b,.count {
 }
 .panel-head {
   display:flex;
+  flex-shrink:0;
   align-items:center;
   justify-content:space-between;
   padding:12px 14px 10px;
@@ -541,7 +543,14 @@ b,time,output,.metric b,.count {
 }
 .left-column {
   left:var(--side);
-  width:var(--left-w)
+  width:var(--left-w);
+  bottom:calc(var(--rail-bottom) + var(--operations-h) + var(--gap));
+  min-height:0;
+  overflow:auto;
+  pointer-events:auto!important
+}
+.left-column>* {
+  min-height:0
 }
 .right-column {
   right:var(--side);
@@ -555,14 +564,16 @@ b,time,output,.metric b,.count {
 }
 /* Agent status ---------------------------------------------------------- */
 .agent-status {
-  flex:1 1 auto;
-  min-height:150px;
+  /* Keep room for the header, summary and a readable list; the rail can scroll. */
+  flex:1 0 220px;
+  min-height:0;
   display:flex;
   flex-direction:column;
   overflow:hidden
 }
 .status-strip {
   display:grid;
+  flex-shrink:0;
   grid-template-columns:repeat(3,1fr);
   gap:6px;
   padding:10px 10px 8px
@@ -599,7 +610,7 @@ b,time,output,.metric b,.count {
 }
 .status-groups {
   flex:1;
-  min-height:0;
+  min-height:96px;
   overflow:auto;
   padding:0 8px 8px
 }
@@ -689,6 +700,21 @@ b,time,output,.metric b,.count {
   white-space:nowrap;
   overflow:hidden;
   text-overflow:ellipsis
+}
+.status-roles {
+  display:flex;
+  flex-wrap:wrap;
+  gap:3px;
+  margin-top:2px
+}
+.role-chip {
+  font-size:9px;
+  line-height:1.4;
+  color:var(--s);
+  padding:0 5px;
+  border-radius:6px;
+  background:color-mix(in srgb,var(--s) 12%,transparent);
+  white-space:nowrap
 }
 .status-row time {
   font:10px var(--mono);
@@ -782,7 +808,11 @@ b,time,output,.metric b,.count {
   max-width:100%
 }
 .operations {
-  flex:none;
+  position:absolute;
+  left:var(--side);
+  bottom:var(--rail-bottom);
+  width:var(--left-w);
+  height:var(--operations-h);
   padding:8px;
   display:grid;
   grid-template-columns:1fr 1fr 1fr;
@@ -991,6 +1021,144 @@ b,time,output,.metric b,.count {
   color:var(--muted);
   overflow-wrap:anywhere
 }
+.tool-activity {
+  flex:0 0 132px;
+  min-height:0;
+  display:flex;
+  flex-direction:column;
+  overflow:hidden
+}
+.tool-list {
+  flex:1;
+  min-height:0;
+  padding:0 8px 8px;
+  display:grid;
+  grid-template-columns:minmax(0,1fr);
+  gap:0;
+  align-content:start;
+  overflow:auto
+}
+.tool-row {
+  --s:var(--muted);
+  display:grid;
+  grid-template-columns:13px minmax(0,1fr) auto auto;
+  cursor:pointer;
+  gap:5px;
+  align-items:center;
+  padding:2px 5px;
+  border:1px solid var(--hair);
+  border-left:3px solid var(--s);
+  border-radius:6px;
+  background:linear-gradient(90deg,color-mix(in srgb,var(--s) 8%,transparent),transparent 70%);
+  font-size:10px
+}
+.tool-row[data-state=working] {
+  box-shadow:inset 3px 0 12px -6px var(--s)
+}
+.tool-icon,.status-tool-icon {
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  width:13px;
+  height:13px;
+  color:var(--s);
+  flex:none
+}
+.tool-icon svg,.status-tool-icon svg,.detail-tool-icon svg {
+  width:100%;
+  height:100%;
+  display:block
+}
+.tool-letter {
+  font:600 8px/1 var(--font);
+  font-style:normal;
+  color:var(--s)
+}
+.tool-cell {
+  display:inline-flex;
+  align-items:center;
+  gap:6px
+}
+.detail-tool {
+  display:flex;
+  align-items:center;
+  justify-content:center
+}
+.detail-tool-icon {
+  display:inline-flex;
+  width:30px;
+  height:30px;
+  color:var(--s)
+}
+.status-tool-icon {
+  width:12px;
+  height:12px
+}
+.tool-dot {
+  width:6px;
+  height:6px;
+  border-radius:50%;
+  background:var(--s);
+  box-shadow:0 0 8px var(--s)
+}
+.tool-row[data-state=working] .tool-dot {
+  animation:tool-pulse 1.6s ease-in-out infinite
+}
+.tool-name {
+  min-width:0;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+  color:#cfe4f2
+}
+.tool-more {
+  display:block;
+  width:100%;
+  text-align:left;
+  padding:2px 6px;
+  border:1px dashed var(--hair-strong);
+  border-left:3px solid transparent;
+  background:none;
+  color:var(--muted);
+  font:10px var(--font);
+  border-radius:6px
+}
+.tool-agents {
+  font:600 9px/1 var(--font);
+  font-style:normal;
+  color:var(--s);
+  border:1px solid color-mix(in srgb,var(--s) 40%,transparent);
+  border-radius:999px;
+  padding:1px 4px
+}
+.tool-table .data-table td:nth-child(1),.tool-table .data-table td:nth-child(2),.tool-table .data-table td:nth-child(4) {
+  white-space:nowrap
+}
+.tool-activity .panel-head .link-button {
+  margin-left:auto
+}
+.tool-meta {
+  color:var(--muted);
+  font-variant-numeric:tabular-nums;
+  font-size:9px;
+  white-space:nowrap
+}
+.tool-activity .panel-head {
+  min-height:32px;
+  padding:8px 12px 6px;
+  gap:6px
+}
+.tool-activity .panel-head h2,.tool-activity .panel-head small,.tool-activity .panel-head .link-button {
+  white-space:nowrap
+}
+.tool-activity .panel-head small {
+  white-space:nowrap
+}
+@keyframes tool-pulse {
+  50% {
+    opacity:.45
+  }
+}
 .worker-list {
   padding:0 8px 8px;
   display:grid;
@@ -1031,6 +1199,80 @@ b,time,output,.metric b,.count {
   overflow:hidden;
   text-overflow:ellipsis;
   white-space:nowrap
+}
+/* Working now: one card per live item, above the rest of Live work. */
+.working-now {
+  display:grid;
+  gap:4px
+}
+.working-now h3 {
+  display:flex;
+  justify-content:space-between;
+  font-size:9.5px;
+  font-weight:500;
+  letter-spacing:1.1px;
+  text-transform:uppercase;
+  color:#8fe9ff;
+  margin:2px 2px 0
+}
+.work-card {
+  --s:var(--muted);
+  display:flex;
+  flex-direction:column;
+  gap:1px;
+  min-width:0;
+  text-align:left;
+  width:100%;
+  border:1px solid var(--hair);
+  border-left:3px solid var(--s);
+  border-radius:6px;
+  background:linear-gradient(90deg,color-mix(in srgb,var(--s) 12%,transparent),transparent 75%);
+  box-shadow:inset 3px 0 12px -6px var(--s);
+  padding:6px 8px
+}
+.work-card.selected {
+  border-color:var(--s)
+}
+.work-head {
+  display:flex;
+  gap:6px;
+  align-items:baseline;
+  min-width:0
+}
+.work-task {
+  flex:1;
+  min-width:0;
+  font-size:11px;
+  color:#e7f4fc;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap
+}
+.work-kind {
+  flex:none;
+  font-size:8.5px;
+  font-style:normal;
+  letter-spacing:.6px;
+  text-transform:uppercase;
+  color:var(--s)
+}
+.work-card[data-kind=omp-child] .work-kind,.work-card[data-kind=tool] .work-kind {
+  color:#9fb6c6
+}
+.work-meta {
+  font-size:9.5px;
+  color:#9fb6c6;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap
+}
+.work-left {
+  color:#7c9bb1
+}
+.work-divider {
+  border:0;
+  border-top:1px solid var(--hair);
+  margin:4px 2px
 }
 .live-tail {
   margin:0 12px 12px;
@@ -1265,7 +1507,12 @@ b,time,output,.metric b,.count {
   padding:10px 14px;
   display:flex;
   flex-direction:column;
-  justify-content:center
+  justify-content:safe center;
+  overflow:auto;
+  max-height:var(--bottom-h)
+}
+.preferences>* {
+  flex-shrink:0
 }
 .toggle-row {
   display:flex;
@@ -1611,11 +1858,25 @@ dialog::backdrop {
     display:none
   }
 }
+@media(height < 800px) {
+  .agent-status {
+    flex-basis:200px
+  }
+  /* Fit the 424px laptop rail with 10px gaps and margin above the 96px list floor. */
+  .task-board {
+    flex:0 0 136px;
+    overflow:auto
+  }
+  .tool-activity {
+    flex:0 0 68px
+  }
+}
 @media(max-height:780px) {
   :root {
     --top:64px;
     --gap:10px;
-    --bottom-h:124px
+    --bottom-h:124px;
+    --operations-h:40px
   }
   .metrics {
     height:42px
@@ -1641,9 +1902,6 @@ dialog::backdrop {
   }
   .lane {
     padding:3px 6px
-  }
-  .agent-status {
-    min-height:120px
   }
   /* Short screens: operations collapse to an icon row; names stay in title/aria-label. */
   .operations {
@@ -1810,6 +2068,7 @@ dialog::backdrop {
 
 /* Floor view is spatial-first: the command dashboard is intentionally only on /. */
 body[data-view="floor"] .left-column,
+body[data-view="floor"] .operations,
 body[data-view="floor"] .events,
 body[data-view="floor"] .world-heading,
 body[data-view="floor"] .view-links,
@@ -1835,7 +2094,7 @@ body[data-view="floor"] .right-column {
   #hud {
     background:linear-gradient(180deg,#020a14b8,transparent 20%,transparent 74%,#020a1466)
   }
-  .metrics,.legend,.floor-switch,.settings-button,.left-column,.events,.navigator,.preferences,.world-heading,.view-links,.scene-hint,.ticker {
+  .metrics,.legend,.floor-switch,.settings-button,.left-column,.operations,.events,.navigator,.preferences,.world-heading,.view-links,.scene-hint,.ticker {
     display:none!important
   }
   .topbar {

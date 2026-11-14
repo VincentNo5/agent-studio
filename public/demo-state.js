@@ -129,7 +129,14 @@ export function createDemoFeed(roster) {
             ],
             kanban: [], kanbanStats: {},
             orcaTasks: tasks,
-            audit: { source: 'demo://agent-audit.log', events: events.slice(-40), agents: auditAgents }
+            audit: { source: 'demo://agent-audit.log', events: events.slice(-40), agents: auditAgents },
+            tools: [
+                { id: 'claude-code', name: 'Claude Code', kind: 'cli', installed: true, state: script.running ? 'working' : 'available', processes: script.running ? 1 : 0, cpuActive: !!script.running, lastSession: '~/.claude/projects/-demo/game-studio.jsonl', lastActivity: iso(now - (script.running ? 4_000 : 900_000)), evidence: 'demo session' },
+                { id: 'codex', name: 'Codex CLI', kind: 'cli', installed: true, state: script.running > 1 ? 'working' : 'idle', processes: script.running > 1 ? 1 : 0, cpuActive: script.running > 1, lastSession: '~/.codex/sessions/2026/01/01/rollout-demo.jsonl', lastActivity: iso(now - (script.running > 1 ? 11_000 : 2_400_000)), evidence: 'demo rollout' },
+                { id: 'opencode', name: 'OpenCode', kind: 'cli', installed: true, state: 'available', processes: 0, cpuActive: false, lastSession: '~/.local/share/opencode/opencode.db-wal', lastActivity: iso(now - 7_200_000), evidence: 'demo store' },
+                { id: 'omp', name: 'omp', kind: 'cli', installed: true, state: 'idle', processes: 1, cpuActive: false, lastSession: '~/.omp/agent/sessions/demo.jsonl', lastActivity: iso(now - 600_000), evidence: 'demo worker' },
+                { id: 'amp', name: 'Amp', kind: 'cli', installed: false, state: 'offline', processes: 0, cpuActive: false, lastSession: null, lastActivity: null, evidence: 'not installed' }
+            ]
         };
     }
 

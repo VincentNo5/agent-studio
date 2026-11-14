@@ -142,16 +142,14 @@
   <div id="output-state"></div>
   <pre id="output-body" tabindex="0" aria-label="Worker output">Loading…</pre>
 </dialog>
-<script>
+<script type="module">
+  import { isPresent, workerStatus } from '/assets/studio-data.js';
   const $ = (id) => document.getElementById(id);
   const demoMode = new URLSearchParams(location.search).get("demo") === "1";
   let demoFeed = null;
   const demoStarted = performance.now();
   if (demoMode) $("demo-banner").hidden = false;
   let lastTs = 0;
-  const settled = new Set(["succeeded", "failed", "stopped", "cancelled"]);
-  const present = (worker) => worker.liveness === "live" || worker.dispatchStatus === "pending";
-  const working = (worker) => present(worker) && !settled.has(worker.workerState || "");
   const escapeText = (value) => String(value ?? "");
   const safe = (value) => escapeText(value).replace(/[&<>"']/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[ch]);
   const time = (value) => {
@@ -180,9 +178,9 @@
   }
   function renderAgents(state) {
     const workers = Array.isArray(state.workers) ? state.workers : [];
-    const workerPresent = workers.filter(present);
-    const workerWorking = workerPresent.filter(working);
-    const pending = workers.filter((worker) => worker.dispatchStatus === "pending");
+    const workerPresent = workers.filter(isPresent);
+    const workerWorking = workerPresent.filter((worker) => workerStatus(worker).status === "working");
+    const pending = workers.filter((worker) => workerStatus(worker).status === "pending");
     $("working-count").textContent = workerWorking.length;
     $("present-count").textContent = workerPresent.length;
     $("pending-count").textContent = pending.length;
@@ -190,7 +188,7 @@
       dispatchId: worker.dispatchId,
       source: worker.agent ? `ORCA · ${worker.agent}` : "ORCA",
       name: worker.label || worker.taskTitle || worker.dispatchId || "Unnamed worker",
-      state: working(worker) ? "working" : worker.dispatchStatus === "pending" ? "pending" : "present"
+      state: workerStatus(worker).status
     }));
     const paseo = Array.isArray(state.paseo) ? state.paseo : [];
     for (const agent of paseo) {

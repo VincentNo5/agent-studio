@@ -1,4 +1,5 @@
-import { agentStatuses, workerStatus, countStatuses, STATUS_META, STATUS_ORDER, COMPLETED_WINDOW_MS, isWorking, matchesRole, taskBoard, getJSON, outputBlocks, ROOM_COLORS, hash } from './studio-data.js';
+import { toolIcon } from './tool-icons.js';
+import { agentStatuses, workerStatus, countStatuses, STATUS_META, STATUS_ORDER, COMPLETED_WINDOW_MS, isWorking, matchesRole, taskBoard, getJSON, outputBlocks, ROOM_COLORS, hash, workKind, workSelection, workLines, workingItems, workingSummary, floorWorkers, roleWork, campusStatuses } from './studio-data.js';
 import { createDemoFeed, DEMO_START } from './demo-state.js';
 const $ = id => document.getElementById(id);
 const el = (tag, cls, text) => { const n = document.createElement(tag); if (cls)
@@ -94,14 +95,15 @@ ${demoMode ? '<div class="demo-banner" role="status">DEMO MODE · SIMULATED DATA
 </header>
 <div class="world-heading"><div class="eyebrow">Headquarters · live spatial view</div><h2 id="world-title">ONE STUDIO. EVERY AGENT.</h2><p id="world-subtitle">One open campus. Every team on the same floor.</p></div>
 <nav class="view-links" aria-label="Studio view"><a href="/${demoSuffix}" ${!isFloor ? 'aria-current="page"' : ''}>Command overview</a><a href="/floor${demoSuffix}" ${isFloor ? 'aria-current="page"' : ''}>Floor view ↗</a><a href="/anatomy">Anatomy ↗</a></nav>
-<aside class="left-column" aria-label="Agent status, task board and operations">
+<aside class="left-column" aria-label="Agent status, task board and tools">
  <section class="panel agent-status" aria-labelledby="agent-status-title"><div class="panel-head"><h2 id="agent-status-title">Agent status</h2><small id="status-total">—</small></div>
   <div class="status-strip">${['working', 'completed', 'idle'].map(s => `<div style="--s:${meta(s).color}" data-status="${s}"><b>${icon(s)}<span id="count-${s}">—</span></b><span>${meta(s).label}</span></div>`).join('')}</div>
   <div class="status-groups" id="status-groups"><p class="empty">Awaiting state.</p></div>
  </section>
  <section class="panel task-board"><div class="panel-head"><h2>Task board</h2><small id="board-total">—</small></div><p class="board-source" id="board-source">Awaiting state</p><div class="board-progress" id="board-progress" hidden><i></i></div><div class="lanes" id="lanes"></div></section>
- <nav class="panel operations" aria-label="Operations">${[['history', '◷', 'Run history'], ['roster', '◈', 'Roster'], ['audit', '⌁', 'Audit'], ['quotas', '◴', 'Quotas'], ['paseo', '◇', 'Paseo'], ['tasks', '☷', 'All tasks']].map(([k, i, t]) => `<button data-panel="${k}" title="${t}" aria-label="${t}"><span>${i}</span><em>${t}</em></button>`).join('')}</nav>
+ <section class="panel tool-activity" aria-labelledby="tool-activity-title"><div class="panel-head"><h2 id="tool-activity-title">Agent tools</h2><small id="tool-total">—</small><button data-panel="tools" class="link-button">Detail ↗</button></div><div class="tool-list" id="tool-list"><p class="empty">Awaiting tool scan.</p></div></section>
 </aside>
+<nav class="panel operations" aria-label="Operations">${[['history', '◷', 'Run history'], ['roster', '◈', 'Roster'], ['audit', '⌁', 'Audit'], ['quotas', '◴', 'Quotas'], ['paseo', '◇', 'Paseo'], ['tasks', '☷', 'All tasks']].map(([k, i, t]) => `<button data-panel="${k}" title="${t}" aria-label="${t}"><span>${i}</span><em>${t}</em></button>`).join('')}</nav>
 <aside class="right-column" aria-label="Agent inspection" data-open="false">
  <button class="drawer-handle" id="drawer-handle" type="button" aria-expanded="false" aria-controls="agent-detail live-work"><span></span>Agent details</button>
  <section class="panel detail" id="agent-detail"><div class="panel-head"><h2>Agent detail</h2><button id="clear-selection" class="icon-button" aria-label="Clear agent selection">×</button></div><div id="detail-body" class="detail-body"></div></section>
@@ -116,6 +118,11 @@ const dialog = el('dialog');
 dialog.setAttribute('aria-labelledby', 'dialog-title');
 dialog.innerHTML = '<div class="dialog-header"><h2 id="dialog-title"></h2><div class="dialog-actions"><button id="dialog-refresh" aria-label="Refresh panel">↻ Refresh</button><button id="dialog-close" aria-label="Close panel">×</button></div></div><div id="dialog-content" class="dialog-content"></div>';
 document.body.append(dialog);
+// `?debug` exposes the scene for inspector use (no effect without the flag).
+if (urlParams.has('debug'))
+    Object.defineProperty(window, '__studio', { get: () => ({ world, state, statuses }) });
+// First time this browser saw each work id: the strip's newest-first order (no reported start time exists).
+const firstSeen = new Map();
 let world = null, state = null, roster = { rooms: [], agents: [] }, rosterLoaded = false, selected = null, statuses = new Map(), board = null, pickedWorker = null, follow = true, currentPanel = null, selectedLane = null;
 let demoFeed = null, market = null;
 let pollTimer = null, outputTimer = null, clockTimer = null, marketTimer = null, loading = false, closed = false, logId = null, logGeneration = 0, outputBusy = false, outputCache = null, previous = null, transitions = [];
@@ -208,6 +215,59 @@ function renderDetail() {
         box.append(empty);
         return;
     }
+    if (selected.startsWith('tool:')) {
+        const tool = (state?.tools || []).find(t => `tool:${t.id}` === selected);
+        if (!tool) {
+            box.append(el('p', 'empty', 'This tool is no longer reported.'));
+            return;
+        }
+        const head = el('div', 'detail-head');
+        const avatar = el('div', 'detail-avatar detail-tool');
+        avatar.append(toolBadge(tool, 'detail-tool-icon'));
+        avatar.style.setProperty('--s', TOOL_COLOR[tool.state] || TOOL_COLOR.offline);
+        const who = el('div');
+        who.append(el('h3', 'agent-name', tool.name), el('div', 'department', `Agent tool · ${TOOL_LABEL[tool.state] || tool.state}`));
+        head.append(avatar, who);
+        box.append(head);
+        const now = Number(state.ts) || Date.now();
+        const facts = el('dl', 'fields');
+        for (const [key, value] of [
+            ['State', tool.state],
+            ['Processes', tool.processes ? `${tool.processes} · pid ${(tool.pids || []).join(', ')}` : 'none'],
+            ['Project', tool.cwd],
+            ['Newest output', tool.lastActivity ? `${ago(Date.parse(tool.lastActivity), now)} ago` : null],
+            ['Session', tool.lastSession],
+            ['Evidence', tool.evidence],
+        ]) {
+            if (value)
+                facts.append(el('dt', null, key), el('dd', null, value));
+        }
+        const details = el('section', 'detail-section');
+        details.append(el('h3', null, 'Reported fields'), facts);
+        box.append(details);
+        const agents = tool.agents || [];
+        const dispatches = el('section', 'detail-section');
+        dispatches.append(el('h3', null, 'Orca dispatches on this tool'));
+        if (!agents.length) {
+            dispatches.append(el('p', null, 'None. The process is a direct session, not an orchestration dispatch.'));
+        }
+        for (const a of agents) {
+            dispatches.append(button(`${a.role || a.agent || 'dispatch'} · ${a.task || a.dispatchId} · ${a.state || 'unknown'} ↗`, () => {
+                selected = `worker:${a.dispatchId}`;
+                pickedWorker = a.dispatchId;
+                follow = false;
+                renderDetail();
+                renderWorkers();
+                openLogs(a.dispatchId);
+            }, 'wide history-row'));
+        }
+        box.append(dispatches);
+        return;
+    }
+    if (selected.startsWith('worker:omp-child:')) {
+        renderChildDetail(box, findWorker(selected.slice(7)));
+        return;
+    }
     const role = roster.agents.find(a => a.name === selected), entry = state ? statusOf(selected) : null;
     const worker = selected.startsWith('worker:') ? findWorker(selected.slice(7)) : entry?.worker || ((state?.workers || []).find(w => isWorking(w) && role && matchesRole(w, role)) || (state?.workers || []).find(w => role && matchesRole(w, role)));
     if (!role && !worker) {
@@ -235,7 +295,8 @@ function renderDetail() {
         box.append(el('p', 'description', role.desc));
     const evidence = el('section', 'detail-section');
     const proof = el('dl', 'fields');
-    const facts = [['Evidence', entry?.evidence || (state ? 'No current work reported' : null)], ['Since', entry?.since ? date(entry.since) : null], ['Last audit', entry?.lastEvent ? `${entry.lastEvent.kind} · ${clock(entry.lastEvent.ts)}` : null]];
+    const tool = worker?.dispatchId ? (state?.tools || []).find(t => (t.agents || []).some(a => a.dispatchId === worker.dispatchId)) : null;
+    const facts = [['Evidence', entry?.evidence || (state ? 'No current work reported' : null)], ['Tool', tool ? `${tool.name} · ${tool.state}` : worker?.agent || null], ['Since', entry?.since ? date(entry.since) : null], ['Last audit', entry?.lastEvent ? `${entry.lastEvent.kind} · ${clock(entry.lastEvent.ts)}` : null]];
     for (const [key, value] of facts)
         if (value)
             proof.append(el('dt', null, key), el('dd', null, value));
@@ -247,7 +308,7 @@ function renderDetail() {
     const details = el('section', 'detail-section'), dl = el('dl', 'fields');
     const events = (state?.audit?.events || []).filter(e => role ? e.agent === role.name : e.agent === worker?.agent);
     const lastInvoke = events.filter(e => e.kind === 'invoked').at(-1);
-    const fields = [['Stage', worker?.workerState], ['Dispatch', worker?.dispatchStatus], ['Model', worker?.model || role?.model], ['Agent', worker?.agent], ['Liveness', worker?.liveness], ['Reason', worker?.livenessReason], ['Next action', worker?.nextAction], ['Terminal', worker?.terminalState], ['Host', worker?.host], ['Last invoked', lastInvoke ? date(lastInvoke.ts) : null]];
+    const fields = [['Stage', worker?.workerState], ['Dispatch', worker?.dispatchStatus], ['Model', worker?.model || '—'], ['Provider', worker?.provider], ['Agent', worker?.agent], ['Remaining tasks', worker?.remainingTasks?.length ? worker.remainingTasks.join(' · ') : null], ['Liveness', worker?.liveness], ['Reason', worker?.livenessReason], ['Next action', worker?.nextAction], ['Terminal', worker?.terminalState], ['Host', worker?.host], ['Last invoked', lastInvoke ? date(lastInvoke.ts) : null]];
     for (const [key, value] of fields)
         if (value) {
             dl.append(el('dt', null, key), el('dd', null, value === 'inherit' ? 'Inherited (roster)' : value));
@@ -273,8 +334,48 @@ function renderDetail() {
     else
         box.append(el('p', 'department', 'No dispatch is associated with this role.'));
 }
+/** An omp task child is its own agent: its task, state and parent tool, never the tool's detail. */
+function renderChildDetail(box, w) {
+    if (!w) {
+        box.append(el('p', 'empty', 'This omp child is no longer reported. It may have settled.'));
+        return;
+    }
+    const status = workerStatus(w).status;
+    box.append(chip(status, meta(status).label, 'status-pill'));
+    const head = el('div', 'detail-head');
+    const avatar = el('div', 'detail-avatar');
+    avatar.innerHTML = portrait(w.agent || 'omp-child', 'lobby', true);
+    avatar.style.setProperty('--s', meta(status).color);
+    avatar.dataset.status = status;
+    const who = el('div');
+    who.append(el('h3', 'agent-name', w.agent || 'omp child'), el('div', 'department', `omp task child · ${w.toolName || '—'}`));
+    head.append(avatar, who);
+    box.append(head);
+    const section = el('section', 'detail-section omp-child-detail');
+    section.append(el('h3', null, 'Current task'), el('p', null, w.taskTitle || 'The child reported no task.'));
+    box.append(section);
+    const facts = el('dl', 'fields');
+    for (const [key, value] of [
+        ['Agent', w.agent], ['State', w.childState], ['Parent tool', w.toolName], ['Stale', w.stale ? 'yes · no recent evidence' : 'no'],
+        ['Provider', w.provider], ['Model', w.model], ['Remaining', workLines(w).count], ['Project', w.cwd], ['Child', w.dispatchId.slice('omp-child:'.length)],
+    ])
+        facts.append(el('dt', null, key), el('dd', null, value || '—'));
+    const details = el('section', 'detail-section');
+    details.append(el('h3', null, 'Reported fields'), facts);
+    box.append(details);
+    if (w.toolId)
+        box.append(button(`Open parent tool · ${w.toolName || w.toolId} ↗`, () => selectAgent(`tool:${w.toolId}`), 'wide'));
+    box.append(el('p', 'department', 'Child output stays in its omp session; no log stream is available here.'));
+}
 function findWorker(id) { return state?.workers?.find(w => w.dispatchId === id) || state?.runs?.flatMap(r => r.workers || []).find(w => w.dispatchId === id); }
-function selectAgent(id, focus = true) { selected = id; world?.select(id, focus); if (id.startsWith('worker:')) {
+function selectAgent(id, focus = true) { world?.select(id, focus);
+// A direct session visitor on the floor opens its tool; synthetic rows have no Orca log to fetch.
+if (id.startsWith('worker:tool:')) {
+    const w = findWorker(id.slice(7));
+    if (w?.toolId)
+        id = `tool:${w.toolId}`;
+}
+selected = id; if (id.startsWith('worker:') && workKind({ dispatchId: id.slice(7) }) === 'dispatch') {
     pickedWorker = id.slice(7);
     follow = false;
     outputCache = null;
@@ -352,16 +453,72 @@ function renderEvents() {
     }
     box.scrollTop = box.scrollHeight;
 }
-function workerSource() { return state?.workers?.length ? state.workers : state?.runs?.[0]?.workers || []; }
+function workerSource() { return floorWorkers(state); }
+/**
+ * Live tool work as worker rows, so the floor's actors, Agent status and Live work all see it.
+ * omp task children carry their own agent name; a direct session is one generic worker.
+ * Only working sessions and non-stale children become rows: idle evidence must not displace the recorded run.
+ */
+function withToolWorkers(next) {
+    if (!next?.tools?.length)
+        return next;
+    const known = new Set((next.workers || []).map(w => w.dispatchId).filter(Boolean));
+    const dispatchPaths = new Set((next.workers || [])
+        .filter(w => w.dispatchId && !/^(tool:|omp-child:)/.test(w.dispatchId) && isWorking(w) && w.path)
+        .map(w => w.path));
+    const settledChildren = new Set(['completed', 'complete', 'succeeded', 'failed', 'cancelled', 'aborted', 'error']);
+    const extra = [];
+    for (const tool of next.tools) {
+        for (const child of tool.subagents || []) {
+            // A stale child stays in the tool detail but never claims the floor.
+            if (settledChildren.has(child.state) || child.stale === true) continue;
+            const id = `omp-child:${child.id}`;
+            if (known.has(id)) continue;
+            known.add(id);
+            extra.push({
+                dispatchId: id, agent: child.agent, label: `${child.agent} · ${tool.name}`,
+                taskTitle: child.task ?? null,
+                workerState: child.state === 'pending' ? 'pending' : 'running',
+                dispatchStatus: child.state, liveness: 'live',
+                stale: false, childState: child.state ?? null, toolId: tool.id, toolName: tool.name, cwd: child.cwd ?? null,
+                model: child.model ?? null, provider: child.model ? child.provider ?? null : null,
+                remaining: child.remaining ?? null,
+            });
+        }
+        // Older payloads have one tool row; an explicit empty sessions list has no live pid.
+        const sessions = Array.isArray(tool.sessions) ? tool.sessions : tool.state === 'working' ? [tool] : [];
+        for (const session of sessions) {
+            if (session.cwd && dispatchPaths.has(session.cwd)) continue;
+            if ((session.state ?? tool.state) !== 'working') continue;
+            const id = session.pid == null ? `tool:${tool.id}` : `tool:${tool.id}:${session.pid}`;
+            if (known.has(id)) continue;
+            known.add(id);
+            extra.push({
+                dispatchId: id, agent: tool.name, label: `${tool.name} · direct session`,
+                taskTitle: session.current ?? null, workerState: 'running',
+                dispatchStatus: 'working', liveness: 'live',
+                toolId: tool.id, toolName: tool.name, cwd: session.cwd, model: session.model ?? null,
+                provider: session.model ? session.provider ?? null : null, remaining: session.remaining ?? null,
+                pid: session.pid, command: session.command, processes: session.pid == null ? tool.processes : 1,
+            });
+        }
+    }
+    if (!extra.length)
+        return next;
+    const workers = [...(next.workers || []), ...extra];
+    return extra.some(isWorking) ? { ...next, workers, workerScope: { ...(next.workerScope || {}), live: true } } : { ...next, workers };
+}
 function renderWorkers() {
     if (!state)
         return;
     const source = workerSource(), scope = state.workerScope || {}, run = state.runs?.[0];
-    $('run-tag').textContent = scope.live ? 'Live' : scope.runId || run ? 'Recorded' : 'No run';
-    $('run-tag').dataset.live = String(!!scope.live);
-    $('run-objective').textContent = scope.objective || run?.objective || 'No orchestration run recorded.';
+    const direct = source.filter(w => String(w.dispatchId || '').startsWith('tool:'));
+    $('run-tag').textContent = scope.live || direct.length ? 'Live' : scope.runId || run ? 'Recorded' : 'No run';
+    $('run-tag').dataset.live = String(!!(scope.live || direct.length));
+    $('run-objective').textContent = scope.objective || run?.objective || (direct.length ? `${direct.length} live tool surface${direct.length === 1 ? '' : 's'} · no Orca run bound` : 'No orchestration run recorded.');
+    const orcaLike = w => w.dispatchId && !/^(tool:|omp-child:)/.test(String(w.dispatchId));
     if (follow) {
-        const next = source.find(isWorking) || source[0];
+        const next = source.find(w => orcaLike(w) && isWorking(w)) || source.find(orcaLike) || null;
         if (next?.dispatchId !== pickedWorker) {
             pickedWorker = next?.dispatchId || null;
             outputCache = null;
@@ -372,19 +529,56 @@ function renderWorkers() {
     box.replaceChildren();
     if (!source.length)
         box.append(el('p', 'empty', 'No workers reported.'));
+    // Working items lead as cards; everything else follows below a divider.
+    const working = workingItems(state, firstSeen), tasksKnown = (state.orcaTasks || []).length > 0;
+    if (working.length) {
+        const strip = el('section', 'working-now');
+        const h = el('h3');
+        h.append('Working now', el('span', 'count', String(working.length)));
+        strip.append(h);
+        for (const w of working)
+            strip.append(workCard(w, tasksKnown));
+        box.append(strip);
+        if (source.length > working.length)
+            box.append(el('hr', 'work-divider'));
+    }
     for (const w of source) {
-        const s = statuses.get(`worker:${w.dispatchId}`) || workerStatus(w);
-        const b = button('', () => selectAgent(`worker:${w.dispatchId}`), 'worker-row');
+        if (working.includes(w))
+            continue;
+        const toolOnly = workKind(w) === 'tool';
+        const s = w.dispatchId ? statuses.get(`worker:${w.dispatchId}`) || workerStatus(w) : { status: w.workerState === 'working' ? 'working' : 'pending' };
+        const id = workSelection(w);
+        const b = button('', () => selectAgent(id), 'worker-row');
         b.dataset.status = s.status;
         b.style.setProperty('--s', meta(s.status).color);
-        b.classList.toggle('selected', pickedWorker === w.dispatchId);
-        b.title = [s.evidence, w.agent, w.liveness].filter(Boolean).join(' · ');
+        b.classList.toggle('selected', selected === id);
+        b.title = [s.evidence, w.toolName, w.cwd, w.agent].filter(Boolean).join(' · ');
         const text = el('span', 'worker-text');
-        text.append(el('span', 'worker-name', w.taskTitle || w.label || w.dispatchId || 'Unnamed worker'), el('small', null, [w.agent || 'agent unknown', w.workerState || w.dispatchStatus || 'no state'].join(' · ')));
+        const project = w.cwd ? w.cwd.split('/').filter(Boolean).slice(-1)[0] : null;
+        const detail = toolOnly
+            ? ['direct session', project, w.processes ? `${w.processes}p` : null]
+            : [w.agent || w.role || 'agent unknown', w.workerState || 'no state', w.toolName ? `via ${w.toolName}` : null, project].filter(Boolean);
+        text.append(el('span', 'worker-name', w.taskTitle || w.label || w.dispatchId || 'Unnamed worker'),
+            el('small', null, detail.filter(Boolean).join(' · ')));
         b.append(text, chip(s.status));
         box.append(b);
     }
     $('live-tail').hidden = !isFloor || !pickedWorker;
+}
+const WORK_KIND = { dispatch: 'Orca dispatch', tool: 'direct session', 'omp-child': 'omp child' };
+/** One working item: task; agent · provider · model; remaining work. */
+function workCard(w, tasksKnown) {
+    const id = workSelection(w), kind = workKind(w), lines = workLines(w, tasksKnown);
+    const card = button('', () => selectAgent(id), 'work-card');
+    card.setAttribute('data-work-id', w.dispatchId);
+    card.dataset.kind = kind;
+    card.style.setProperty('--s', meta('working').color);
+    card.classList.toggle('selected', selected === id);
+    card.title = [WORK_KIND[kind], w.toolName, w.cwd, w.dispatchId].filter(Boolean).join(' · ');
+    const top = el('span', 'work-head');
+    top.append(el('span', 'work-task', lines.task), el('em', 'work-kind', WORK_KIND[kind]));
+    card.append(top, el('small', 'work-meta', lines.who), el('small', 'work-meta work-left', lines.left));
+    return card;
 }
 function diffActivity(next) {
     if (previous) {
@@ -408,8 +602,10 @@ function diffActivity(next) {
 // Combined map: roster roles from agentStatuses, plus every Orca dispatch on the floor.
 function computeStatuses() {
     const map = new Map(agentStatuses(state, roster));
+    // Synthetic tool rows are not roster roles: leave them out of the map so the floor's
+    // visitor pass sees them (a represented dispatch is assumed to own a roster actor).
     for (const w of workerSource())
-        if (w.dispatchId)
+        if (w.dispatchId && !String(w.dispatchId).startsWith('tool:') && !String(w.dispatchId).startsWith('omp-child:'))
             map.set(`worker:${w.dispatchId}`, { ...workerStatus(w), worker: w, task: w.taskTitle || w.label || null, since: null, lastEvent: null });
     return map;
 }
@@ -432,35 +628,170 @@ function statusRow(id, entry) {
     b.append(text, el('time', null, entry.since ? clock(entry.since) : ''));
     return b;
 }
-function renderStatusPanel(counts) {
+/** A working item in Agent status: opens what its strip card opens. */
+function workStatusRow(id, entry, roles = []) {
+    const w = entry.worker, kind = workKind(w), b = statusRow(id, entry);
+    b.dataset.workId = w.dispatchId;
+    b.dataset.kind = kind;
+    const lines = workLines(w, (state?.orcaTasks || []).length > 0);
+    b.querySelector('.status-name').textContent = lines.task;
+    b.querySelector('.status-text small').textContent = [WORK_KIND[kind], w.toolName, lines.who].filter(Boolean).join(' · ');
+    // Roster roles this dispatch lights are annotations on its row, not rows of their own.
+    if (roles.length) {
+        const chips = el('span', 'status-roles');
+        for (const role of roles)
+            chips.append(el('span', 'role-chip', agentName(role, statuses.get(role))));
+        b.querySelector('.status-text').append(chips);
+    }
+    return b;
+}
+function renderStatusPanel(counts, items, { byItem, roleOnly }) {
     for (const s of ['working', 'completed', 'idle'])
         $(`count-${s}`).textContent = String(counts[s]);
     $('status-total').textContent = `${counts.total} roles`;
     const box = $('status-groups');
     box.replaceChildren();
+    // Same items as the Live work strip, grouped by tool, so the two counts cannot drift.
+    const toolWork = items.filter(w => workKind(w) !== 'dispatch');
+    const perTool = new Map();
+    for (const w of toolWork)
+        perTool.set(w.toolId, (perTool.get(w.toolId) || 0) + 1);
+    const workingTools = (state?.tools || []).filter(t => perTool.has(t.id));
+    if (workingTools.length) {
+        const group = el('section', 'status-group');
+        group.style.setProperty('--s', meta('working').color);
+        const head = el('h3');
+        head.innerHTML = icon('working');
+        // A per-tool count, labelled as such: the item count lives on the Working now group.
+        head.append('Tools working', el('span', 'count', `${workingTools.length} tool${workingTools.length === 1 ? '' : 's'}`));
+        group.append(head);
+        for (const tool of workingTools) {
+            const row = button('', () => selectAgent(`tool:${tool.id}`), 'status-row');
+            row.dataset.status = 'working';
+            row.style.setProperty('--s', TOOL_COLOR.working);
+            row.classList.toggle('selected', selected === `tool:${tool.id}`);
+            const text = el('span', 'status-text');
+            const n = perTool.get(tool.id);
+            const metaBits = [
+                `${n} working`,
+                tool.processes ? `${tool.processes} proc` : null,
+                tool.cwd ? tool.cwd.split('/').filter(Boolean).slice(-1)[0] : null,
+                tool.agents?.length ? `${tool.agents.length} dispatch${tool.agents.length === 1 ? '' : 'es'}` : null,
+            ].filter(Boolean).join(' · ');
+            text.append(el('span', 'status-name', tool.name), el('small', null, metaBits || tool.evidence || ''));
+            row.append(toolBadge(tool, 'status-tool-icon'), text, el('time', null, tool.lastActivity ? ago(Date.parse(tool.lastActivity), Number(state.ts) || Date.now()) : ''));
+            group.append(row);
+        }
+        box.append(group);
+    }
     const recent = (a, b) => String(b[1].since || '').localeCompare(String(a[1].since || '')) || a[0].localeCompare(b[0]);
     const groups = [
-        ['working', 'Working now', 'No agent is working right now.'],
+        ['working', 'Working now', 'Nothing is working right now: no dispatch, tool session, omp child or roster role.'],
         ['pending', 'Waiting to start', null],
         ['failed', 'Failed', null],
         ['completed', 'Recently completed', `No settled worker on the floor and no audit completion in the last ${COMPLETED_WINDOW_MS / 60000} minutes.`]
     ];
     for (const [status, title, empty] of groups) {
-        const rows = [...statuses].filter(([id, e]) => !id.startsWith('worker:') && e.status === status).sort(recent);
-        if (!rows.length && !empty)
+        // Working now leads with the same items as the strip and the header metric; only roles no
+        // item accounts for follow. Item rows stay out of `statuses`, which the floor uses to pick visitors.
+        const rows = status === 'working' ? [...roleOnly].sort(recent) : [...statuses].filter(([id, e]) => !id.startsWith('worker:') && e.status === status).sort(recent);
+        const work = status === 'working' ? items.map(w => [workSelection(w), { ...workerStatus(w), worker: w, task: w.taskTitle || w.label || null, since: null, lastEvent: null }]) : [];
+        if (!rows.length && !work.length && !empty)
             continue;
         const group = el('section', 'status-group');
         group.style.setProperty('--s', meta(status).color);
         const h = el('h3');
         h.innerHTML = icon(status);
-        h.append(title, el('span', 'count', String(rows.length)));
+        if (status === 'working') {
+            group.dataset.workingItems = String(work.length);
+            group.dataset.workingRoles = String(rows.length);
+            h.append(title, el('span', 'count', String(work.length)));
+            if (rows.length)
+                h.append(el('span', 'count role-count', `+${rows.length} role${rows.length === 1 ? '' : 's'}`));
+        }
+        else
+            h.append(title, el('span', 'count', String(rows.length)));
         group.append(h);
-        if (!rows.length)
+        if (!rows.length && !work.length)
             group.append(el('p', 'group-empty', empty));
+        for (const [id, entry] of work)
+            group.append(workStatusRow(id, entry, byItem.get(entry.worker.dispatchId)));
         for (const [id, entry] of rows)
             group.append(statusRow(id, entry));
         box.append(group);
     }
+}
+const TOOL_LABEL = { working: 'Working', idle: 'Idle · process up', available: 'Available', offline: 'Not installed' };
+const TOOL_COLOR = { working: '#38d9ff', idle: '#ffb547', available: '#4fe08f', offline: '#7f93a8' };
+/** Official mark in the state colour, or the first letter when the vendor has no public icon. */
+function toolBadge(tool, cls = 'tool-icon') {
+    const wrap = el('span', cls);
+    const path = toolIcon(tool.id);
+    if (path) {
+        const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+        svg.setAttribute('viewBox', '0 0 24 24');
+        svg.setAttribute('aria-hidden', 'true');
+        const shape = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+        shape.setAttribute('d', path);
+        shape.setAttribute('fill', 'currentColor');
+        svg.append(shape);
+        wrap.append(svg);
+    }
+    else {
+        wrap.append(el('i', 'tool-letter', (tool.name || '?').slice(0, 1).toUpperCase()));
+    }
+    wrap.style.setProperty('--s', TOOL_COLOR[tool.state] || TOOL_COLOR.offline);
+    return wrap;
+}
+
+const ago = (ms, now = Date.now()) => { const s = Math.max(0, Math.round((now - ms) / 1000)); return s < 60 ? `${s}s` : s < 3600 ? `${Math.round(s / 60)}m` : `${Math.round(s / 3600)}h`; };
+/** One row per installed agent surface: process count, newest session output, derived state. */
+function renderTools() {
+    const all = Array.isArray(state?.tools) ? state.tools : [];
+    const installed = all.filter(t => t.installed !== false);
+    const rows = installed.length ? installed : all;
+    const list = $('tool-list');
+    // Demo snapshots carry their own clock, so age against the snapshot, not the wall.
+    const now = Number(state?.ts) || Date.now();
+    $('tool-total').textContent = all.length
+        ? `${all.filter(t => t.state === 'working').length} working · ${installed.length}/${all.length}`
+        : '—';
+    list.replaceChildren();
+    if (!rows.length) {
+        list.append(el('p', 'empty', 'No tool scan reported.'));
+        return;
+    }
+    // The panel is short on a laptop: show what is live now, and fold the quiet tools into one
+    // row that opens the full table. Icons stay in both places.
+    const order = { working: 0, idle: 1, available: 2, offline: 3 };
+    const sorted = rows.slice().sort((a, b) => (order[a.state] ?? 9) - (order[b.state] ?? 9));
+    const live = sorted.filter(t => t.state === 'working' || t.state === 'idle');
+    const quiet = sorted.filter(t => t.state !== 'working' && t.state !== 'idle');
+    for (const tool of live) {
+        const row = el('div', 'tool-row');
+        row.dataset.state = tool.state || 'offline';
+        row.append(toolBadge(tool), el('span', 'tool-name', tool.name));
+        const meta = tool.state === 'working' && tool.lastActivity
+            ? ago(Date.parse(tool.lastActivity), now)
+            : tool.processes ? `${tool.processes}p` : tool.state === 'idle' ? 'idle' : '';
+        row.append(el('span', 'tool-meta', meta));
+        const agents = Array.isArray(tool.agents) ? tool.agents : [];
+        // Badge only live work: a project keeps its settled dispatches listed in the dialog.
+        const moving = agents.filter(a => !['succeeded', 'failed', 'stopped', 'cancelled', 'exited', 'completed'].includes(a.state || ''));
+        const children = Array.isArray(tool.subagents) ? tool.subagents.length : 0;
+        if (moving.length + children)
+            row.append(el('em', 'tool-agents', moving.length + children));
+        row.onclick = () => openPanel('tools');
+        row.title = `${tool.name}: ${tool.evidence || tool.state}${tool.cwd ? `\nproject: ${tool.cwd}` : ''}${tool.lastSession ? `\nsession: ${tool.lastSession}` : ''}${agents.length ? `\n${agents.map(a => `${a.role || a.agent} · ${a.state}`).join('\n')}` : ''}`;
+        list.append(row);
+    }
+    if (quiet.length) {
+        const more = button(`${quiet.length} quiet tool${quiet.length === 1 ? '' : 's'} · all tools ↗`, () => openPanel('tools'), 'tool-row tool-more');
+        more.title = quiet.map(t => `${t.name} · ${TOOL_LABEL[t.state] || t.state}`).join('\n');
+        list.append(more);
+    }
+    if (!live.length && !quiet.length)
+        list.append(el('p', 'empty', 'No tool scan reported.'));
 }
 function render() {
     board = taskBoard(state);
@@ -471,8 +802,19 @@ function render() {
     const working = list => list.filter(([, e]) => e.status === 'working').length;
     const completed = list => list.filter(([, e]) => e.status === 'completed').length;
     const doneLane = board.source === 'Orca' ? 'completed' : 'done';
-    $('metric-working').textContent = String(roleCounts.working);
-    $('metric-working-sub').textContent = `${roleCounts.working} role${roleCounts.working === 1 ? '' : 's'} · ${working(dispatches)} dispatch${working(dispatches) === 1 ? '' : 'es'}`;
+    const present = new Set(workerSource().map(w => w.dispatchId).filter(Boolean));
+    for (const id of firstSeen.keys())
+        if (!present.has(id))
+            firstSeen.delete(id);
+    for (const id of present)
+        if (!firstSeen.has(id))
+            firstSeen.set(id, Number(state.ts) || Date.now());
+    // The headline is the Live work strip: dispatches plus tool sessions and omp children, plus
+    // roles working outside them. The campus badge and Agent status count the same two lists.
+    const items = workingItems(state, firstSeen), work = roleWork(statuses, items);
+    const summary = workingSummary(items, work.roleOnly.length);
+    $('metric-working').textContent = String(summary.count);
+    $('metric-working-sub').textContent = summary.sub;
     $('metric-completed').textContent = String(roleCounts.completed);
     $('metric-completed-sub').textContent = `${roleCounts.completed} role${roleCounts.completed === 1 ? '' : 's'} · ${completed(dispatches)} dispatch${completed(dispatches) === 1 ? '' : 'es'}`;
     $('metric-pending').textContent = `${roleCounts.pending} / ${board.counts.blocked || 0}`;
@@ -482,13 +824,12 @@ function render() {
     $('metric-tasks-sub').textContent = board.total ? `${board.counts[doneLane] || 0}/${board.total} done` : 'none reported';
     $('metric-board-label').textContent = `${board.source} tasks`;
     for (const f of [0, 1, 2, 3]) {
-        const onFloor = f ? entries.filter(([id]) => floorOf(id) === f) : entries;
-        const values = onFloor.map(([, e]) => e), c = countStatuses(values);
+        const values = f ? entries.filter(([id]) => floorOf(id) === f).map(([, e]) => e) : campusStatuses(statuses, items, work.roleOnly), c = countStatuses(values);
         document.querySelectorAll(`[data-floor-badges="${f}"]`).forEach(n => { n.innerHTML = badgesFor(values); });
         if (f)
             document.querySelectorAll(`[data-floor="${f}"]`).forEach(b => { b.dataset.active = String(c.working > 0); b.title = `${c.working} working · ${c.completed} completed · ${c.pending} pending · ${c.failed} failed`; });
     }
-    renderStatusPanel(roleCounts);
+    renderStatusPanel(roleCounts, items, work);
     $('scope').textContent = `${state.terminals?.length || 0} terminals · ${state.worktrees?.length || 0} worktrees · ${state.workerScope?.hidden || 0} historical dispatches`;
     world?.update(state, statuses, board);
     highlightLane();
@@ -496,6 +837,7 @@ function render() {
     renderDetail();
     renderWorkers();
     renderEvents();
+    renderTools();
     diffActivity(state);
     connection();
     // Operational dialogs are snapshots: explicit refresh preserves keyboard focus
@@ -509,14 +851,14 @@ async function poll() {
     const jobs = [];
     if (!demoMode)
         jobs.push(getJSON('/state').then(data => { if (!data || !Array.isArray(data.workers) || !Number.isFinite(data.ts))
-                throw new Error('Invalid state payload'); state = data; stateError = null; lastSuccess = Date.now(); }).catch(e => { stateError = `State: ${e.message}`; }));
+                throw new Error('Invalid state payload'); state = withToolWorkers(data); stateError = null; lastSuccess = Date.now(); }).catch(e => { stateError = `State: ${e.message}`; }));
     if (!rosterLoaded)
         jobs.push(getJSON('/roster.json').then(data => { if (!data || !Array.isArray(data.agents) || !Array.isArray(data.rooms))
             throw new Error('Invalid roster payload'); roster = data; rosterLoaded = true; rosterError = null; world?.setRoster(roster); }).catch(e => { rosterError = `Roster: ${e.message}`; }));
     await Promise.allSettled(jobs);
     if (demoMode && rosterLoaded) {
         demoFeed ||= createDemoFeed(roster);
-        state = demoFeed.tick(DEMO_START + performance.now() - demoStarted);
+        state = withToolWorkers(demoFeed.tick(DEMO_START + performance.now() - demoStarted));
         stateError = null;
         lastSuccess = Date.now();
     }
@@ -540,7 +882,7 @@ function openPanel(kind) { currentPanel = kind; logId = null; logGeneration++; r
     dialog.showModal(); }
 function intro(text) { $('dialog-content').append(el('p', 'dialog-intro', text)); }
 function emptyPanel(text) { $('dialog-content').append(el('p', 'empty', text)); }
-function table(headers, rows) { const t = el('table', 'data-table'), head = el('thead'), tr = el('tr'); headers.forEach(h => tr.append(el('th', null, h))); head.append(tr); const body = el('tbody'); for (const values of rows) {
+function table(headers, rows, parent = $('dialog-content')) { const t = el('table', 'data-table'), head = el('thead'), tr = el('tr'); headers.forEach(h => tr.append(el('th', null, h))); head.append(tr); const body = el('tbody'); for (const values of rows) {
     const row = el('tr');
     for (const value of values) {
         const td = el('td');
@@ -548,13 +890,13 @@ function table(headers, rows) { const t = el('table', 'data-table'), head = el('
         row.append(td);
     }
     body.append(row);
-} t.append(head, body); $('dialog-content').append(t); }
+} t.append(head, body); parent.append(t); return t; }
 function renderPanel() {
     const content = $('dialog-content');
     content.replaceChildren();
     $('dialog-refresh').hidden = currentPanel === 'settings';
     $('dialog-refresh').title = `Refresh from latest snapshot${state ? ' · ' + date(state.ts) : ''}`;
-    const names = { history: 'Run history', roster: 'Studio roster', audit: 'Subagent audit', quotas: 'Provider quotas', paseo: 'Paseo agents', tasks: 'Task board', settings: 'Rendering & navigation', logs: 'Worker output' };
+    const names = { history: 'Run history', roster: 'Studio roster', audit: 'Subagent audit', quotas: 'Provider quotas', paseo: 'Paseo agents', tasks: 'Task board', tools: 'Agent tools', settings: 'Rendering & navigation', logs: 'Worker output' };
     $('dialog-title').textContent = names[currentPanel] || currentPanel;
     if (stateError)
         intro(`Connection error: ${stateError}. Showing the last received state.`);
@@ -600,6 +942,59 @@ function renderPanel() {
     if (!state) {
         emptyPanel(stateError || 'Waiting for the first state snapshot.');
         content.append(button('Retry connection', () => poll(), 'wide'));
+        return;
+    }
+    if (currentPanel === 'tools') {
+        const tools = state.tools || [];
+        const now = Number(state.ts) || Date.now();
+        intro(`${tools.filter(t => t.state === 'working').length} working of ${tools.length} tool surfaces. State comes from the process table plus the newest file in each tool's own session store; an agent is matched to a tool by the agent Orca launched.`);
+        if (!tools.length) {
+            emptyPanel('No tool scan reported.');
+            return;
+        }
+        const tableWrap = el('div', 'tool-table');
+        content.append(tableWrap);
+        table(['Tool', 'State', 'Project', 'Processes', 'Newest session output', 'Agents'], tools.map(t => [
+            (() => { const cell = el('span', 'tool-cell'); cell.append(toolBadge(t), el('span', null, t.name)); return cell; })(),
+            t.state,
+            t.cwd || '—',
+            String(t.processes ?? 0),
+            t.lastActivity ? `${ago(Date.parse(t.lastActivity), now)} ago · ${t.lastSession || ''}` : '—',
+            t.agents?.length ? `${t.agents.length} · ${t.agents.map(a => [a.role || a.agent, a.state].filter(Boolean).join(' · ')).join('; ')}` : '—',
+        ]), tableWrap);
+        for (const t of tools.filter(t => t.agents?.length)) {
+            const card = el('article', 'data-card');
+            card.append(el('h3', null, `${t.name} · ${t.state}`), el('p', null, t.evidence || ''));
+            for (const a of t.agents) {
+                const row = button(`${a.role || a.agent || 'dispatch'} · ${a.task || a.dispatchId || ''} · ${a.state || 'unknown'} ↗`, () => {
+                    selected = `worker:${a.dispatchId}`;
+                    pickedWorker = a.dispatchId;
+                    follow = false;
+                    renderDetail();
+                    openLogs(a.dispatchId);
+                }, 'wide history-row');
+                row.prepend(chip(workerStatus({ dispatchId: a.dispatchId, workerState: a.state }).status));
+                card.append(row);
+            }
+            if (t.lastSession)
+                card.append(el('p', null, `Session: ${t.lastSession}`));
+            content.append(card);
+        }
+        const children = workerSource().filter(w => workKind(w) === 'omp-child');
+        // Stale children never become workers; list them here so they stay inspectable.
+        const staleChildren = (state.tools || []).flatMap(t => (t.subagents || []).filter(c => c.stale === true).map(c => ({ ...c, toolName: t.name })));
+        if (children.length || staleChildren.length) {
+            const card = el('article', 'data-card');
+            card.append(el('h3', null, `omp task children · ${children.length + staleChildren.length}`));
+            for (const c of staleChildren)
+                card.append(el('p', null, `${c.agent || 'child'} · ${c.task || '—'} · stale · no recent evidence · ${c.toolName}`));
+            for (const w of children) {
+                const row = button(`${w.agent || 'child'} · ${w.taskTitle || '—'} · ${w.stale ? 'stale' : w.childState || 'unknown'} ↗`, () => { dialog.close(); selectAgent(workSelection(w)); }, 'wide history-row');
+                row.prepend(chip(workerStatus(w).status));
+                card.append(row);
+            }
+            content.append(card);
+        }
         return;
     }
     if (currentPanel === 'history') {
@@ -698,8 +1093,10 @@ async function refreshOutput() {
     if (outputBusy || closed || document.hidden)
         return;
     const id = logId || (isFloor ? pickedWorker : null);
-    if (!id)
+    if (!id || /^(tool:|omp-child:)/.test(String(id))) {
+        $('live-tail').hidden = true;
         return;
+    }
     outputBusy = true;
     const generation = logGeneration;
     try {

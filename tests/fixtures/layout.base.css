@@ -1,0 +1,38 @@
+/* Geometry overrides from 8cc60dd, before Task 1; loaded AFTER studio.css.
+ * The audit also returns Operations to .left-column, its original DOM parent.
+ * CSS alone on the fixed DOM cannot reproduce the original flex overflow.
+ *
+ * At 1280x720: rail top=74, bottom=548, available height=474.
+ * Original minimum children: status 120 + board 166 + tools 132 + operations 42
+ * + three 10px gaps = 490. With overflow:visible, Operations ends at y=564.
+ * Navigator begins at 720 - (28 + 10) - 124 = 558.
+ * Both start at x=12; Operations is 220px wide: intersection = 220x6px.
+ * These are natural flex sizes, not a hard-coded overlapping position.
+ */
+.panel-head { flex-shrink:1 }
+.left-column {
+  bottom:var(--rail-bottom);
+  min-height:auto;
+  overflow:visible;
+  pointer-events:none!important
+}
+.left-column>* { min-height:auto }
+.agent-status { flex:1 1 auto; min-height:150px }
+.status-strip { flex-shrink:1 }
+.status-groups { min-height:0 }
+.task-board { flex:none; overflow:visible }
+.tool-activity { flex:0 0 132px; min-height:0 }
+.operations {
+  position:relative;
+  left:auto;
+  bottom:auto;
+  width:auto;
+  height:auto;
+  flex:none
+}
+.tool-row { grid-template-columns:6px minmax(0,1fr) auto auto }
+.preferences { justify-content:center; overflow:visible; max-height:none }
+.preferences>* { flex-shrink:1 }
+@media(max-height:780px) {
+  .agent-status { min-height:120px }
+}

@@ -1,6 +1,7 @@
 // Shared interpretation of the read-only StudioState contract.
 export const SETTLED = ['succeeded', 'failed', 'stopped', 'cancelled'];
-export const isPresent = w => w.liveness === 'live' || w.dispatchStatus === 'pending';
+export const MOVING_STATES = ['starting', 'running', 'pending', 'dispatched', 'queued'];
+export const isPresent = w => w.liveness === 'live' || w.dispatchStatus === 'pending' || MOVING_STATES.includes(w.workerState || '');
 export const isWorking = w => isPresent(w) && !SETTLED.includes(w.workerState || '');
 export const workerText = w => [w.taskTitle, w.taskSpec, w.label, w.worktreeName, w.agent].filter(Boolean).join(' ').toLowerCase();
 export const matchesRole = (w, role) => workerText(w).includes(role.name.toLowerCase());
@@ -27,7 +28,8 @@ export function activeRoles(state, roster) {
     return hits;
 }
 // One status per agent, derived only from reported fields. Order is precedence:
-// any working evidence beats pending, pending beats failed, failed beats completed.
+// Worker/audit/session working evidence beats pending, pending beats failed,
+// failed beats completed. Tool evidence only upgrades idle roles.
 export const STATUS_ORDER = ['working', 'pending', 'failed', 'completed', 'idle'];
 export const STATUS_META = {
     working: { label: 'Working', color: '#38d9ff', icon: '▶', description: 'A live worker or an open subagent invocation is doing this work now. On the floor: lit, pulsing monitor and a WORKING pill above the agent.' },
@@ -49,7 +51,7 @@ export function workerStatus(w) {
     if (ws === 'failed' || ds === 'failed')
         return { status: 'failed', evidence: evidence('failed') };
     // A queued dispatch counts as present for following, but it has not started work.
-    if (ws === 'pending' || ds === 'pending')
+    if (ws === 'pending' || ws === 'queued' || ds === 'pending')
         return { status: 'pending', evidence: evidence('pending') };
     if (isWorking(w))
         return { status: 'working', evidence: evidence(ws || w.liveness || 'live') };
@@ -99,6 +101,17 @@ export function agentStatuses(state, roster, now = Date.now()) {
             continue;
         }
         out.set(name, { status: 'idle', worker: null, task: null, evidence: null, since: null, lastEvent });
+    }
+    // Tool activity fills gaps when the Orca floor has no run to scope the worker to.
+    // It must not replace a status already established by workers, audit, or sessions.
+    for (const tool of state?.tools || []) {
+        if (tool.state !== 'working')
+            continue;
+        for (const entry of tool.agents || []) {
+            const current = out.get(entry.role);
+            if (current?.status === 'idle')
+                out.set(entry.role, { ...current, status: 'working', task: entry.task || current.task, evidence: `tool ${tool.name} · ${tool.evidence || 'writing now'}`, since: tool.lastActivity || null });
+        }
     }
     return out;
 }
@@ -155,3 +168,59 @@ export const floorForRoom = room => ['directors', 'leads', 'engineering', 'desig
 export const ROOM_COLORS = { directors: 0xf6c884, leads: 0xc7b6ff, engineering: 0x42cafa, design: 0x7aa3ff, art: 0xcc8aff, audio: 0xfaaf6e, narrative: 0x81c8ff, qa: 0x56e6c1, engines: 0x8199ff, community: 0xf3bf75, lobby: 0x42dcff };
 export const hash = str => { let h = 2166136261; for (const c of str)
     h = Math.imul(h ^ c.charCodeAt(0), 16777619); return h >>> 0; };
+// Live work rows: a synthetic id marks a direct tool session (`tool:`) or an omp task child.
+export const workKind = w => { const id = String(w?.dispatchId || ''); return id.startsWith('omp-child:') ? 'omp-child' : id.startsWith('tool:') ? 'tool' : 'dispatch'; };
+/** A dispatch or omp child opens its own detail; a direct session opens the tool it runs in. */
+export const workSelection = w => workKind(w) === 'tool' ? `tool:${w.toolId}` : `worker:${w.dispatchId}`;
+/**
+ * The three lines of a working-now card. Unknown parts read `—`; nothing is guessed.
+ * Remaining means what is still open after the current task. `remainingTasks: null` (nothing to
+ * join tasks on) is unknown; `[]` is zero only when the task list was reported (`tasksKnown`).
+ */
+export function workLines(w, tasksKnown = false) {
+    const dash = v => v == null || v === '' ? '—' : String(v);
+    const task = w.taskTitle || w.label || w.dispatchId || 'Unnamed work';
+    const titles = Array.isArray(w.remainingTasks) && (tasksKnown || w.remainingTasks.length) ? w.remainingTasks : null;
+    const n = titles ? titles.length : typeof w.remaining === 'number' ? w.remaining : null;
+    return { task, who: [w.agent, w.provider, w.model].map(dash).join(' · '), count: dash(n), left: n == null ? '—' : `remaining: ${n} · next: ${titles?.[0] || '—'}` };
+}
+/** Working rows only, newest first by when this browser first saw them; source order breaks ties. */
+export function workingNow(workers, firstSeen = new Map()) {
+    return (workers || []).map((w, i) => ({ w, i, at: firstSeen.get(w.dispatchId) ?? 0 }))
+        .filter(({ w }) => workerStatus(w).status === 'working')
+        .sort((a, b) => b.at - a.at || a.i - b.i).map(({ w }) => w);
+}
+/** The floor's workers: live ones, else the latest recorded run's. */
+export const floorWorkers = state => state?.workers?.length ? state.workers : state?.runs?.[0]?.workers || [];
+/**
+ * Every working item (Orca dispatch, direct tool session, omp child), newest first. The header
+ * metric, the Working now strip and the Agent status group all count this one list.
+ */
+export const workingItems = (state, firstSeen) => workingNow(floorWorkers(state), firstSeen);
+/**
+ * Working roster roles split by whether a working item already accounts for them. A role lit by
+ * the same dispatch as an item is that item's annotation (`byItem`, keyed by dispatchId), not a
+ * second row; only `roleOnly` (audit, paseo, tool evidence) adds to the working count.
+ */
+export function roleWork(statuses, items) {
+    const ids = new Set(items.map(w => w.dispatchId).filter(Boolean)), byItem = new Map(), roleOnly = [];
+    for (const [id, e] of statuses || []) {
+        if (id.startsWith('worker:') || e.status !== 'working')
+            continue;
+        const w = e.worker;
+        if (w && (items.includes(w) || (w.dispatchId && ids.has(w.dispatchId))))
+            byItem.set(w.dispatchId, [...(byItem.get(w.dispatchId) || []), id]);
+        else
+            roleOnly.push([id, e]);
+    }
+    return { byItem, roleOnly };
+}
+/** Campus badge input: every settled status, with working replaced by the items plus role-only work. */
+export const campusStatuses = (statuses, items, roleOnly) =>
+    [...[...(statuses?.values() || [])].filter(e => e.status !== 'working'), ...[...items, ...roleOnly].map(() => ({ status: 'working' }))];
+const plural = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
+/** Header metric: the item count, then how many tools those items span and how many roles work outside them. */
+export function workingSummary(items, rolesWorking = 0) {
+    const tools = new Set(items.filter(w => workKind(w) !== 'dispatch').map(w => w.toolId || w.dispatchId)).size;
+    return { count: items.length, sub: `${plural(items.length, 'item')} · ${plural(tools, 'tool')} · ${plural(rolesWorking, 'role')}` };
+}
