@@ -80,7 +80,8 @@ const agentByDispatch = new Map<string, DispatchAgent>();
  * concise view puts the dispatch at `result` and has no `startOptions` at all.
  */
 export function readDispatchAgent(raw: string): DispatchAgent {
-  const detail = readJson(raw) as { result?: OrcaDispatchDetail } | null;
+  const detail = readJson(raw) as { ok?: boolean; result?: OrcaDispatchDetail } | null;
+  if (detail?.ok === false) return { agent: null, model: null, exitCause: null };
   const record = detail?.result?.worker ?? detail?.result;
   const launch = record?.startOptions?.launch;
   return {
@@ -617,9 +618,10 @@ async function collect(): Promise<StudioState> {
   const { workers: onFloor, scope: workerScope } = selectFloor(workers, runRows);
 
   // `worker-list` reports a null projection.agent, so the AI a dispatch launched is only in
-  // `worker-show` — and it never changes, so one lookup per dispatch is cached for the life of
-  // the server. The floor's dispatches and the newest run's are filled first; misses are capped
-  // per collect, so a fresh run of 22 fills in over a few polls instead of stalling one.
+  // `worker-show` — successful launch metadata is cached for the life of the server.
+  // Missing metadata is retried on later collects. The floor's dispatches and the newest run's
+  // are filled first; misses are capped per collect, so a fresh run of 22 fills in over a few
+  // polls instead of stalling one.
   const targets: WorkerView[] = [];
   const seen = new Set<string>();
   for (const worker of workers) {
@@ -642,7 +644,7 @@ async function collect(): Promise<StudioState> {
     // launched agent is recorded. Without it every worker reads as agent-less.
     const raw = await run(["orca", "orchestration", "worker-show", "--dispatch", id, "--json", "--full"]);
     const info = readDispatchAgent(raw);
-    agentByDispatch.set(id, info);
+    if (info.agent !== null || info.model !== null) agentByDispatch.set(id, info);
     applyDispatchAgent(worker, info);
   }));
   if (agentByDispatch.size > 2000) {
@@ -694,7 +696,9 @@ let cached: { at: number; data: StudioState } | null = null;
 let inflight: Promise<StudioState> | null = null;
 
 function stateForClients(): Promise<StudioState> {
-  if (cached && Date.now() - cached.at < TTL_MS) return Promise.resolve(cached.data);
+  // A wall-clock rollback invalidates the sample instead of extending its TTL.
+  const age = cached ? Date.now() - cached.at : null;
+  if (cached && age !== null && age >= 0 && age < TTL_MS) return Promise.resolve(cached.data);
   if (inflight) return inflight;
   inflight = collect()
     .then((data) => { cached = { at: Date.now(), data }; return data; })

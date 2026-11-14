@@ -1,6 +1,7 @@
-import { describe, test, expect } from 'bun:test';
+import { describe, test, expect, spyOn } from 'bun:test';
+import { collectToolActivity, readOmpSubagents } from '../activity.ts';
 import { interpretTools, joinToolAgents, parseCpuTime, parseLsofCwd, parseOmpSubagents, taskSummary, parsePs, projectFromKnownPaths, projectFromSession, runsTool, newestEntry, humanAge, toolForAgent, WORKING_WINDOW_MS, type PsRow, type StoreMap, type ToolActivity, type ToolDef } from '../activity.ts';
-import { mkdtempSync, mkdirSync, writeFileSync, utimesSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, utimesSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { agentStatuses } from '../public/studio-data.js';
@@ -127,7 +128,58 @@ describe('store walk', () => {
 
 const base = (id: string): ToolActivity => ({
   id, name: id, kind: 'cli', installed: true, state: 'available', processes: 0,
-  cpuActive: false, pids: [], cwd: null, lastSession: null, lastActivity: null, evidence: 'installed',
+  cpuActive: false, pids: [], cwd: null, model: null, sessions: [], lastSession: null, lastActivity: null, evidence: 'installed',
+});
+
+test('collection preserves each live pid and its own cwd, with nullable models until Task 4', async () => {
+  const commands = ['/bin/codex --model alpha', '/bin/codex --model beta'];
+  let ps = `900001 00:01 ${commands[0]}\n900002 00:02 ${commands[1]}\n900003 00:00 /bin/other`;
+  const spawn = spyOn(Bun, 'spawn').mockImplementation(((args: string[]) => {
+    const output = args[0] === 'ps' ? ps : args[0] === 'lsof'
+      ? `p${args[3]}\nfcwd\nn/projects/${args[3] === '900001' ? 'one' : 'two'}\n` : '';
+    return { stdout: new Response(output).body, exited: Promise.resolve(0), kill() {} };
+  }) as typeof Bun.spawn);
+  try {
+    const tool = (await collectToolActivity()).find(tool => tool.id === 'codex')!;
+    expect(tool.sessions).toEqual([
+      { pid: 900002, cwd: '/projects/two', model: null, command: commands[1] },
+      { pid: 900001, cwd: '/projects/one', model: null, command: commands[0] },
+    ]);
+    expect(tool.processes).toBe(2);
+    expect(tool.pids).toEqual([900001, 900002]);
+    expect(tool.cwd).toBe('/projects/two');
+    expect(tool.model).toBeNull();
+    ps = '';
+    expect((await collectToolActivity()).find(tool => tool.id === 'codex')!.sessions).toEqual([]);
+  } finally { spawn.mockRestore(); }
+});
+
+test('omp children keep session identity and survive old spawn records with recent parent output', async () => {
+  const home = mkdtempSync(join(tmpdir(), 'studio-omp-'));
+  const root = join(home, '.omp/agent/sessions/project');
+  mkdirSync(root, { recursive: true });
+  const now = Date.parse('2026-11-13T12:00:00Z');
+  const progress = (status: string, msAgo: number) => JSON.stringify({
+    timestamp: new Date(now - msAgo).toISOString(),
+    message: { role: 'toolResult', toolName: 'task', details: { progress: [{ id: 'child', agent: 'coder', status, task: 'Build it' }] } },
+  });
+  const writeSession = (id: string, records: string[], msAgo = 1000) => {
+    const path = join(root, `file-${id}.jsonl`);
+    writeFileSync(path, [JSON.stringify({ type: 'session', id }), ...records].join('\n'));
+    utimesSync(path, new Date(now - msAgo), new Date(now - msAgo));
+  };
+  try {
+    // The spawn must survive even after more than the former 400 KB tail of parent output.
+    writeSession('parent-a', [progress('pending', 120_000), JSON.stringify({ message: { role: 'assistant', content: 'x'.repeat(410_000) } })]);
+    writeSession('parent-b', [progress('pending', 120_000), progress('running', 1000)]);
+    writeSession('parent-c', [progress('pending', 120_000), progress('completed', 1000)]);
+    writeSession('parent-d', [progress('pending', 90_000)], 70_000);
+    const children = await readOmpSubagents(now, home);
+    expect(children.map(child => child.id).sort()).toEqual(['parent-a:child', 'parent-b:child', 'parent-d:child']);
+    expect(children.find(child => child.id === 'parent-a:child')).toMatchObject({ stale: true, task: 'Build it' });
+    expect(children.find(child => child.id === 'parent-b:child')).toMatchObject({ stale: false });
+    expect(children.find(child => child.id === 'parent-d:child')).toMatchObject({ stale: true });
+  } finally { rmSync(home, { recursive: true, force: true }); }
 });
 
 describe('agent to tool join', () => {

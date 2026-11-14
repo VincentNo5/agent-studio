@@ -421,22 +421,29 @@ function withToolWorkers(next) {
         for (const child of tool.subagents || []) {
             const id = `omp-child:${child.id}`;
             if (known.has(id)) continue;
+            known.add(id);
             extra.push({
                 dispatchId: id, agent: child.agent, label: `${child.agent} · ${tool.name}`,
                 taskTitle: child.task || `${child.agent} · ${tool.name}`,
-                workerState: child.state === 'pending' ? 'pending' : 'running',
-                dispatchStatus: child.state, liveness: 'live', toolId: tool.id, toolName: tool.name, cwd: tool.cwd,
+                workerState: child.stale ? 'idle' : child.state === 'pending' ? 'pending' : 'running',
+                dispatchStatus: child.stale ? 'idle' : child.state, liveness: child.stale ? 'unknown' : 'live',
+                stale: child.stale === true, toolId: tool.id, toolName: tool.name, cwd: tool.cwd,
             });
         }
-        const owned = (tool.agents || []).length + (tool.subagents || []).length;
-        if (tool.state === 'working' && !owned) {
-            const id = `tool:${tool.id}`;
-            if (!known.has(id))
-                extra.push({
-                    dispatchId: id, agent: tool.name, label: `${tool.name} · direct session`,
-                    taskTitle: `${tool.name} · direct session`, workerState: 'running', dispatchStatus: 'working',
-                    liveness: 'live', toolId: tool.id, toolName: tool.name, cwd: tool.cwd, processes: tool.processes,
-                });
+        // Older payloads have one tool row; an explicit empty sessions list has no live pid.
+        const sessions = Array.isArray(tool.sessions) ? tool.sessions : tool.state === 'working' ? [tool] : [];
+        for (const session of sessions) {
+            const id = session.pid == null ? `tool:${tool.id}` : `tool:${tool.id}:${session.pid}`;
+            if (known.has(id)) continue;
+            known.add(id);
+            const working = tool.state === 'working';
+            extra.push({
+                dispatchId: id, agent: tool.name, label: `${tool.name} · direct session`,
+                taskTitle: `${tool.name} · direct session`, workerState: working ? 'running' : 'idle',
+                dispatchStatus: working ? 'working' : 'idle', liveness: working ? 'live' : 'unknown',
+                toolId: tool.id, toolName: tool.name, cwd: session.cwd, model: session.model ?? null,
+                pid: session.pid, command: session.command, processes: session.pid == null ? tool.processes : 1,
+            });
         }
     }
     if (!extra.length)

@@ -44,10 +44,13 @@ export interface WorkerLite {
   path?: string | null;
 }
 
-/** A task child writes one spawn record; no completion record lands while it runs. */
+/** Child evidence older than this is uncertain, not proof the child has stopped. */
 const SUBAGENT_LIVE_MS = 60_000;
+const SUBAGENT_SESSION_WINDOW_MS = 10 * 60_000;
 
-export interface OmpSubagent { id: string; agent: string; state: string; task: string | null }
+export interface OmpSubagent { id: string; agent: string; state: string; task: string | null; stale?: boolean }
+
+export interface ToolSession { pid: number; cwd: string | null; model: string | null; command: string }
 
 export interface ToolActivity {
   /** Stable slug, unique across the table. */
@@ -60,8 +63,12 @@ export interface ToolActivity {
   processes: number;
   /** Matching pids, newest sample only. */
   pids: number[];
-  /** Working directory of the first live process (lsof, cached per pid). */
+  /** One entry per live pid, newest first (descending pid in the process sample). */
+  sessions: ToolSession[];
+  /** Working directory of the newest live session (lsof, cached per pid). */
   cwd: string | null;
+  /** Model of the newest live session; populated starting in Task 4. */
+  model: string | null;
   /** Cumulative CPU time advanced since the previous sample. */
   cpuActive: boolean;
   /** Newest store file, relative to the home directory. */
@@ -70,7 +77,7 @@ export interface ToolActivity {
   lastActivity: string | null;
   /** Short human-readable reason for the state. */
   evidence: string;
-  /** omp task-tool children currently running in the newest session. */
+  /** Unsettled omp task-tool children across recently touched sessions. */
   subagents?: OmpSubagent[];
 }
 
@@ -237,7 +244,7 @@ export function taskSummary(task: string): string | null {
  * omp records each `task` call's children in the tool result (`details.progress[]`) with the
  * agent name and status. The newest record per child wins; settled children are dropped.
  */
-export function parseOmpSubagents(text: string): OmpSubagent[] {
+export function parseOmpSubagents(text: string): Array<OmpSubagent & { at: number }> {
   const latest = new Map<string, OmpSubagent & { at: number }>();
   for (const line of text.split("\n")) {
     if (!line.includes('"toolName":"task"') || !line.includes('"progress"')) continue;
@@ -266,9 +273,9 @@ export function parseOmpSubagents(text: string): OmpSubagent[] {
   return [...latest.values()].filter((child) => !settled.has(child.state));
 }
 
-/** Tails of the omp sessions touched in the last ten minutes, oldest first. */
-export async function readOmpSubagents(now = Date.now()): Promise<OmpSubagent[]> {
-  const roots = join(HOME, ".omp/agent/sessions");
+/** Children from the eight newest sessions touched in the last ten minutes. */
+export async function readOmpSubagents(now = Date.now(), home = HOME): Promise<OmpSubagent[]> {
+  const roots = join(home, ".omp/agent/sessions");
   const files: { path: string; mtime: number }[] = [];
   let dirs: Dirent[] = [];
   try { dirs = readdirSync(roots, { withFileTypes: true }).filter((d) => d.isDirectory()); } catch { return []; }
@@ -280,21 +287,28 @@ export async function readOmpSubagents(now = Date.now()): Promise<OmpSubagent[]>
       const path = join(roots, dir.name, entry.name);
       try {
         const mtime = statSync(path).mtimeMs;
-        if (now - mtime <= SUBAGENT_LIVE_MS) files.push({ path, mtime });
+        if (now - mtime <= SUBAGENT_SESSION_WINDOW_MS) files.push({ path, mtime });
       } catch { /* raced with a writer */ }
     }
   }
-  // Several sessions can be live at once (interactive + headless): merge, newest record wins.
+  // Child ids are local to a parent session, so qualify before merging.
   const merged = new Map<string, OmpSubagent>();
   for (const file of files.sort((a, b) => a.mtime - b.mtime).slice(-8)) {
     try {
       const text = await Bun.file(file.path).text();
-      for (const child of parseOmpSubagents(text.slice(-400_000))) merged.set(child.id, child);
+      let sessionId = file.path.slice(roots.length + 1);
+      try {
+        const header = JSON.parse(text.split("\n", 1)[0]);
+        if (header.type === "session" && typeof header.id === "string" && header.id) sessionId = header.id;
+      } catch { /* A missing header still has a stable, project-qualified file identity. */ }
+      // Keep early spawn records even when later parent output exceeds the former tail limit.
+      for (const { at, ...child } of parseOmpSubagents(text)) {
+        const id = `${sessionId}:${child.id}`;
+        merged.set(id, { ...child, id, stale: now - at > SUBAGENT_LIVE_MS });
+      }
     } catch { /* unreadable session: skip it */ }
   }
-  // A child with no completion record would linger; its last spawn record ages out instead.
-  return [...merged.values()].filter((child) => now - ((child as OmpSubagent & { at?: number }).at ?? 0) <= SUBAGENT_LIVE_MS)
-    .map(({ at, ...rest }) => rest);
+  return [...merged.values()];
 }
 
 /** Compact age for evidence text: 12s, 4m, 3h, 9d. */
@@ -372,7 +386,10 @@ export function interpretTools(
       state,
       processes: mine.length,
       pids: mine.map((row) => row.pid),
+      sessions: [...mine].sort((a, b) => b.pid - a.pid)
+        .map(({ pid, command }) => ({ pid, command, cwd: null, model: null })),
       cwd: null,
+      model: null,
       cpuActive,
       lastSession: newest ? (newest.path.startsWith(HOME) ? newest.path.slice(HOME.length + 1) : newest.path) : null,
       lastActivity: newest ? new Date(newest.mtime).toISOString() : null,
@@ -458,6 +475,8 @@ export async function collectToolActivity(now = Date.now()): Promise<ToolActivit
   } catch { /* no process table: stores alone still answer */ }
 
   const procs = parsePs(ps).filter((row) => row.pid !== process.pid);
+  const livePids = new Set(procs.map((row) => row.pid));
+  for (const pid of cwdByPid.keys()) if (!livePids.has(pid)) cwdByPid.delete(pid);
   const stores: Record<string, StoreMap> = {};
   for (const def of TOOL_DEFS) stores[def.id] = scanStores(def);
 
@@ -469,15 +488,12 @@ export async function collectToolActivity(now = Date.now()): Promise<ToolActivit
 
   const tools = interpretTools(TOOL_DEFS, procs, stores, installed, prevCpu, now);
   const omp = tools.find((tool) => tool.id === "omp");
-  if (omp?.state === "working") omp.subagents = await readOmpSubagents();
-  // A live process names the project directly; one lsof per tool, only while it runs.
-  // After a short run the newest session path still names it, so the row keeps its project.
+  if (omp) omp.subagents = await readOmpSubagents(now);
+  // Each live pid names its own project; never borrow another session's cwd.
   await Promise.all(tools.map(async (tool) => {
-    // Prefer the shortest command line: internal helpers (`omp __omp_worker_…`) are not the tool.
-    const mine = procs.filter((row) => runsTool(row.command, TOOL_DEFS.find((def) => def.id === tool.id)?.bins ?? []));
-    const pid = mine.sort((a, b) => a.command.length - b.command.length)[0]?.pid;
-    if (pid) tool.cwd = await cwdFor(pid);
-    tool.cwd ??= projectFromSession(tool.lastSession);
+    await Promise.all(tool.sessions.map(async (session) => { session.cwd = await cwdFor(session.pid); }));
+    tool.cwd = tool.sessions.length ? tool.sessions[0].cwd : projectFromSession(tool.lastSession);
+    tool.model = tool.sessions[0]?.model ?? null;
   }));
   for (const row of procs) prevCpu.set(row.pid, row.cpu);
   for (const pid of prevCpu.keys()) if (!procs.some((row) => row.pid === pid)) prevCpu.delete(pid);
