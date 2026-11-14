@@ -440,8 +440,14 @@ export function interpretTools(
       processes: mine.length,
       pids: mine.map((row) => row.pid),
       sessions: [...mine].sort((a, b) => b.pid - a.pid)
-        .map(row => ({ pid: row.pid, command: row.command, cwd: null, model: null,
-          cpuActive: active(row), state: active(row) ? "working" as const : "idle" as const })),
+        .map(row => {
+          const cpuActive = active(row);
+          // A sole session inherits tool evidence. Store stamps have no pid identity,
+          // so multiple sessions must use their own CPU deltas, not shared freshness.
+          const working = mine.length === 1 ? state === "working" : cpuActive;
+          return { pid: row.pid, command: row.command, cwd: null, model: null,
+            cpuActive, state: working ? "working" as const : "idle" as const };
+        }),
       cwd: null,
       model: null,
       cpuActive,
@@ -517,7 +523,7 @@ export function joinToolAgents(
   return views;
 }
 
-/** Live sample: one `ps` spawn, one bounded walk per store, no caching of its own. */
+/** Live sample: fresh ps/store scans, with cached prior CPU, per-pid cwd and incremental omp parses. */
 export async function collectToolActivity(now = Date.now()): Promise<ToolActivity[]> {
   let ps = "";
   try {

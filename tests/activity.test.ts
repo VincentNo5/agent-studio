@@ -73,6 +73,19 @@ describe('state derivation', () => {
     expect(tool.evidence).toContain('5s ago');
   });
 
+  test.each([undefined, 42])('a sole live session inherits fresh store activity with previous CPU %s', previousCpu => {
+    const prev = previousCpu === undefined ? new Map<number, number>() : new Map([[10, previousCpu]]);
+    const tool = derive([row(10, 42, '/bin/demo run')], { demo: store(at(5_000, now)) }, true, prev);
+    expect(tool.state).toBe('working');
+    expect(tool.cpuActive).toBe(false);
+    expect(tool.sessions).toEqual([
+      expect.objectContaining({ pid: 10, state: 'working', cpuActive: false }),
+    ]);
+    const expired = derive([row(10, 42, '/bin/demo run')],
+      { demo: store(at(WORKING_WINDOW_MS + 1, now)) }, true, prev);
+    expect(expired.sessions[0].state).toBe('idle');
+  });
+
   test('the freshness window is the boundary, not a heuristic', () => {
     expect(derive([], { demo: store(at(WORKING_WINDOW_MS - 1, now)) }, true).state).toBe('working');
     expect(derive([], { demo: store(at(WORKING_WINDOW_MS + 1, now)) }, true).state).toBe('available');
@@ -89,6 +102,7 @@ describe('state derivation', () => {
     const tool = derive([row(10, 42.4, '/bin/demo run')], { demo: {} }, true, new Map([[10, 42]]));
     expect(tool.state).toBe('working');
     expect(tool.cpuActive).toBe(true);
+    expect(tool.sessions[0]).toMatchObject({ pid: 10, state: 'working', cpuActive: true });
     expect(tool.evidence).toContain('pid 10');
   });
 
@@ -96,13 +110,14 @@ describe('state derivation', () => {
     expect(derive([row(10, 42.4, '/bin/demo run')], { demo: {} }, true).cpuActive).toBe(false);
   });
 
-  test('each session uses only its own CPU delta even when the tool store is fresh', () => {
+  test('two sessions use their own CPU deltas when fresh store output cannot be attributed', () => {
     const tool = derive([row(10, 42.4, '/bin/demo'), row(20, 10, '/bin/demo')],
       { demo: store(now) }, true, new Map([[10, 42], [20, 10]]));
     expect(tool.sessions).toEqual([
       expect.objectContaining({ pid: 20, state: 'idle', cpuActive: false }),
       expect.objectContaining({ pid: 10, state: 'working', cpuActive: true }),
     ]);
+    expect(tool.sessions.filter(session => session.state === 'working').map(session => session.pid)).toEqual([10]);
   });
 
   test('another tool\'s process is not counted', () => {

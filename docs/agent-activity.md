@@ -47,8 +47,11 @@ then `interpretTools()` maps the evidence to a state:
 | no binary and no store | `offline` |
 
 These are tool-wide summary states. Each live session carries its own `cpuActive` and
-`state`, derived from that pid's CPU delta; another session's fresh output cannot make it
-working. A first CPU sample is idle until a later sample establishes activity.
+`state`. A sole live session inherits the tool's working state from fresh store output or
+CPU activity, including on its first sample. With multiple live sessions, state uses each
+pid's CPU delta: store stamps contain no reliable pid attribution, so shared freshness
+cannot mark a quiet session working. `cpuActive` always describes only that pid's CPU
+delta and remains false on the first sample.
 
 Only the **executable position** is matched (`argv[0]`, or the first script argument after
 `node`/`bun`/`python`), never arbitrary arguments — otherwise a prompt that mentions `Cursor`
