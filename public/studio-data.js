@@ -77,6 +77,13 @@ export function agentStatuses(state, roster, now = Date.now()) {
             entry('working', working, working.evidence, lastInvoked.get(name)?.ts || null);
             continue;
         }
+        // A tool writing now is direct evidence for the role behind its dispatch, even when the
+        // Orca floor has no run to scope the worker to.
+        const live = (state?.tools || []).find(t => t.state === 'working' && (t.agents || []).some(a => a.role === name));
+        if (live) {
+            entry('working', null, `tool ${live.name} · ${live.evidence || 'writing now'}`, live.lastActivity || null);
+            continue;
+        }
         if (activity?.active > 0) {
             const invoked = lastInvoked.get(name);
             entry('working', null, invoked ? `audit invoked ${clock(invoked.ts)}` : `audit · ${activity.active} open invocation${activity.active > 1 ? 's' : ''}`, invoked?.ts || null);

@@ -199,11 +199,66 @@ and its eight lanes. The header note always names the source: `Orca · 20 tasks 
 it up for the dispatches on the floor and for the newest run, caches it per dispatch — it never
 changes — and the floor, the history detail and the mobile view all name it (`ORCA · claude`).
 
+**Verifying it by hand.** `curl -s 127.0.0.1:8787/activity | jq '.tools[] | select(.state=="working")'`
+names the tool and its project; `jq '.tools[] | select(.agents|length>0)'` names the dispatches
+Orca launched on that surface. In the browser, the **Agent tools** panel lists every installed
+tool (working first); click any row or **Detail ↗** for the full table, then a dispatch row there
+opens that worker's live log. To force a state change, run one prompt in a repository:
+`cd ~/workspace/<repo> && claude -p "say ok" --model opencode-go/glm-5.3-flash` — the row flips to
+`working` within one poll, shows the project, and returns to `available` after 120 s.
+
 **Worker output.** `/worker/<dispatch-id>` proxies `orca orchestration worker-read --source auto`
 (bounded tail) for one dispatch. The history detail opens it in an overlay and refreshes it every
 two seconds while open; ids are validated, and a dispatch Orca cannot read answers `502` rather
 than an empty box. Orca holds a terminal tail only while that terminal lives, so a finished
 dispatch reads empty — the overlay says so, with the source, terminal status and line count.
+
+**Agent tool activity.** `activity.ts` watches every installed agent surface without
+instrumenting it: one `ps -axo pid=,time=,command=` for processes plus a bounded walk of each
+tool's own session store for the newest file. `/state` carries the result as `tools`, and
+`/activity` serves the same rows on their own for other consumers. Each row is
+`{ id, name, kind, installed, state, processes, pids, cwd, cpuActive, lastSession, lastActivity,
+evidence, agents }` with `state` one of `working` (store output in the last 120 s, or cumulative
+CPU advancing), `idle` (process up, no output), `available` (installed, nothing running) or
+`offline`. `cwd` comes from `lsof` while a process lives, else from the session slug resolved
+against Orca's worktree paths. `agents` is the join: every Orca dispatch whose `worker-show`
+agent names the tool, or whose worktree is the tool's `cwd`, with its state, model and matched
+roster role. `worker-show` only reports that agent with `--full`; the concise payload omits
+`startOptions`, which is why the lookup passes `--full` and accepts both shapes.
+
+The panel shows the tools that are **working or idle** (official brand mark, state colour, age or
+process count, and a badge with the live dispatches on that surface) and folds the quiet ones into
+one row; `Detail ↗` opens the full table. The same rows feed **Agent status** — a working tool
+lights the roster role its dispatch names, and a *Tools working* group names the surface itself —
+and **Live work**, which lists direct sessions the Orca floor does not carry. Tool work is also
+turned into worker rows on the client, so it reaches the floor's visitor pass: an omp `task` child
+or a direct session takes a hot desk as a visitor and shows the WORKING state, instead of only
+lighting a row in the sidebar. omp children are read from the tool result's `details.progress[]`
+in the newest session files (`agent`, `status`, `task`), with a 60 s recency window because a
+child writes only its spawn record. `?debug` exposes `window.__studio = { world, state, statuses }`
+for inspector use; without the flag nothing is added. Clicking a tool row
+opens its **Agent detail** card: state, pids, project, session, evidence and its dispatches.
+
+| Tool | Process | Session store |
+|---|---|---|
+| Claude Code | `claude` | `~/.claude/projects/**/*.jsonl` |
+| Codex CLI | `codex` | `~/.codex/sessions/**/rollout-*.jsonl` |
+| OpenCode | `opencode` | `~/.local/share/opencode` (SQLite WAL) |
+| omp | `omp` | `~/.omp/agent/sessions/**` |
+| Cursor | `cursor-agent`, `Cursor` | `~/.cursor/chats`, `~/.cursor/ai-tracking` |
+| VS Code agents | `code` | `~/Library/Application Support/Code/User/globalStorage/agent-host.db` |
+| Windsurf | `Windsurf` | `~/.codeium/windsurf/cascade`, `~/.codeium/windsurf/database` |
+| Pi | `pi` | `~/.pi/agent/sessions/**` |
+| Hermes | `hermes` | `~/.hermes/sessions/**` |
+| OpenClaw | `openclaw`, `openclaw-gateway` | `~/.openclaw/agents/**` |
+| T3 Code | `t3`, `t3-code` | `~/.t3/userdata/statev2.sqlite-wal` |
+| Amp | `amp` | `~/.local/share/amp/threads/T-*.json` |
+| Gemini CLI / Aider | same-named binary | `~/.gemini/tmp`, `~/.aider` |
+
+Lock files, `*.tmp`, logs, caches, statig caches and SQLite `-shm` files are skipped so idle
+heartbeats do not read as work. The walk is capped (3000 entries, depth 4) and shares the `/state`
+TTL, so the whole scan costs one process spawn and a few milliseconds of stats. Adding a tool is
+one row in `TOOL_DEFS`: the panel, the endpoint and the tests follow.
 
 The floor view (`/floor`) carries the same thing in its sidebar: **LIVE WORK** names the run on the
 floor, the agents behind it (`working · claude ×2 · codex ×1`) and the tasks in flight, and follows
@@ -282,6 +337,8 @@ git config core.hooksPath .githooks   # once per clone
 
 - `server.ts` — Bun HTTP server: collects the sources, serves `/state`, `/market`, `/roster.json`, `/`, `/floor`, `/demo`
 - `index.html` — command overview entry and local import map
+- `activity.ts` — process-table + session-store scan for every installed agent tool (see `docs/agent-activity.md`)
+- `public/tool-icons.js` — 24×24 brand marks (Simple Icons, CC0) for the tool rows
 - `floor.html` — focused floor entry and local import map
 - `public/` — shared Three.js world, state interpretation, responsive HUD and styles
 - `public/demo-state.js` — the deterministic `/demo` feed
@@ -289,6 +346,7 @@ git config core.hooksPath .githooks   # once per clone
 - `roster.json` — generated roster: `{ rooms: [...], agents: [{ name, model, desc, room, tier }] }`
 - `docs/*.png` — screenshots (redacted: repository names and local paths replaced)
 - `docs/hero/` — the README hero loop: its source, `poster.png`, `hero.webm` and render script
+- `docs/agent-activity.md` — which signal each agent tool exposes, and why the detector reads mtime + processes
 
 ## Limits
 

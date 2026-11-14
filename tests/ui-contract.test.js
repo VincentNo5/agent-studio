@@ -13,6 +13,16 @@ test('desktop controller exposes demo, phase, market and mobile drawer contracts
   expect(studio).toContain("drawerHandle.focus()");
   expect(studio).toContain("getJSON('/market')");
   expect(studio).toContain('if (demoMode)');
+  expect(studio).toContain('id="tool-list"');
+  expect(studio).toContain('renderTools();');
+  expect(studio).toContain('Detail ↗');
+  expect(studio).toContain("currentPanel === 'tools'");
+  expect(studio).toContain("from './tool-icons.js'");
+  expect(studio).toContain('Tools working');
+  expect(studio).toContain('function withToolWorkers');
+  expect(studio).toContain("startsWith('omp-child:')");
+  expect(studio).toContain('__studio');
+  expect(css).toContain('.tool-row[data-state=working]');
   expect(studio).toContain('3D assets are missing. Run `bun install` in the repository root, then reload.');
   expect(css).toContain('@media(max-width:820px)');
   expect(css).toContain('.right-column[data-open=true]');

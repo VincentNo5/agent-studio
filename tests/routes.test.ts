@@ -1,6 +1,7 @@
 import { beforeAll, test, expect } from 'bun:test';
 let handler: (request: Request, server: unknown) => Promise<Response>;
 let createMarketService: typeof import('../server.ts').createMarketService;
+let readDispatchAgent: typeof import('../server.ts').readDispatchAgent;
 const local = { requestIP: () => ({ address: '127.0.0.1' }) };
 beforeAll(async () => {
   // Capture the real server handler without opening a listening socket.
@@ -9,6 +10,7 @@ beforeAll(async () => {
     Bun.serve = ((options: any) => { handler = options.fetch; return {}; }) as typeof Bun.serve;
     const serverModule = await import('../server.ts');
     createMarketService = serverModule.createMarketService;
+    readDispatchAgent = serverModule.readDispatchAgent;
   } finally { Bun.serve = serve; }
 });
 const request = (path: string) => handler(new Request(`http://127.0.0.1:8788${path}`), local);
@@ -44,6 +46,29 @@ test('asset traversal, malformed paths, missing files and off-network callers ar
 test('read-only routes reject methods and oversized request bodies before dispatch', async () => {
   expect((await handler(new Request('http://127.0.0.1:8788/market', { method: 'POST', body: 'x' }), local)).status).toBe(405);
   expect((await handler(new Request('http://127.0.0.1:8788/market', { method: 'POST', headers: { 'content-length': '70000' } }), local)).status).toBe(413);
+});
+
+test('activity route answers the normalized tool rows', async () => {
+  const res = await request('/activity');
+  expect(res.status).toBe(200);
+  const body = await res.json() as { ts: number; tools: { id: string; name: string; state: string; installed: boolean; agents: unknown[] }[] };
+  expect(Number.isFinite(body.ts)).toBe(true);
+  expect(body.tools.length).toBeGreaterThan(5);
+  for (const tool of body.tools) {
+    expect(typeof tool.id).toBe('string');
+    expect(typeof tool.name).toBe('string');
+    expect(['working', 'idle', 'available', 'offline']).toContain(tool.state);
+    expect(typeof tool.installed).toBe('boolean');
+    expect(Array.isArray(tool.agents)).toBe(true);
+  }
+});
+
+test('worker-show parsing reads the agent from either payload shape', () => {
+  const full = JSON.stringify({ ok: true, result: { worker: { startOptions: { launch: { requested: { agent: 'claude', model: 'sonnet' }, effective: { agent: 'claude', model: 'opus' } } } } } });
+  expect(readDispatchAgent(full)).toEqual({ agent: 'claude', model: 'opus', exitCause: null });
+  const concise = JSON.stringify({ ok: true, result: { dispatchId: 'ctx_1', state: 'succeeded' } });
+  expect(readDispatchAgent(concise)).toEqual({ agent: null, model: null, exitCause: null });
+  expect(readDispatchAgent('not json')).toEqual({ agent: null, model: null, exitCause: null });
 });
 
 test('demo route serves the studio shell', async () => {

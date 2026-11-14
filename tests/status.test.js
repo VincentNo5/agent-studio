@@ -5,6 +5,18 @@ const now = Date.parse('2026-10-19T14:30:00Z');
 const at = minutesAgo => new Date(now - minutesAgo * 60000).toISOString();
 const worker = (id, fields) => ({ dispatchId: id, taskTitle: `qa-tester: ${id}`, ...fields });
 const status = (state, role = 'qa-tester') => agentStatuses({ audit: { agents: [], events: [] }, ...state }, roster, now).get(role);
+describe('tool activity feeds role status', () => {
+    const tools = [{ id: 'claude-code', name: 'Claude Code', state: 'working', processes: 1, evidence: '4s ago', lastActivity: at(0), agents: [{ dispatchId: 'ctx_1', role: 'qa-tester', agent: 'claude', state: 'running' }] }];
+    test('a working tool lights the role its dispatch names', () => {
+        const s = status({ tools }, 'qa-tester');
+        expect(s.status).toBe('working');
+        expect(s.evidence).toBe('tool Claude Code · 4s ago');
+    });
+    test('a tool that is not working does not light anything', () => {
+        const idle = [{ ...tools[0], state: 'available' }];
+        expect(status({ tools: idle }, 'qa-tester').status).toBe('idle');
+    });
+});
 describe('agent status model', () => {
     test('every status has label, colour, icon and description', () => {
         for (const key of STATUS_ORDER)

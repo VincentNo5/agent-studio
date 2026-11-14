@@ -34,3 +34,4 @@ skills-lock.json
 
 # locally installed design skill
 .agents/skills/luobo-design/
+.superpowers/
