@@ -55,6 +55,8 @@ try {
           left = Math.max(left, 0); top = Math.max(top, 0);
           right = Math.min(right, innerWidth); bottom = Math.min(bottom, innerHeight);
           for (let parent = el.parentElement; parent; parent = parent.parentElement) {
+            // The viewport is the root clip; BODY can have zero height with absolute children.
+            if (parent === document.body || parent === document.documentElement) continue;
             const style = getComputedStyle(parent), bounds = parent.getBoundingClientRect();
             if (/(auto|scroll|hidden|clip)/.test(style.overflowX)) {
               left = Math.max(left, bounds.left + parent.clientLeft);
@@ -95,7 +97,7 @@ try {
         ...result.missing.map(selector => `missing or invisible required panel: ${selector}`),
         ...(result.headingCount === 0 ? ['no panel headings found'] : []),
         ...(result.statusHeight < 96 ? [`#status-groups clientHeight ${result.statusHeight}px < 96px`] : []),
-        ...errors.map(error => `page error: ${error}`),
+        ...errors.sort().map(error => `page error: ${error}`),
       ];
       for (const failure of failures) console.log(`  FAIL: ${failure}`);
       if (failures.length) process.exitCode = 1;
