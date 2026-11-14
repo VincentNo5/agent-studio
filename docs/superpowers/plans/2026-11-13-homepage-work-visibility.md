@@ -142,3 +142,13 @@ failed `worker-show` lookups, and a finished process reading as working for 120 
 - [ ] **Step 2:** Fix or explicitly park each high-severity finding with a one-line rationale.
 - [ ] **Step 3:** `bun test` + `node tests/layout.audit.mjs` green; screenshots at three viewports saved to `docs/review/`.
 - [ ] **Step 4:** Commit `chore(studio): astra re-review and verification artifacts`
+
+
+## Completion (2026-11-13)
+
+Branch `feat/homepage-work-visibility`, commits `0b50a8f..<HEAD>`. Six tasks landed with per-task
+reviews; final review and scoped re-reviews recorded in `docs/review/`. Verification:
+
+- `bun test` — 160 pass, 0 fail.
+- `node tests/layout.audit.mjs` — PASS at 1280×720, 1365×768, 1440×900 (no overlap >2px, status list ≥96px, tool header + first row painted); `--base-css` reproduces the original operations × navigator overlap.
+- Live `/state` on :8787 — working items expose task, agent · provider · model and remaining; header, strip, Agent status and campus badge agree; finished omp children settle from wait/async results.

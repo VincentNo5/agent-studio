@@ -469,6 +469,10 @@ test('argv model scan rejects prompt text and keeps scanning for a real flag', (
   expect(activity.modelFromArgv('claude -p "so the prompt can look like a -m flag; keep going"')).toBeNull();
   expect(activity.modelFromArgv('codex exec -m codex/gpt-6-astra')).toBe('codex/gpt-6-astra');
   expect(activity.modelFromArgv('claude -p "a -m flag; here" --model claude-opus-5-5')).toBe('claude-opus-5-5');
+  expect(activity.modelFromArgv('claude --model opus[1m]')).toBe('opus[1m]');
+  expect(activity.modelFromArgv('claude --model=claude-opus-5-5[1m] -p hi')).toBe('claude-opus-5-5[1m]');
+  expect(activity.modelFromArgv('claude -p "use -m flag; now"')).toBeNull();
+  expect(activity.modelFromArgv('claude --model opus[1m];')).toBeNull();
 });
 
 test('a wait toolResult settles spawned children by task-result tag', () => {
@@ -480,6 +484,16 @@ test('a wait toolResult settles spawned children by task-result tag', () => {
   ], details: { results: [{ text: '<task-result id="re-review-task-5" status="failed">no</task-result>' }] } } });
   expect(parseOmpSubagents(spawn).map(c => c.id)).toEqual(['review-task-5', 're-review-task-5', 'still-going']);
   expect(parseOmpSubagents(spawn + '\n' + wait).map(c => c.id)).toEqual(['still-going']);
+});
+
+test('a quoted task-result tag in a read toolResult does not settle a live child', () => {
+  const spawn = JSON.stringify({ type: 'message', message: { role: 'toolResult', toolName: 'task', details: {
+    progress: [{ id: 'live-child', agent: 'reviewer', status: 'pending' }],
+  } } });
+  const read = JSON.stringify({ type: 'message', message: { role: 'toolResult', toolName: 'read', content: [
+    { type: 'text', text: '<task-result id="live-child" status="completed">quoted</task-result>' },
+  ] } });
+  expect(parseOmpSubagents(spawn + '\n' + read).map(c => c.id)).toEqual(['live-child']);
 });
 
 test('failed todo results preserve the last successful snapshot', () => {

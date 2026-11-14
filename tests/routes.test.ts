@@ -168,11 +168,11 @@ test('the floor retains each direct session beside dispatches and session-qualif
   ] };
   const result = withToolWorkers(next);
   expect(result.workers.map((worker: any) => worker.dispatchId).sort()).toEqual([
-    'omp-child:parent-a:child', 'omp-child:parent-b:child', 'orca-1', 'tool:codex:10', 'tool:codex:20', 'tool:omp:30',
+    'omp-child:parent-b:child', 'orca-1', 'tool:codex:10', 'tool:codex:20', 'tool:omp:30',
   ]);
   expect(result.workers.find((worker: any) => worker.dispatchId === 'tool:codex:20')).toMatchObject({ cwd: '/two', model: 'beta', processes: 1 });
-  expect(result.workers.find((worker: any) => worker.dispatchId === 'omp-child:parent-a:child')).toMatchObject({ taskTitle: 'First', stale: true, workerState: 'idle', liveness: 'unknown' });
-  expect(withToolWorkers(result).workers).toHaveLength(6);
+  expect(result.workers.find((worker: any) => worker.dispatchId === 'omp-child:parent-b:child')).toMatchObject({ taskTitle: 'Second', stale: false, workerState: 'running', liveness: 'live' });
+  expect(withToolWorkers(result).workers).toHaveLength(5);
   expect(next.workers).toEqual([dispatched]);
 });
 
@@ -192,6 +192,18 @@ test('an idle claude session does not replace the recorded run on the floor', ()
   expect(result.workerScope?.live).toBeUndefined();
   expect(floorWorkers(result).map((w: any) => w.dispatchId)).toEqual(['d-rec']);
   expect(workingItems(result)).toHaveLength(0);
+});
+
+test('a stale omp child does not displace the recorded run or mark the floor live', () => {
+  const recorded = { dispatchId: 'd-rec', agent: 'codex', workerState: 'succeeded', liveness: 'dead' };
+  const next = { workers: [], runs: [{ runId: 'r', workers: [recorded] }], tools: [{ id: 'omp', name: 'omp', state: 'idle', sessions: [], subagents: [
+    { id: 'parent:old', agent: 'coder', state: 'running', task: 'Old', stale: true },
+  ] }] };
+  const result = withToolWorkers(next);
+  expect(result).toBe(next);
+  expect(result.workers).toEqual([]);
+  expect(result.workerScope?.live).toBeUndefined();
+  expect(floorWorkers(result).map((w: any) => w.dispatchId)).toEqual(['d-rec']);
 });
 
 test('direct sessions keep individual activity and skip only matching live dispatch paths', () => {
@@ -395,7 +407,7 @@ test('state retains store-only identity and maps bare Claude launch models', asy
   }) as typeof Bun.spawn);
   try {
     const state = await (await request('/state')).json();
-    expect(state.tools.find((t: any) => t.id === 'codex')).toMatchObject({ model: 'gpt-6-astra', provider: 'custom-provider' });
+    expect(state.tools.find((t: any) => t.id === 'codex')).toMatchObject({ model: 'gpt-6-astra', provider: 'codex' });
     expect(state.workers.find((w: any) => w.dispatchId === 'r1-claude')).toMatchObject({ model: 'claude-opus-5-5', provider: 'claude' });
     const claude = state.tools.find((t: any) => t.id === 'claude-code');
     expect(claude).toMatchObject({ model: 'claude-opus-5-5', provider: 'claude' });

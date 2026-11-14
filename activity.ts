@@ -153,8 +153,8 @@ export function providerFor(model: string | null): string | null {
   return null;
 }
 
-/** Model ids are short slugs; prompt text (spaces, quotes, `;`) is never a model. */
-const MODEL_ID = /^[A-Za-z0-9][A-Za-z0-9._:\/@-]{0,79}$/;
+/** Model ids are short slugs with an optional `[1m]`-style suffix; prompt punctuation (quotes, `;`) is never a model. */
+const MODEL_ID = /^[A-Za-z0-9][A-Za-z0-9._:\/@-]{0,79}(?:\[[A-Za-z0-9]{1,16}\])?$/;
 
 /** ps flattens argv: quotes are literal characters, not shell grouping syntax. */
 export function modelFromArgv(command: string): string | null {
@@ -349,14 +349,14 @@ function consumeOmpRecords(text: string, parsed: OmpParse): number {
     if (record.type === "model_change") {
       parsed.model = typeof record.model === "string" && record.model ? record.model : null;
     }
-    // Settlement arrives as an async-result custom message or inside any toolResult (e.g. `wait`).
+    // Settlement arrives as an async-result custom message or a `wait`/`task` toolResult; other tools may merely quote the tag.
     const settled: string[] = [];
     if (record.type === "custom_message" && record.customType === "async-result") settled.push(...settledTaskIds(record.content));
     const message = record.message;
     if (message?.role === "toolResult" && message.toolName === "todo" && !message.isError) {
       Object.assign(parsed, ompTodos(message.details));
     }
-    if (message?.role === "toolResult") settled.push(...settledTaskIds(message.content), ...settledTaskIds(message.details));
+    if (message?.role === "toolResult" && (message.toolName === "wait" || message.toolName === "task")) settled.push(...settledTaskIds(message.content), ...settledTaskIds(message.details));
     if (message?.role === "toolResult" && message.toolName === "task" && Array.isArray(message.details?.progress)) {
       const at = Date.parse(String(record.timestamp ?? "")) || 0;
       for (const entry of message.details.progress) {

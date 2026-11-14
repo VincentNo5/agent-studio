@@ -100,15 +100,17 @@ The HUD reads one state:
   dispatches on that tool; `worker:<dispatch>` adds a `Tool` field with its state.
 - **The floor** — tool work is converted to worker rows (`tool:<id>:<pid>` for a *working* direct session —
   idle pids add no row, so they never displace the recorded run —
-  `omp-child:<sessionId>:<childId>` for an omp `task` child) and handed to the scene, where the existing visitor
+  `omp-child:<sessionId>:<childId>` for a non-stale omp `task` child; `workerScope.live` is set only
+  when an added row is working) and handed to the scene, where the existing visitor
   pass gives it a hot desk or a corridor place. That is the same path Orca workers without a
   roster role already use, so the character matches the work rather than a roster name.
 
 omp is the one tool that names its children on disk: each `task` call's tool result carries
 `details.progress[]` with `id`, `agent`, `status: "pending"` and `task`. Completion arrives as a
 `<task-result id="…" status="completed">` tag, either in a `custom_message` with
-`customType: "async-result"` or in any `toolResult` (typically `wait`), in its `content` text or
-anywhere in its `details`. Completed, failed, cancelled and other settled children are removed
+`customType: "async-result"` or in a `wait`/`task` `toolResult`, in its `content` text or
+anywhere in its `details`. Other tool results (`read`, `bash`, …) may merely quote such a tag
+from a transcript or diff, so they never settle a child. Completed, failed, cancelled and other settled children are removed
 immediately when that record is collected.
 
 Each child's identity and cwd come from its parent session header, which can follow a title
@@ -116,7 +118,9 @@ record. Missing headers fall back to a project-qualified filename for identity a
 Freshness uses the child's transcript mtime at `<parent-session-dir>/<childId>.jsonl` (the
 parent filename without `.jsonl` names that directory). Without a child transcript, the spawn
 timestamp supplies the last evidence. After one minute without child evidence a child is
-marked stale and idle; after ten minutes it expires. Parent output cannot refresh that clock.
+marked stale; after ten minutes it expires. Parent output cannot refresh that clock. A stale
+child never becomes a floor row, never sets `workerScope.live` and so never pushes the recorded run
+off the floor; it stays listed (read-only, `stale`) under omp task children in the Tools dialog.
 A recently updated child transcript keeps a quiet parent eligible for discovery.
 
 The eight sessions with the newest parent or child evidence in the ten-minute window are
@@ -139,7 +143,11 @@ part the state does not report reads `—`.
 `/`), else its family (`claude*` → `claude`; `gpt*`, `o3*`, `o4*` → `codex`; `gemini*` →
 `google`), else an explicit store `model_provider` (Codex `session_meta`); otherwise unknown. An
 omp dispatch with no model therefore reads `omp · — · —`. Argv models are accepted only as short
-slugs (`[A-Za-z0-9][A-Za-z0-9._:/@-]{0,79}`), so `-m` inside a flattened prompt is ignored. The
+slugs with an optional bracketed suffix (`[A-Za-z0-9][A-Za-z0-9._:/@-]{0,79}` + `[1m]`-style
+`\[[A-Za-z0-9]{1,16}\]`, so `opus[1m]` and `claude-opus-5-5[1m]` pass), so `-m flag;` inside a
+flattened prompt is ignored. Known limit: a bare word after `-m` in a prompt (`-p "use -m fast"`)
+still looks like a model, because `ps` loses argv quoting. A store-only tool (no live session)
+follows the same provider order. The
 detail panel's Model field shows only the worker/session model, never the roster role's. WorkerView carries no start time, so "newest first"
 is the order this browser first saw each item. Synthetic rows never fetch Orca logs.
 
@@ -159,7 +167,7 @@ dispatch as an item is shown as a chip on that item's row, never as a second row
 **+N roles** badge and the header's `N roles` count only those role-only rows, and the campus
 badge is items + role-only roles. *Tools working* groups sessions and children by tool. An omp
 child opens its own detail (task, agent, state, parent tool, stale flag, bare remaining count).
-On the floor, tool and child visitors carry a `STATE · role` tag (`STALE` for a stale child).
+On the floor, tool and child visitors carry a `STATE · role` tag (`STALE` for a stale child row; stale children themselves are not placed on the floor).
 
 ## Limits
 

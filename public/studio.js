@@ -457,7 +457,7 @@ function workerSource() { return floorWorkers(state); }
 /**
  * Live tool work as worker rows, so the floor's actors, Agent status and Live work all see it.
  * omp task children carry their own agent name; a direct session is one generic worker.
- * Only working sessions become rows: an idle pid must not displace the recorded run.
+ * Only working sessions and non-stale children become rows: idle evidence must not displace the recorded run.
  */
 function withToolWorkers(next) {
     if (!next?.tools?.length)
@@ -470,16 +470,17 @@ function withToolWorkers(next) {
     const extra = [];
     for (const tool of next.tools) {
         for (const child of tool.subagents || []) {
-            if (settledChildren.has(child.state)) continue;
+            // A stale child stays in the tool detail but never claims the floor.
+            if (settledChildren.has(child.state) || child.stale === true) continue;
             const id = `omp-child:${child.id}`;
             if (known.has(id)) continue;
             known.add(id);
             extra.push({
                 dispatchId: id, agent: child.agent, label: `${child.agent} · ${tool.name}`,
                 taskTitle: child.task ?? null,
-                workerState: child.stale ? 'idle' : child.state === 'pending' ? 'pending' : 'running',
-                dispatchStatus: child.stale ? 'idle' : child.state, liveness: child.stale ? 'unknown' : 'live',
-                stale: child.stale === true, childState: child.state ?? null, toolId: tool.id, toolName: tool.name, cwd: child.cwd ?? null,
+                workerState: child.state === 'pending' ? 'pending' : 'running',
+                dispatchStatus: child.state, liveness: 'live',
+                stale: false, childState: child.state ?? null, toolId: tool.id, toolName: tool.name, cwd: child.cwd ?? null,
                 model: child.model ?? null, provider: child.model ? child.provider ?? null : null,
                 remaining: child.remaining ?? null,
             });
@@ -504,7 +505,8 @@ function withToolWorkers(next) {
     }
     if (!extra.length)
         return next;
-    return { ...next, workers: [...(next.workers || []), ...extra], workerScope: { ...(next.workerScope || {}), live: true } };
+    const workers = [...(next.workers || []), ...extra];
+    return extra.some(isWorking) ? { ...next, workers, workerScope: { ...(next.workerScope || {}), live: true } } : { ...next, workers };
 }
 function renderWorkers() {
     if (!state)
@@ -979,9 +981,13 @@ function renderPanel() {
             content.append(card);
         }
         const children = workerSource().filter(w => workKind(w) === 'omp-child');
-        if (children.length) {
+        // Stale children never become workers; list them here so they stay inspectable.
+        const staleChildren = (state.tools || []).flatMap(t => (t.subagents || []).filter(c => c.stale === true).map(c => ({ ...c, toolName: t.name })));
+        if (children.length || staleChildren.length) {
             const card = el('article', 'data-card');
-            card.append(el('h3', null, `omp task children · ${children.length}`));
+            card.append(el('h3', null, `omp task children · ${children.length + staleChildren.length}`));
+            for (const c of staleChildren)
+                card.append(el('p', null, `${c.agent || 'child'} · ${c.task || '—'} · stale · no recent evidence · ${c.toolName}`));
             for (const w of children) {
                 const row = button(`${w.agent || 'child'} · ${w.taskTitle || '—'} · ${w.stale ? 'stale' : w.childState || 'unknown'} ↗`, () => { dialog.close(); selectAgent(workSelection(w)); }, 'wide history-row');
                 row.prepend(chip(workerStatus(w).status));

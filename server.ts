@@ -708,7 +708,8 @@ async function collect(): Promise<StudioState> {
     }).map(task => task.title ?? task.spec ?? "—");
   }
   for (const tool of tools) {
-    if (!tool.sessions.length) continue;
+    // Store-only identity: namespace/family first, the store's explicit provider last.
+    if (!tool.sessions.length) { tool.provider = providerFor(tool.model) ?? tool.provider; continue; }
     tool.model = tool.sessions[0].model;
     tool.provider = tool.sessions[0].provider ?? providerFor(tool.model);
   }
