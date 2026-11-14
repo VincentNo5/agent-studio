@@ -1771,18 +1771,15 @@ dialog::backdrop {
 }
 @media(height < 800px) {
   .agent-status {
-    flex-basis:192px
+    flex-basis:200px
   }
-  .status-groups {
-    min-height:80px
-  }
-  /* Leave the tools header and first row painted before the rail scrolls. */
+  /* Fit the 424px laptop rail with 10px gaps and margin above the 96px list floor. */
   .task-board {
-    flex:0 0 140px;
+    flex:0 0 136px;
     overflow:auto
   }
   .tool-activity {
-    flex:0 0 96px
+    flex:0 0 68px
   }
 }
 @media(max-height:780px) {

@@ -113,7 +113,7 @@ try {
           operationsInColumn: !!document.querySelector('.left-column .operations') };
       });
 
-      const statusFloor = viewport.height >= 800 ? 96 : 80;
+      const statusFloor = 96;
       console.log(`${name}: ${result.panelCount} painted panels; ${result.headingCount} headings; #status-groups painted height=${result.statusHeight.toFixed(2)}px; first tool row=${result.toolRowHeight.toFixed(2)}px`);
       console.log(`  Painted panel heights: ${result.required.map(p => `${p.selector}=${p.height.toFixed(2)}px`).join(', ')}`);
       const failures = [
