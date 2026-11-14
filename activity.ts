@@ -48,9 +48,9 @@ export interface WorkerLite {
 const SUBAGENT_LIVE_MS = 60_000;
 const SUBAGENT_SESSION_WINDOW_MS = 10 * 60_000;
 
-export interface OmpSubagent { id: string; agent: string; state: string; task: string | null; stale?: boolean; cwd?: string | null }
+export interface OmpSubagent { id: string; agent: string; state: string; task: string | null; model: string | null; provider: string | null; remaining: number | null; stale?: boolean; cwd?: string | null }
 
-export interface ToolSession { pid: number; cwd: string | null; model: string | null; command: string; state: "working" | "idle"; cpuActive: boolean }
+export interface ToolSession { pid: number; cwd: string | null; model: string | null; provider: string | null; current: string | null; remaining: number | null; command: string; state: "working" | "idle"; cpuActive: boolean }
 
 export interface ToolActivity {
   /** Stable slug, unique across the table. */
@@ -67,8 +67,11 @@ export interface ToolActivity {
   sessions: ToolSession[];
   /** Working directory of the newest live session (lsof, cached per pid). */
   cwd: string | null;
-  /** Model of the newest live session; populated starting in Task 4. */
+  /** Identity and work of the newest live session; null without attributable evidence. */
   model: string | null;
+  provider: string | null;
+  current: string | null;
+  remaining: number | null;
   /** Cumulative CPU time advanced since the previous sample. */
   cpuActive: boolean;
   /** Newest store file, relative to the home directory. */
@@ -124,6 +127,26 @@ export function toolForAgent(agent: string | null | undefined, defs: ToolDef[] =
   const needle = (agent ?? "").trim().toLowerCase();
   if (!needle) return null;
   return defs.find((def) => def.agents.some((name) => needle === name || needle.startsWith(`${name}-`)))?.id ?? null;
+}
+
+/** Literal model namespace; never infer a vendor from an executable or role. */
+export function providerOf(model: string | null): string | null {
+  return model?.split("/", 1)[0] || null;
+}
+
+/** Read model options without executing the command or treating quoted prompts as flags. */
+export function modelFromArgv(command: string): string | null {
+  const tokens = (command.match(/(?:[^\s"'\\]|\\.|"(?:[^"\\]|\\.)*"|'[^']*')+/g) ?? [])
+    .map(token => token.replace(/"((?:[^"\\]|\\.)*)"|'([^']*)'|\\(.)/g,
+      (_, double, single, escaped) => double !== undefined ? double.replace(/\\(.)/g, "$1") : single ?? escaped));
+  for (let i = 1; i < tokens.length; i++) {
+    if (tokens[i] === "--") break;
+    const option = tokens[i].match(/^(?:-m|--model)(?:=(.*))?$/);
+    if (!option) continue;
+    const model = option[1] ?? tokens[i + 1];
+    return model && !model.startsWith("-") ? model : null;
+  }
+  return null;
 }
 
 /** `ps -axo time=` → seconds. Accepts SS, MM:SS, HH:MM:SS and D-HH:MM:SS. */
@@ -245,9 +268,29 @@ type OmpChildRecord = OmpSubagent & { at: number };
 interface OmpParse {
   sessionId: string | null;
   cwd: string | null;
+  model: string | null;
+  current: string | null;
+  remaining: number | null;
   children: Map<string, OmpChildRecord>;
 }
-const emptyOmpParse = (): OmpParse => ({ sessionId: null, cwd: null, children: new Map() });
+const emptyOmpParse = (): OmpParse => ({ sessionId: null, cwd: null, model: null, current: null, remaining: null, children: new Map() });
+
+function ompTodos(details: any): { current: string | null; remaining: number | null } {
+  const unknown = { current: null, remaining: null };
+  // omp stores the complete todo snapshot in phases, not in its rendered text summary.
+  if (!Array.isArray(details?.phases) || details.phases.some((phase: any) => !Array.isArray(phase?.tasks))) return unknown;
+  const tasks = details.phases.flatMap((phase: any) => phase.tasks);
+  if (tasks.some((task: any) => typeof task?.content !== "string" || typeof task.status !== "string")) return unknown;
+  const open = tasks.filter((task: any) => task.status === "pending" || task.status === "in_progress");
+  return { current: (open.find((task: any) => task.status === "in_progress") ?? open[0])?.content ?? null, remaining: open.length };
+}
+
+/** Last complete todo result in a JSONL tail; absent or unreadable work stays unknown. */
+export function parseOmpTodos(text: string): { current: string | null; remaining: number | null } {
+  const parsed = emptyOmpParse();
+  consumeOmpRecords(text, parsed);
+  return { current: parsed.current, remaining: parsed.remaining };
+}
 
 /** Returns consumed bytes; an incomplete final JSON record is retried on the next append. */
 function consumeOmpRecords(text: string, parsed: OmpParse): number {
@@ -266,6 +309,9 @@ function consumeOmpRecords(text: string, parsed: OmpParse): number {
       if (typeof record.id === "string" && record.id) parsed.sessionId = record.id;
       if (typeof record.cwd === "string" && record.cwd) parsed.cwd = record.cwd;
     }
+    if (record.type === "model_change") {
+      parsed.model = typeof record.model === "string" && record.model ? record.model : null;
+    }
     if (record.type === "custom_message" && record.customType === "async-result") {
       const content = typeof record.content === "string" ? record.content :
         Array.isArray(record.content) ? record.content.map((part: { text?: string }) => part?.text ?? "").join("\n") : "";
@@ -275,6 +321,9 @@ function consumeOmpRecords(text: string, parsed: OmpParse): number {
       }
     }
     const message = record.message;
+    if (message?.role === "toolResult" && message.toolName === "todo") {
+      Object.assign(parsed, ompTodos(message.isError ? null : message.details));
+    }
     if (message?.role !== "toolResult" || message.toolName !== "task" || !Array.isArray(message.details?.progress)) continue;
     const at = Date.parse(String(record.timestamp ?? "")) || 0;
     for (const entry of message.details.progress) {
@@ -282,7 +331,9 @@ function consumeOmpRecords(text: string, parsed: OmpParse): number {
       const state = entry.status === "pending" ? "running" : entry.status ?? "running";
       if (SETTLED_CHILD.has(state)) { parsed.children.delete(entry.id); continue; }
       parsed.children.set(entry.id, { id: entry.id, agent: entry.agent, state,
-        task: taskSummary(typeof entry.task === "string" ? entry.task : ""), at });
+        task: taskSummary(typeof entry.task === "string" ? entry.task : ""),
+        model: typeof entry.model === "string" && entry.model ? entry.model : null,
+        provider: providerOf(typeof entry.model === "string" ? entry.model : null), remaining: null, at });
     }
   }
   return consumed;
@@ -312,12 +363,12 @@ async function readOmpSession(path: string): Promise<OmpParse> {
   return parsed;
 }
 
-/** Children from eight sessions with parent or child evidence in the last ten minutes. */
-export async function readOmpSubagents(now = Date.now(), home = HOME): Promise<OmpSubagent[]> {
+/** Eight newest sessions for identity/work; child liveness still expires after ten minutes. */
+async function readOmpActivity(now: number, home: string): Promise<{ subagents: OmpSubagent[]; sessions: OmpParse[] }> {
   const roots = join(home, ".omp/agent/sessions");
   const files: { path: string; mtime: number }[] = [];
   let dirs: Dirent[] = [];
-  try { dirs = readdirSync(roots, { withFileTypes: true }).filter((d) => d.isDirectory()); } catch { return []; }
+  try { dirs = readdirSync(roots, { withFileTypes: true }).filter((d) => d.isDirectory()); } catch { return { subagents: [], sessions: [] }; }
   for (const dir of dirs) {
     let entries: Dirent[];
     try { entries = readdirSync(join(roots, dir.name), { withFileTypes: true }); } catch { continue; }
@@ -334,7 +385,7 @@ export async function readOmpSubagents(now = Date.now(), home = HOME): Promise<O
             try { mtime = Math.max(mtime, statSync(join(childDir, child)).mtimeMs); } catch { /* raced */ }
           }
         } catch { /* no child transcripts */ }
-        if (now - mtime <= SUBAGENT_SESSION_WINDOW_MS) files.push({ path, mtime });
+        files.push({ path, mtime });
       } catch { /* raced with a writer */ }
     }
   }
@@ -342,24 +393,39 @@ export async function readOmpSubagents(now = Date.now(), home = HOME): Promise<O
   const merged = new Map<string, OmpSubagent>();
   const selected = files.sort((a, b) => a.mtime - b.mtime).slice(-8);
   const selectedPaths = new Set(selected.map(file => file.path));
-  for (const path of ompParses.keys()) if (!selectedPaths.has(path)) ompParses.delete(path);
+  const sessions: OmpParse[] = [];
   for (const file of selected) {
     try {
       const parsed = await readOmpSession(file.path);
+      sessions.push(parsed);
       const sessionId = parsed.sessionId ?? file.path.slice(roots.length + 1);
       for (const { at, ...child } of parsed.children.values()) {
         let lastEvidence = at;
+        let detail: OmpParse | null = null;
         // Child ids name files, never arbitrary paths from session content.
         if (basename(child.id) === child.id && child.id !== "." && child.id !== "..") {
-          try { lastEvidence = statSync(join(file.path.slice(0, -6), `${child.id}.jsonl`)).mtimeMs; } catch { /* spawn evidence only */ }
+          const childPath = join(file.path.slice(0, -6), `${child.id}.jsonl`);
+          try {
+            lastEvidence = statSync(childPath).mtimeMs;
+            selectedPaths.add(childPath);
+            detail = await readOmpSession(childPath);
+          } catch { /* spawn evidence only */ }
         }
         if (!lastEvidence || now - lastEvidence > SUBAGENT_SESSION_WINDOW_MS) continue;
         const id = `${sessionId}:${child.id}`;
-        merged.set(id, { ...child, id, cwd: parsed.cwd, stale: now - lastEvidence > SUBAGENT_LIVE_MS });
+        const model = child.model ?? detail?.model ?? null;
+        merged.set(id, { ...child, id, cwd: parsed.cwd, stale: now - lastEvidence > SUBAGENT_LIVE_MS,
+          model, provider: providerOf(model), task: detail?.current ?? child.task, remaining: detail?.remaining ?? null });
       }
     } catch { /* unreadable session: skip it */ }
   }
-  return [...merged.values()];
+  for (const path of ompParses.keys()) if (!selectedPaths.has(path)) ompParses.delete(path);
+  return { subagents: [...merged.values()], sessions: sessions.reverse() };
+}
+
+/** Children and identity/work share the same incremental session reads. */
+export async function readOmpSubagents(now = Date.now(), home = HOME): Promise<OmpSubagent[]> {
+  return (await readOmpActivity(now, home)).subagents;
 }
 
 /** Compact age for evidence text: 12s, 4m, 3h, 9d. */
@@ -374,10 +440,10 @@ export function humanAge(ms: number): string {
 export interface StoreStamp { path: string; mtime: number }
 export type StoreMap = Record<string, StoreStamp | null>;
 
-export function scanStores(def: ToolDef): StoreMap {
+export function scanStores(def: ToolDef, home = HOME): StoreMap {
   const map: StoreMap = {};
   for (const relative of def.stores) {
-    const full = join(HOME, relative);
+    const full = join(home, relative);
     map[relative] = newestEntry(full);
   }
   return map;
@@ -431,6 +497,15 @@ export function interpretTools(
       evidence = newest ? `last output ${humanAge(now - newest.mtime)} ago` : "installed · no session yet";
     }
 
+    const sessions: ToolSession[] = [...mine].sort((a, b) => b.pid - a.pid).map(row => {
+      const cpuActive = active(row);
+      // A sole session inherits tool evidence. Store stamps have no pid identity,
+      // so multiple sessions must use their own CPU deltas, not shared freshness.
+      const working = mine.length === 1 ? state === "working" : cpuActive;
+      const model = modelFromArgv(row.command);
+      return { pid: row.pid, command: row.command, cwd: null, model, provider: providerOf(model), current: null, remaining: null,
+        cpuActive, state: working ? "working" : "idle" };
+    });
     return {
       id: def.id,
       name: def.name,
@@ -439,17 +514,12 @@ export function interpretTools(
       state,
       processes: mine.length,
       pids: mine.map((row) => row.pid),
-      sessions: [...mine].sort((a, b) => b.pid - a.pid)
-        .map(row => {
-          const cpuActive = active(row);
-          // A sole session inherits tool evidence. Store stamps have no pid identity,
-          // so multiple sessions must use their own CPU deltas, not shared freshness.
-          const working = mine.length === 1 ? state === "working" : cpuActive;
-          return { pid: row.pid, command: row.command, cwd: null, model: null,
-            cpuActive, state: working ? "working" as const : "idle" as const };
-        }),
+      sessions,
       cwd: null,
-      model: null,
+      model: sessions[0]?.model ?? null,
+      provider: sessions[0]?.provider ?? null,
+      current: null,
+      remaining: null,
       cpuActive,
       lastSession: newest ? (newest.path.startsWith(HOME) ? newest.path.slice(HOME.length + 1) : newest.path) : null,
       lastActivity: newest ? new Date(newest.mtime).toISOString() : null,
@@ -524,7 +594,7 @@ export function joinToolAgents(
 }
 
 /** Live sample: fresh ps/store scans, with cached prior CPU, per-pid cwd and incremental omp parses. */
-export async function collectToolActivity(now = Date.now()): Promise<ToolActivity[]> {
+export async function collectToolActivity(now = Date.now(), home = HOME): Promise<ToolActivity[]> {
   let ps = "";
   try {
     const proc = Bun.spawn(["ps", "-axo", "pid=,time=,command="], { stdout: "pipe", stderr: "ignore" });
@@ -538,7 +608,7 @@ export async function collectToolActivity(now = Date.now()): Promise<ToolActivit
   const livePids = new Set(procs.map((row) => row.pid));
   for (const pid of cwdByPid.keys()) if (!livePids.has(pid)) cwdByPid.delete(pid);
   const stores: Record<string, StoreMap> = {};
-  for (const def of TOOL_DEFS) stores[def.id] = scanStores(def);
+  for (const def of TOOL_DEFS) stores[def.id] = scanStores(def, home);
 
   const installed: Record<string, boolean> = {};
   for (const def of TOOL_DEFS) {
@@ -548,12 +618,26 @@ export async function collectToolActivity(now = Date.now()): Promise<ToolActivit
 
   const tools = interpretTools(TOOL_DEFS, procs, stores, installed, prevCpu, now);
   const omp = tools.find((tool) => tool.id === "omp");
-  if (omp) omp.subagents = await readOmpSubagents(now);
+  const ompActivity = omp ? await readOmpActivity(now, home) : null;
+  if (omp && ompActivity) omp.subagents = ompActivity.subagents;
   // Each live pid names its own project; never borrow another session's cwd.
   await Promise.all(tools.map(async (tool) => {
     await Promise.all(tool.sessions.map(async (session) => { session.cwd = await cwdFor(session.pid); }));
+    if (tool.id === "omp" && ompActivity) {
+      for (const session of tool.sessions) {
+        if (!session.cwd || tool.sessions.filter(s => s.cwd === session.cwd).length !== 1) continue;
+        const detail = ompActivity.sessions.find(s => s.cwd === session.cwd);
+        session.model ??= detail?.model ?? null;
+        session.provider = providerOf(session.model);
+        session.current = detail?.current ?? null;
+        session.remaining = detail?.remaining ?? null;
+      }
+    }
     tool.cwd = tool.sessions.length ? tool.sessions[0].cwd : projectFromSession(tool.lastSession);
     tool.model = tool.sessions[0]?.model ?? null;
+    tool.provider = providerOf(tool.model);
+    tool.current = tool.sessions[0]?.current ?? null;
+    tool.remaining = tool.sessions[0]?.remaining ?? null;
   }));
   for (const row of procs) prevCpu.set(row.pid, row.cpu);
   for (const pid of prevCpu.keys()) if (!procs.some((row) => row.pid === pid)) prevCpu.delete(pid);

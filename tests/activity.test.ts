@@ -152,10 +152,10 @@ describe('store walk', () => {
 
 const base = (id: string): ToolActivity => ({
   id, name: id, kind: 'cli', installed: true, state: 'available', processes: 0,
-  cpuActive: false, pids: [], cwd: null, model: null, sessions: [], lastSession: null, lastActivity: null, evidence: 'installed',
+  cpuActive: false, pids: [], cwd: null, model: null, provider: null, current: null, remaining: null, sessions: [], lastSession: null, lastActivity: null, evidence: 'installed',
 });
 
-test('collection preserves each live pid and its own cwd, with nullable models until Task 4', async () => {
+test('collection preserves each live pid, cwd, and argv model', async () => {
   const commands = ['/bin/codex --model alpha', '/bin/codex --model beta'];
   let ps = `900001 00:01 ${commands[0]}\n900002 00:02 ${commands[1]}\n900003 00:00 /bin/other`;
   const spawn = spyOn(Bun, 'spawn').mockImplementation(((args: string[]) => {
@@ -166,13 +166,13 @@ test('collection preserves each live pid and its own cwd, with nullable models u
   try {
     const tool = (await collectToolActivity()).find(tool => tool.id === 'codex')!;
     expect(tool.sessions).toEqual([
-      { pid: 900002, cwd: '/projects/two', model: null, command: commands[1], state: 'idle', cpuActive: false },
-      { pid: 900001, cwd: '/projects/one', model: null, command: commands[0], state: 'idle', cpuActive: false },
+      expect.objectContaining({ pid: 900002, cwd: '/projects/two', model: 'beta', provider: 'beta', command: commands[1], state: 'idle', cpuActive: false }),
+      expect.objectContaining({ pid: 900001, cwd: '/projects/one', model: 'alpha', provider: 'alpha', command: commands[0], state: 'idle', cpuActive: false }),
     ]);
     expect(tool.processes).toBe(2);
     expect(tool.pids).toEqual([900001, 900002]);
     expect(tool.cwd).toBe('/projects/two');
-    expect(tool.model).toBeNull();
+    expect(tool.model).toBe('beta');
     ps = '';
     expect((await collectToolActivity()).find(tool => tool.id === 'codex')!.sessions).toEqual([]);
   } finally { spawn.mockRestore(); }
@@ -407,4 +407,114 @@ describe('omp subagents', () => {
   test('lines that are not task results are ignored', () => {
     expect(parseOmpSubagents('{"type":"title","v":1}\nnot json\n')).toEqual([]);
   });
+});
+
+// Task 4: exercise identity and work at the parser and collection boundaries.
+import * as activity from '../activity.ts';
+
+const todoResult = (tasks: object[]) => JSON.stringify({ type: 'message', message: {
+  role: 'toolResult', toolName: 'todo', details: { op: 'update', phases: [{ name: 'Work', tasks }] },
+} });
+
+test('argv model flags supply the literal provider prefix, never an inferred vendor', () => {
+  for (const command of ['codex exec -m codex/gpt-6-astra', 'omp --model codex/gpt-6-astra',
+    'omp --model="codex/gpt-6-astra"', "omp -m 'codex/gpt-6-astra'"]) {
+    expect(activity.modelFromArgv(command)).toBe('codex/gpt-6-astra');
+  }
+  for (const command of ['codex exec', 'omp --model', 'omp -m --resume',
+    'codex exec "explain -m fake/model"', 'codex exec -- -m fake/model']) {
+    expect(activity.modelFromArgv(command)).toBeNull();
+  }
+  expect(activity.providerOf('codex/gpt-6-astra')).toBe('codex');
+  expect(activity.providerOf('proxy/vendor/model')).toBe('proxy');
+  expect(activity.providerOf('local-model')).toBe('local-model');
+  expect(activity.providerOf(null)).toBeNull();
+  expect(activity.providerOf('')).toBeNull();
+});
+
+test('newest todo result counts pending plus in_progress and prefers the first active task', () => {
+  const text = [todoResult([{ content: 'Old', status: 'pending' }]), 'broken JSON', todoResult([
+    { content: 'First pending', status: 'pending' }, { content: 'Done', status: 'completed' },
+    { content: 'Current', status: 'in_progress' }, { content: 'Second active', status: 'in_progress' },
+    { content: 'Cancelled', status: 'cancelled' },
+  ]), JSON.stringify({ message: { role: 'assistant', toolName: 'todo', details: { phases: [] } } }), '{"message":'].join('\n');
+  expect(activity.parseOmpTodos(text)).toEqual({ current: 'Current', remaining: 3 });
+  expect(activity.parseOmpTodos(todoResult([{ content: 'Next', status: 'pending' }]))).toEqual({ current: 'Next', remaining: 1 });
+  expect(activity.parseOmpTodos(todoResult([{ content: 'Done', status: 'completed' }]))).toEqual({ current: null, remaining: 0 });
+  expect(activity.parseOmpTodos(todoResult([]))).toEqual({ current: null, remaining: 0 });
+  expect(activity.parseOmpTodos('not json\n{}')).toEqual({ current: null, remaining: null });
+  expect(activity.parseOmpTodos(todoResult([{ content: 'Old', status: 'pending' }]) + '\n' +
+    JSON.stringify({ message: { role: 'toolResult', toolName: 'todo', details: {} } })))
+    .toEqual({ current: null, remaining: null });
+});
+
+test('direct process identities stay per pid and unknown without an argv model', () => {
+  const tool = interpretTools([def()], [row(1, 0, 'demo -m codex/gpt-6-astra'), row(2, 0, 'demo')], {}, {}, new Map())[0];
+  expect(tool.sessions).toEqual([
+    expect.objectContaining({ pid: 2, model: null, provider: null }),
+    expect.objectContaining({ pid: 1, model: 'codex/gpt-6-astra', provider: 'codex' }),
+  ]);
+  expect(tool).toMatchObject({ model: null, provider: null, remaining: null });
+});
+
+test('omp collection uses matching session model and todos, argv wins, and child details come from its own transcript', async () => {
+  const home = mkdtempSync(join(tmpdir(), 'studio-work-payload-'));
+  const root = join(home, '.omp/agent/sessions/project');
+  mkdirSync(join(root, 'parent'), { recursive: true });
+  const now = Date.now();
+  const write = (path: string, records: object[], todos?: string) => {
+    writeFileSync(path, records.map(r => JSON.stringify(r)).join('\n') + (todos ? '\n' + todos : '') + '\n');
+    utimesSync(path, new Date(now), new Date(now));
+  };
+  write(join(root, 'parent.jsonl'), [
+    { type: 'session', id: 'parent', cwd: '/task4/project' },
+    { type: 'model_change', model: 'old/model' }, { type: 'model_change', model: 'store/latest' },
+    { timestamp: new Date(now).toISOString(), message: { role: 'toolResult', toolName: 'task', details: {
+      progress: [{ id: 'child', agent: 'coder', status: 'pending', task: 'Assignment' }],
+    } } },
+  ], todoResult([{ content: 'Parent current', status: 'in_progress' }, { content: 'Parent next', status: 'pending' }]));
+  write(join(root, 'parent/child.jsonl'), [{ type: 'model_change', model: 'child/model' }],
+    todoResult([{ content: 'Child current', status: 'in_progress' }]));
+  let command = '/bin/omp';
+  const spawn = spyOn(Bun, 'spawn').mockImplementation(((args: string[]) => ({
+    stdout: new Response(args[0] === 'ps' ? `940001 00:01 ${command}\n940002 00:01 /bin/omp`
+      : `n${args[3] === '940001' ? '/task4/project' : '/task4/unrelated'}\n`).body,
+    exited: Promise.resolve(0), kill() {},
+  })) as typeof Bun.spawn);
+  try {
+    const collect = async () => (await activity.collectToolActivity(now, home)).find(t => t.id === 'omp')!;
+    let tool = await collect();
+    expect(tool.sessions.find(s => s.pid === 940001)).toMatchObject({ model: 'store/latest', provider: 'store', current: 'Parent current', remaining: 2 });
+    expect(tool.sessions.find(s => s.pid === 940002)).toMatchObject({ model: null, provider: null, remaining: null });
+    expect(tool).toMatchObject({ model: null, provider: null, remaining: null });
+    expect(tool.subagents).toEqual([expect.objectContaining({ id: 'parent:child', model: 'child/model', provider: 'child', task: 'Child current', remaining: 1 })]);
+    command = '/bin/omp -m argv/model';
+    tool = await collect();
+    expect(tool.sessions.find(s => s.pid === 940001)).toMatchObject({ model: 'argv/model', provider: 'argv', remaining: 2 });
+    appendFileSync(join(root, 'parent.jsonl'), todoResult([]) + '\n');
+    expect((await collect()).sessions.find(s => s.pid === 940001)).toMatchObject({ current: null, remaining: 0 });
+  } finally { spawn.mockRestore(); rmSync(home, { recursive: true, force: true }); }
+});
+
+test('quiet omp sessions retain identity and work, but shared cwd processes cannot borrow them', async () => {
+  const home = mkdtempSync(join(tmpdir(), 'studio-quiet-omp-'));
+  const root = join(home, '.omp/agent/sessions/project');
+  mkdirSync(root, { recursive: true });
+  const path = join(root, 'quiet.jsonl');
+  const now = Date.now();
+  writeFileSync(path, [JSON.stringify({ type: 'session', id: 'quiet', cwd: '/task4/quiet' }),
+    JSON.stringify({ type: 'model_change', model: 'store/quiet' }),
+    todoResult([{ content: 'Continue', status: 'pending' }])].join('\n'));
+  utimesSync(path, new Date(now - 3_600_000), new Date(now - 3_600_000));
+  let ps = '960001 00:00 omp';
+  const spawn = spyOn(Bun, 'spawn').mockImplementation(((args: string[]) => ({
+    stdout: new Response(args[0] === 'ps' ? ps : 'n/task4/quiet\n').body, exited: Promise.resolve(0), kill() {},
+  })) as typeof Bun.spawn);
+  try {
+    const collect = async () => (await activity.collectToolActivity(now, home)).find(t => t.id === 'omp')!;
+    expect(await collect()).toMatchObject({ state: 'idle', model: 'store/quiet', provider: 'store', current: 'Continue', remaining: 1 });
+    ps += '\n960002 00:00 omp';
+    const ambiguous = await collect();
+    for (const session of ambiguous.sessions) expect(session).toMatchObject({ model: null, provider: null, current: null, remaining: null });
+  } finally { spawn.mockRestore(); rmSync(home, { recursive: true, force: true }); }
 });

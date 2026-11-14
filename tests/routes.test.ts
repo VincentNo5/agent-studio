@@ -274,3 +274,69 @@ test('market service rejects oversized upstream JSON without losing the other so
     offline: false,
   });
 });
+
+test('state preserves assignees, joins remaining work within the run, and prefers launch models over matching argv', async () => {
+  const priorCoordinator = process.env.ORCA_COORDINATOR;
+  process.env.ORCA_COORDINATOR = 'task4-coordinator';
+  const time = spyOn(Date, 'now').mockReturnValue(Date.now() + 2_000_000);
+  const fetchSpy = spyOn(globalThis, 'fetch').mockResolvedValue(Response.json({}));
+  const workers = [
+    { dispatchId: 'task4-launch', terminal: 'handle-a', workspace: '/task4/a', runId: 'run-a', taskId: 'active' },
+    { dispatchId: 'task4-argv', terminal: 'handle-b', workspace: '/task4/b', runId: 'run-a' },
+    { dispatchId: 'task4-unknown', terminal: 'handle-c', workspace: '/task4/c', runId: 'run-a' },
+    { dispatchId: 'task4-no-run', terminal: 'handle-d' },
+  ].map(w => ({ ...w, state: 'running', liveness: 'live' }));
+  const tasks = [
+    { id: 'active', task_title: 'qa-tester: current', status: 'running', assignee: 'handle-a', run_id: 'run-a' },
+    ...['pending', 'ready', 'dispatched', 'blocked'].map(status => ({ id: status, task_title: status, status, assignee: 'handle-a', run_id: 'run-a' })),
+    { task_title: 'qa-tester: unassigned fallback', status: 'pending', run_id: 'run-a' },
+    { task_title: 'role assignee', status: 'pending', assignee: 'qa-tester', run_id: 'run-a' },
+    { task_title: 'qa-tester: another handle', status: 'pending', assignee: 'handle-b', run_id: 'run-a' },
+    { task_title: 'Other run', status: 'ready', assignee: 'handle-a', run_id: 'run-b' },
+    { task_title: 'Unscoped', status: 'ready', assignee: 'handle-a' },
+    { task_title: 'Done', status: 'completed', assignee: 'handle-a', run_id: 'run-a' },
+    { task_title: 'Failed', status: 'failed', assignee: 'handle-a', run_id: 'run-a' },
+    { task_title: 'No worker run known', status: 'blocked', assignee: 'handle-d', run_id: 'run-b' },
+  ];
+  const spawn = spyOn(Bun, 'spawn').mockImplementation(((args: string[]) => {
+    let output = '';
+    if (args.includes('worker-list')) output = JSON.stringify({ result: { workers } });
+    if (args.includes('task-list')) output = JSON.stringify({ result: { tasks } });
+    if (args.includes('worker-show')) output = JSON.stringify({ ok: true, result: { worker: { startOptions: { launch: {
+      effective: { agent: 'codex', ...(args.includes('task4-launch') ? { model: 'launch/preferred' } : {}) },
+    } } } } });
+    if (args[0] === 'ps') output = '950001 00:01 codex -m argv/ignored\n950002 00:01 codex --model argv/fallback\n950003 00:01 codex\n950004 00:01 codex';
+    if (args[0] === 'lsof') output = `n/task4/${({ '950001': 'a', '950002': 'b', '950003': 'c', '950004': 'direct' } as Record<string, string>)[args[3]]}\n`;
+    return { stdout: new Response(output).body, exited: Promise.resolve(0), kill() {} };
+  }) as typeof Bun.spawn);
+  try {
+    const state = await (await request('/state')).json();
+    expect(state.orcaTasks.find((t: any) => t.id === 'pending')).toMatchObject({ assignee: 'handle-a' });
+    expect(state.orcaTasks.find((t: any) => t.title === 'qa-tester: unassigned fallback')).toMatchObject({ assignee: null });
+    expect(state.workers.find((w: any) => w.dispatchId === 'task4-launch')).toMatchObject({
+      model: 'launch/preferred', provider: 'launch',
+      remainingTasks: ['pending', 'ready', 'dispatched', 'blocked', 'qa-tester: unassigned fallback', 'role assignee'],
+    });
+    expect(state.workers.find((w: any) => w.dispatchId === 'task4-argv')).toMatchObject({ model: 'argv/fallback', provider: 'argv', remainingTasks: ['qa-tester: another handle'] });
+    expect(state.workers.find((w: any) => w.dispatchId === 'task4-unknown')).toMatchObject({ model: null, provider: null, remainingTasks: [] });
+    expect(state.workers.find((w: any) => w.dispatchId === 'task4-no-run')).toMatchObject({ remainingTasks: ['No worker run known'] });
+    const tool = state.tools.find((t: any) => t.id === 'codex');
+    expect(tool.sessions.find((s: any) => s.pid === 950001)).toMatchObject({ model: 'launch/preferred', provider: 'launch' });
+    expect(tool.sessions.find((s: any) => s.pid === 950002)).toMatchObject({ model: 'argv/fallback', provider: 'argv' });
+    expect(tool.sessions.find((s: any) => s.pid === 950004)).toMatchObject({ model: null, provider: null });
+  } finally {
+    spawn.mockRestore(); fetchSpy.mockRestore(); time.mockRestore();
+    if (priorCoordinator === undefined) delete process.env.ORCA_COORDINATOR;
+    else process.env.ORCA_COORDINATOR = priorCoordinator;
+  }
+});
+
+test('direct UI data preserves model/provider/work and keeps unknown provider null', () => {
+  const state = withToolWorkers({ workers: [], tools: [{ id: 'omp', name: 'omp', state: 'working', sessions: [
+    { pid: 1, model: 'codex/gpt-6-astra', provider: 'codex', current: 'Implement', remaining: 2 },
+    { pid: 2, model: null, provider: null, current: null, remaining: null },
+  ], subagents: [{ id: 'parent:child', agent: 'coder', model: 'child/model', provider: 'child', task: 'Check', remaining: 1 }] }] });
+  expect(state.workers.find((w: any) => w.pid === 1)).toMatchObject({ provider: 'codex', model: 'codex/gpt-6-astra', taskTitle: 'Implement', remaining: 2 });
+  expect(state.workers.find((w: any) => w.pid === 2)).toMatchObject({ provider: null, model: null, taskTitle: null, remaining: null });
+  expect(state.workers.find((w: any) => w.dispatchId === 'omp-child:parent:child')).toMatchObject({ provider: 'child', model: 'child/model', remaining: 1 });
+});

@@ -429,10 +429,12 @@ function withToolWorkers(next) {
             known.add(id);
             extra.push({
                 dispatchId: id, agent: child.agent, label: `${child.agent} · ${tool.name}`,
-                taskTitle: child.task || `${child.agent} · ${tool.name}`,
+                taskTitle: child.task ?? null,
                 workerState: child.stale ? 'idle' : child.state === 'pending' ? 'pending' : 'running',
                 dispatchStatus: child.stale ? 'idle' : child.state, liveness: child.stale ? 'unknown' : 'live',
                 stale: child.stale === true, toolId: tool.id, toolName: tool.name, cwd: child.cwd ?? null,
+                model: child.model ?? null, provider: child.model ? child.provider ?? null : null,
+                remaining: child.remaining ?? null,
             });
         }
         // Older payloads have one tool row; an explicit empty sessions list has no live pid.
@@ -445,9 +447,10 @@ function withToolWorkers(next) {
             const working = (session.state ?? tool.state) === 'working';
             extra.push({
                 dispatchId: id, agent: tool.name, label: `${tool.name} · direct session`,
-                taskTitle: `${tool.name} · direct session`, workerState: working ? 'running' : 'idle',
+                taskTitle: session.current ?? null, workerState: working ? 'running' : 'idle',
                 dispatchStatus: working ? 'working' : 'idle', liveness: working ? 'live' : 'unknown',
                 toolId: tool.id, toolName: tool.name, cwd: session.cwd, model: session.model ?? null,
+                provider: session.model ? session.provider ?? null : null, remaining: session.remaining ?? null,
                 pid: session.pid, command: session.command, processes: session.pid == null ? tool.processes : 1,
             });
         }

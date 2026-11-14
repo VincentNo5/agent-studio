@@ -52,7 +52,7 @@ interface QuotaView {
 
 
 import { resolve, sep } from "node:path";
-import { collectToolActivity, joinToolAgents, projectFromKnownPaths, type ToolDispatch, type ToolActivity } from "./activity.ts";
+import { collectToolActivity, joinToolAgents, projectFromKnownPaths, providerOf, toolForAgent, type ToolDispatch, type ToolActivity } from "./activity.ts";
 import { isPresent as isMovingWorker } from "./public/studio-data.js";
 import { realpath } from "node:fs/promises";
 import { hostname as systemHostname } from "node:os";
@@ -180,8 +180,10 @@ interface WorkerView {
   nextAction: string | null;
   /** Which AI the dispatch launched: worker-show only — worker-list reports a null agent. */
   agent: string | null;
-  /** Launched model, when worker-show reports one. */
+  /** Launch model, falling back to an attributable live session's argv/store model. */
   model: string | null;
+  provider: string | null;
+  remainingTasks: string[];
   /** Terminal exit cause from worker-show, e.g. operator_close. */
   exitCause: string | null;
   host: string | null;
@@ -226,6 +228,7 @@ interface OrcaTaskView {
   spec: string | null;
   status: string | null;
   runId: string | null;
+  assignee: string | null;
 }
 
 interface StudioState {
@@ -575,6 +578,8 @@ async function collect(): Promise<StudioState> {
       nextAction: row.projection?.nextAction?.kind ?? null,
       agent: row.projection?.agent ?? null,
       model: null,
+      provider: null,
+      remainingTasks: [],
       exitCause: null,
       host: row.host ?? row.projection?.host?.id ?? null,
       path,
@@ -599,6 +604,7 @@ async function collect(): Promise<StudioState> {
     spec: t.spec ?? null,
     status: t.status ?? null,
     runId: t.run_id ?? null,
+    assignee: t.assignee ?? null,
   }));
 
   const kanbanStats: Record<string, number> = {};
@@ -663,6 +669,44 @@ async function collect(): Promise<StudioState> {
     for (const key of [...agentByDispatch.keys()].slice(0, 1000)) agentByDispatch.delete(key);
   }
 
+  const roles = await roleNames();
+  const remainingStatuses = new Set(["pending", "ready", "dispatched", "blocked"]);
+  for (const worker of workers) {
+    // Only a uniquely attributable live process can fill missing launch metadata.
+    // A settled dispatch must not borrow the model of a newer session in its worktree.
+    const toolId = toolForAgent(worker.agent);
+    const matches = isMovingWorker(worker) && worker.path
+      ? tools.filter(tool => !toolId || tool.id === toolId).flatMap(tool => tool.sessions)
+        .filter(session => session.cwd === worker.path)
+      : [];
+    const owners = workers.filter(other => isMovingWorker(other) && other.path === worker.path
+      && (!toolId || !toolForAgent(other.agent) || toolForAgent(other.agent) === toolId));
+    if (matches.length === 1 && owners.length === 1) {
+      const session = matches[0];
+      worker.model ??= session.model;
+      session.model = worker.model;
+      session.provider = providerOf(session.model);
+    }
+    worker.provider = providerOf(worker.model);
+
+    const text = [worker.taskTitle, worker.taskSpec, worker.label, worker.worktreeName].filter(Boolean).join(" ").toLowerCase();
+    const workerRoles = roles.filter(role => text.includes(role.toLowerCase()));
+    worker.remainingTasks = orcaTasks.filter(task => {
+      if (!remainingStatuses.has(task.status ?? "") || (worker.runId && task.runId !== worker.runId)) return false;
+      if (task.assignee) {
+        if (task.assignee === worker.terminalHandle) return true;
+        // Explicit assignment to another handle always wins over text mentioning our role.
+        return workerRoles.some(role => role.toLowerCase() === task.assignee!.toLowerCase());
+      }
+      const taskText = [task.title, task.spec].filter(Boolean).join(" ").toLowerCase();
+      return workerRoles.some(role => taskText.includes(role.toLowerCase()));
+    }).map(task => task.title ?? task.spec ?? "—");
+  }
+  for (const tool of tools) {
+    tool.model = tool.sessions[0]?.model ?? null;
+    tool.provider = providerOf(tool.model);
+  }
+
   // Everything the floor left out still has to be inspectable, so group the same dispatches
   // by run and hand the history to the panel. One entry per run Orca reports, newest first.
   const byRun = new Map<string, WorkerView[]>();
@@ -698,7 +742,7 @@ async function collect(): Promise<StudioState> {
     .slice(0, RUN_HISTORY_LIMIT);
 
   // Agents are only known after `worker-show` fills them in, so the join runs at the end.
-  const toolViews = joinToolAgents(tools, workers, await roleNames());
+  const toolViews = joinToolAgents(tools, workers, roles);
 
   return { ts: Date.now(), workers: onFloor, workerScope, runs, terminals, worktrees, paseo, quotas, kanban, kanbanStats, orcaTasks, audit, tools: toolViews };
 }
